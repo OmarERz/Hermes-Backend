@@ -11,14 +11,14 @@ help: ## List the available targets
 verify: lint typecheck test ## Run the quality gate (same command locally and in CI)
 
 lint: ## Formatting and lint (ruff)
-	uv run ruff format --check .
-	uv run ruff check .
+	uv run --locked ruff format --check .
+	uv run --locked ruff check .
 
 typecheck: ## Strict type checking (mypy)
-	uv run mypy
+	uv run --locked mypy
 
 test: ## Unit and integration tests (pytest)
-	uv run pytest
+	uv run --locked pytest
 
 # TASK and REVIEWER reach the recipe as environment variables, so quotes in the task title stay intact.
 export TASK REVIEWER
