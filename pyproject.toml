@@ -1,0 +1,59 @@
+[project]
+name = "hermes-backend"
+version = "0.1.0"
+description = "Self-hosted, personalized threat intelligence backend (iTop + CVE + news + LLM judge)."
+readme = "README.md"
+license = "Apache-2.0"
+requires-python = ">=3.12,<3.13"
+dependencies = []
+
+[dependency-groups]
+dev = [
+    "mypy",
+    "pytest",
+    "ruff",
+]
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[tool.hatch.build.targets.wheel]
+packages = [
+    "src/api",
+    "src/core",
+    "src/notifications_api",
+    "src/notifications_slack",
+    "src/workers",
+]
+
+[tool.uv]
+default-groups = ["dev"]
+
+[tool.ruff]
+line-length = 120
+target-version = "py312"
+src = ["src", "tests"]
+
+[tool.ruff.lint]
+select = [
+    "E", "W", "F", "I", "N", "UP", "B", "A", "C4", "SIM", "RET", "PTH", "PL",
+    "S",    # flake8-bandit (docs/14 §3.1)
+    "BLE", "T20", "DTZ", "TRY", "RUF",
+]
+ignore = ["TRY003"]
+
+[tool.ruff.lint.per-file-ignores]
+"tests/**" = ["S101", "PLR2004"]
+
+[tool.mypy]
+python_version = "3.12"
+strict = true
+mypy_path = "src"
+packages = ["api", "core", "notifications_api", "notifications_slack", "workers"]
+warn_unreachable = true
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+pythonpath = ["src"]
+addopts = ["--strict-markers", "--strict-config"]
