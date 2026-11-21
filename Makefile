@@ -3,12 +3,12 @@
 .DEFAULT_GOAL := help
 SHELL := /bin/bash
 
-.PHONY: help verify lint typecheck test review
+.PHONY: help verify lint typecheck boundaries test review
 
 help: ## List the available targets
 	@grep -E '^[a-z-]+:.*## ' $(MAKEFILE_LIST) | awk 'BEGIN {FS = ":.*## "}; {printf "  %-12s %s\n", $$1, $$2}'
 
-verify: lint typecheck test ## Run the quality gate (same command locally and in CI)
+verify: lint typecheck boundaries test ## Run the quality gate (same command locally and in CI)
 
 lint: ## Formatting and lint (ruff)
 	uv run --locked ruff format --check .
@@ -16,6 +16,9 @@ lint: ## Formatting and lint (ruff)
 
 typecheck: ## Strict type checking (mypy)
 	uv run --locked mypy
+
+boundaries: ## Package boundary contracts (import-linter)
+	uv run --locked lint-imports
 
 test: ## Unit and integration tests (pytest)
 	uv run --locked pytest

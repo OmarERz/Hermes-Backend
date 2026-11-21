@@ -15,8 +15,11 @@ dependencies = [
 [dependency-groups]
 dev = [
     "httpx>=0.28.1",
+    "import-linter>=2.17",
+    "jsonschema>=4.26.0",
     "mypy",
     "pytest",
+    "pytest-cov>=7.1.0",
     "ruff",
 ]
 
@@ -74,3 +77,30 @@ markers = [
     "e2e: whole stack in Docker Compose",
     "slow: excluded from PR runs (weekly)",
 ]
+
+[tool.importlinter]
+root_packages = ["api", "core", "notifications_api", "notifications_slack", "workers"]
+
+[[tool.importlinter.contracts]]
+name = "notifications_slack imports only notifications_api"
+type = "forbidden"
+source_modules = ["notifications_slack"]
+forbidden_modules = ["core", "api", "workers"]
+
+[[tool.importlinter.contracts]]
+name = "notifications_api imports nothing internal"
+type = "forbidden"
+source_modules = ["notifications_api"]
+forbidden_modules = ["api", "core", "workers", "notifications_slack"]
+
+[[tool.importlinter.contracts]]
+name = "core does not import api or workers"
+type = "forbidden"
+source_modules = ["core"]
+forbidden_modules = ["api", "workers"]
+
+[[tool.importlinter.contracts]]
+name = "workers do not import api"
+type = "forbidden"
+source_modules = ["workers"]
+forbidden_modules = ["api"]
