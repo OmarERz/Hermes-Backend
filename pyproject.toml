@@ -6,12 +6,15 @@ readme = "README.md"
 license = "Apache-2.0"
 requires-python = ">=3.12,<3.13"
 dependencies = [
+    "fastapi>=0.165.0",
     "pydantic>=2.14.4",
     "pydantic-settings>=2.16.3",
+    "uvicorn>=0.54.0",
 ]
 
 [dependency-groups]
 dev = [
+    "httpx>=0.28.1",
     "mypy",
     "pytest",
     "ruff",
@@ -48,6 +51,8 @@ ignore = ["TRY003"]
 
 [tool.ruff.lint.per-file-ignores]
 "tests/**" = ["S101", "PLR2004"]
+# Integration tests drive docker compose with a fixed argument list (no shell, no external input).
+"tests/integration/**" = ["S101", "PLR2004", "S603"]
 
 [tool.mypy]
 python_version = "3.12"
@@ -55,8 +60,17 @@ strict = true
 mypy_path = "src"
 packages = ["api", "core", "notifications_api", "notifications_slack", "workers"]
 warn_unreachable = true
+plugins = ["pydantic.mypy"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
 pythonpath = ["src"]
-addopts = ["--strict-markers", "--strict-config"]
+addopts = ["--strict-markers", "--strict-config", "-m", "not slow"]
+markers = [
+    "unit: pure functions, no I/O",
+    "integration: module with its database and test doubles",
+    "contract: schemas, OpenAPI and notification contract",
+    "adversarial: E1-E22 judge suite with recorded responses",
+    "e2e: whole stack in Docker Compose",
+    "slow: excluded from PR runs (weekly)",
+]
