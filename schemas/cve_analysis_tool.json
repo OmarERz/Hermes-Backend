@@ -1,0 +1,96 @@
+{
+  "type": "function",
+  "function": {
+    "name": "submit_cve_analysis",
+    "description": "Submit the analysis of ONE CVE. Infer the CVSS vector only if the input says no CVSS exists; never give the numeric score (code computes it). Every condition and component carries a verbatim quote from the description or the advisory.",
+    "strict": true,
+    "parameters": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "cve",
+        "inferred_cvss_vector",
+        "cvss_confidence",
+        "conditions",
+        "components",
+        "notes"
+      ],
+      "properties": {
+        "cve": {
+          "type": "string"
+        },
+        "inferred_cvss_vector": {
+          "type": "string",
+          "description": "CVSS 3.1 vector (CVSS:3.1/AV:_/AC:_/PR:_/UI:_/S:_/C:_/I:_/A:_) or empty string if a CVSS already exists"
+        },
+        "cvss_confidence": {
+          "type": "number",
+          "description": "0 to 1; 0 if not inferred"
+        },
+        "conditions": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": [
+              "type",
+              "description",
+              "quote"
+            ],
+            "properties": {
+              "type": {
+                "type": "string",
+                "enum": [
+                  "platform",
+                  "module",
+                  "configuration",
+                  "authentication",
+                  "local_access",
+                  "other"
+                ]
+              },
+              "description": {
+                "type": "string"
+              },
+              "quote": {
+                "type": "string"
+              }
+            }
+          }
+        },
+        "components": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": [
+              "component",
+              "relationship",
+              "quote"
+            ],
+            "properties": {
+              "component": {
+                "type": "string"
+              },
+              "relationship": {
+                "type": "string",
+                "enum": [
+                  "includes",
+                  "depends_on",
+                  "fork_of",
+                  "sibling_product"
+                ]
+              },
+              "quote": {
+                "type": "string"
+              }
+            }
+          }
+        },
+        "notes": {
+          "type": "string"
+        }
+      }
+    }
+  }
+}

@@ -1,0 +1,390 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "notification_event.schema.json",
+  "title": "Notification event",
+  "description": "Emitted by the backend when something deserves a notification (NOT-03). Consumed by the Slack module (another team) through NotificationConsumer. At-least-once delivery: the consumer must be idempotent by event_id. Internal contract: never produced by an LLM.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "event_id",
+    "contract_version",
+    "type",
+    "priority",
+    "date",
+    "ticket",
+    "vulnerability",
+    "alert",
+    "score",
+    "assets",
+    "justification",
+    "mitigation",
+    "mitigation_draft",
+    "news",
+    "assessment_id",
+    "frontend_url"
+  ],
+  "properties": {
+    "event_id": {
+      "type": "string"
+    },
+    "contract_version": {
+      "type": "string",
+      "const": "1.0"
+    },
+    "type": {
+      "type": "string",
+      "enum": [
+        "new_ticket",
+        "level_up",
+        "reopened",
+        "partially_fixed",
+        "fixed",
+        "threat_alert",
+        "inferred_alert"
+      ]
+    },
+    "priority": {
+      "type": "string",
+      "enum": [
+        "immediate",
+        "normal",
+        "digest"
+      ],
+      "description": "immediate: individual and immediate delivery is mandatory (NOT-03)"
+    },
+    "date": {
+      "type": "string",
+      "format": "date-time"
+    },
+    "ticket": {
+      "type": [
+        "object",
+        "null"
+      ],
+      "additionalProperties": false,
+      "required": [
+        "itop_id",
+        "url",
+        "custodian",
+        "owners",
+        "urgency",
+        "fixed_cis",
+        "total_cis"
+      ],
+      "properties": {
+        "itop_id": {
+          "type": "string"
+        },
+        "url": {
+          "type": "string"
+        },
+        "custodian": {
+          "type": "string"
+        },
+        "owners": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": [
+              "name",
+              "email"
+            ],
+            "properties": {
+              "name": {
+                "type": "string"
+              },
+              "email": {
+                "type": [
+                  "string",
+                  "null"
+                ]
+              }
+            }
+          }
+        },
+        "urgency": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 4
+        },
+        "fixed_cis": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "total_cis": {
+          "type": "integer",
+          "minimum": 0
+        }
+      }
+    },
+    "vulnerability": {
+      "type": [
+        "object",
+        "null"
+      ],
+      "additionalProperties": false,
+      "required": [
+        "cve",
+        "product",
+        "cvss",
+        "in_kev"
+      ],
+      "properties": {
+        "cve": {
+          "type": "string"
+        },
+        "product": {
+          "type": "string"
+        },
+        "cvss": {
+          "type": [
+            "number",
+            "null"
+          ]
+        },
+        "in_kev": {
+          "type": "boolean"
+        }
+      }
+    },
+    "alert": {
+      "type": [
+        "object",
+        "null"
+      ],
+      "additionalProperties": false,
+      "required": [
+        "relevance",
+        "inferred",
+        "actor",
+        "victim",
+        "vector",
+        "relationship"
+      ],
+      "properties": {
+        "relevance": {
+          "type": "string",
+          "enum": [
+            "R2",
+            "R3",
+            "inferred"
+          ]
+        },
+        "inferred": {
+          "type": "boolean",
+          "description": "true = 'AI-inferred relationship' (mode 2)"
+        },
+        "actor": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "victim": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "vector": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "relationship": {
+          "type": [
+            "string",
+            "null"
+          ]
+        }
+      }
+    },
+    "score": {
+      "type": [
+        "object",
+        "null"
+      ],
+      "additionalProperties": false,
+      "required": [
+        "base",
+        "judge_adjustment",
+        "final",
+        "level",
+        "previous",
+        "driving_ci"
+      ],
+      "properties": {
+        "base": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 100
+        },
+        "judge_adjustment": {
+          "type": "integer"
+        },
+        "final": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 100
+        },
+        "level": {
+          "type": "string",
+          "enum": [
+            "critical",
+            "high",
+            "medium",
+            "low"
+          ]
+        },
+        "previous": {
+          "type": [
+            "integer",
+            "null"
+          ],
+          "minimum": 0,
+          "maximum": 100
+        },
+        "driving_ci": {
+          "type": [
+            "string",
+            "null"
+          ]
+        }
+      }
+    },
+    "assets": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "ci_id",
+          "name",
+          "score",
+          "criticality",
+          "exposed",
+          "confidentiality",
+          "personal_data",
+          "owner",
+          "status"
+        ],
+        "properties": {
+          "ci_id": {
+            "type": "string"
+          },
+          "name": {
+            "type": "string"
+          },
+          "score": {
+            "type": [
+              "integer",
+              "null"
+            ],
+            "minimum": 0,
+            "maximum": 100
+          },
+          "criticality": {
+            "type": "string"
+          },
+          "exposed": {
+            "type": "boolean"
+          },
+          "confidentiality": {
+            "type": "string",
+            "enum": [
+              "public",
+              "classified",
+              "highly_classified",
+              "unclassified"
+            ]
+          },
+          "personal_data": {
+            "type": [
+              "boolean",
+              "null"
+            ]
+          },
+          "owner": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "status": {
+            "type": "string",
+            "enum": [
+              "active",
+              "fixed",
+              "no_data",
+              "inferred"
+            ]
+          }
+        }
+      }
+    },
+    "justification": {
+      "type": "string"
+    },
+    "mitigation": {
+      "type": [
+        "string",
+        "null"
+      ],
+      "description": "Data-based mitigation built by code (D-017); always present when available"
+    },
+    "mitigation_draft": {
+      "type": [
+        "array",
+        "null"
+      ],
+      "description": "AI-drafted steps validated by code, labeled 'drafted by AI' in every channel; null if not drafted or discarded",
+      "items": {
+        "type": "string"
+      }
+    },
+    "news": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "title",
+          "url",
+          "source",
+          "date"
+        ],
+        "properties": {
+          "title": {
+            "type": "string",
+            "description": "External text: the consumer must escape it"
+          },
+          "url": {
+            "type": "string"
+          },
+          "source": {
+            "type": "string"
+          },
+          "date": {
+            "type": "string"
+          }
+        }
+      }
+    },
+    "assessment_id": {
+      "type": [
+        "string",
+        "null"
+      ],
+      "description": "Used to link feedback (FeedbackService)"
+    },
+    "frontend_url": {
+      "type": [
+        "string",
+        "null"
+      ],
+      "description": "Link to the detail page in the frontend"
+    }
+  }
+}

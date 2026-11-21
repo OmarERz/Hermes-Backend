@@ -1,0 +1,571 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "review_package.schema.json",
+  "title": "Review package",
+  "description": "Unit of work the correlation engine hands to the judge: a group (CVE + product) with its context, or an alert. Internal contract (never produced by an LLM). The judge receives a compact view of this object.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "package_id",
+    "type",
+    "fingerprint",
+    "versions",
+    "group",
+    "cve_data",
+    "kev",
+    "epss",
+    "base",
+    "news",
+    "iocs",
+    "tickets",
+    "profile_summary"
+  ],
+  "properties": {
+    "package_id": {
+      "type": "string"
+    },
+    "type": {
+      "type": "string",
+      "enum": [
+        "finding",
+        "alert",
+        "dismissal_candidate"
+      ]
+    },
+    "fingerprint": {
+      "type": "string"
+    },
+    "versions": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "profile",
+        "weights",
+        "schema"
+      ],
+      "properties": {
+        "profile": {
+          "type": "string"
+        },
+        "weights": {
+          "type": "string"
+        },
+        "schema": {
+          "type": "string"
+        }
+      },
+      "description": "Versions used to build the package. 'weights' is recorded but is NOT part of the fingerprint (D-033)."
+    },
+    "group": {
+      "type": [
+        "object",
+        "null"
+      ],
+      "additionalProperties": false,
+      "required": [
+        "group_id",
+        "cve",
+        "product",
+        "cpe",
+        "cis"
+      ],
+      "properties": {
+        "group_id": {
+          "type": "string"
+        },
+        "cve": {
+          "type": "string"
+        },
+        "product": {
+          "type": "string"
+        },
+        "cpe": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "cis": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": [
+              "element_id",
+              "ci_id",
+              "name",
+              "service",
+              "criticality",
+              "exposed",
+              "confidentiality",
+              "personal_data",
+              "custodian",
+              "status",
+              "description",
+              "base"
+            ],
+            "properties": {
+              "element_id": {
+                "type": "string"
+              },
+              "ci_id": {
+                "type": "string"
+              },
+              "name": {
+                "type": "string"
+              },
+              "service": {
+                "type": [
+                  "string",
+                  "null"
+                ]
+              },
+              "criticality": {
+                "type": "string"
+              },
+              "exposed": {
+                "type": "boolean"
+              },
+              "status": {
+                "type": "string"
+              },
+              "description": {
+                "type": [
+                  "string",
+                  "null"
+                ],
+                "description": "Free text from iTop (N4 source)"
+              },
+              "confidentiality": {
+                "type": "string",
+                "enum": [
+                  "public",
+                  "classified",
+                  "highly_classified",
+                  "unclassified"
+                ]
+              },
+              "personal_data": {
+                "type": [
+                  "boolean",
+                  "null"
+                ]
+              },
+              "custodian": {
+                "type": [
+                  "string",
+                  "null"
+                ],
+                "description": "Custodian team name"
+              },
+              "base": {
+                "type": "object",
+                "additionalProperties": false,
+                "required": [
+                  "A",
+                  "D",
+                  "score",
+                  "floor_applicable"
+                ],
+                "properties": {
+                  "A": {
+                    "type": "number"
+                  },
+                  "D": {
+                    "type": "number"
+                  },
+                  "score": {
+                    "type": "integer",
+                    "minimum": 0,
+                    "maximum": 100
+                  },
+                  "floor_applicable": {
+                    "type": "boolean"
+                  }
+                },
+                "description": "Base score of this CI (D-035). Structured iTop fields: the judge cannot contradict them."
+              }
+            }
+          }
+        }
+      }
+    },
+    "cve_data": {
+      "type": [
+        "object",
+        "null"
+      ],
+      "additionalProperties": false,
+      "required": [
+        "element_id",
+        "description",
+        "cvss",
+        "vector",
+        "cvss_source",
+        "cwe",
+        "affected_ranges",
+        "fixed_version",
+        "references",
+        "conditions",
+        "components"
+      ],
+      "properties": {
+        "element_id": {
+          "type": "string"
+        },
+        "description": {
+          "type": "string"
+        },
+        "cvss": {
+          "type": [
+            "number",
+            "null"
+          ]
+        },
+        "vector": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "cvss_source": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "enum": [
+            "cna",
+            "nvd",
+            "inferred",
+            null
+          ]
+        },
+        "cwe": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "affected_ranges": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "fixed_version": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "references": {
+          "type": "array",
+          "items": {
+            "type": "object"
+          }
+        },
+        "conditions": {
+          "type": "array",
+          "items": {
+            "type": "object"
+          }
+        },
+        "components": {
+          "type": "array",
+          "items": {
+            "type": "object"
+          }
+        }
+      }
+    },
+    "kev": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "listed",
+        "date",
+        "required_action",
+        "known_ransomware"
+      ],
+      "properties": {
+        "listed": {
+          "type": "boolean"
+        },
+        "date": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "required_action": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "known_ransomware": {
+          "type": "boolean"
+        }
+      }
+    },
+    "epss": {
+      "type": [
+        "object",
+        "null"
+      ],
+      "additionalProperties": false,
+      "required": [
+        "score",
+        "percentile",
+        "date"
+      ],
+      "properties": {
+        "score": {
+          "type": "number"
+        },
+        "percentile": {
+          "type": "number"
+        },
+        "date": {
+          "type": "string"
+        }
+      }
+    },
+    "base": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "S",
+        "P",
+        "T",
+        "A",
+        "D",
+        "score",
+        "details",
+        "floor_applicable",
+        "relevance"
+      ],
+      "properties": {
+        "S": {
+          "type": "number"
+        },
+        "P": {
+          "type": "number"
+        },
+        "T": {
+          "type": "number"
+        },
+        "A": {
+          "type": "number",
+          "description": "A of the CI that drives the score"
+        },
+        "D": {
+          "type": "number",
+          "description": "D of the CI that drives the score (D-034)"
+        },
+        "E": {
+          "type": "number"
+        },
+        "score": {
+          "type": "integer"
+        },
+        "details": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "floor_applicable": {
+          "type": "boolean"
+        },
+        "relevance": {
+          "type": "array",
+          "items": {
+            "type": "string",
+            "enum": [
+              "R1",
+              "R2",
+              "R3",
+              "R4"
+            ]
+          }
+        }
+      },
+      "description": "Group factors and summary. The per-CI base is in group.cis[].base; 'score' is the highest across CIs."
+    },
+    "news": {
+      "type": "array",
+      "maxItems": 5,
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "element_id",
+          "story_id",
+          "title",
+          "source",
+          "source_level",
+          "date",
+          "urls",
+          "summary",
+          "event_types",
+          "exploitation_level",
+          "match",
+          "suspicious"
+        ],
+        "properties": {
+          "element_id": {
+            "type": "string"
+          },
+          "story_id": {
+            "type": "string"
+          },
+          "title": {
+            "type": "string"
+          },
+          "source": {
+            "type": "string"
+          },
+          "source_level": {
+            "type": "string",
+            "enum": [
+              "N1",
+              "N2",
+              "N3",
+              "N4"
+            ]
+          },
+          "date": {
+            "type": "string"
+          },
+          "urls": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "summary": {
+            "type": "string"
+          },
+          "event_types": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "exploitation_level": {
+            "type": "string"
+          },
+          "match": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": [
+              "type",
+              "strength"
+            ],
+            "properties": {
+              "type": {
+                "type": "string",
+                "enum": [
+                  "exact_cve",
+                  "product_version",
+                  "product",
+                  "os",
+                  "vector",
+                  "none"
+                ]
+              },
+              "strength": {
+                "type": "number"
+              }
+            }
+          },
+          "suspicious": {
+            "type": "boolean",
+            "description": "Flagged by SEG-03"
+          }
+        }
+      }
+    },
+    "additional_urls": {
+      "type": "array",
+      "items": {
+        "type": "string"
+      }
+    },
+    "iocs": {
+      "type": "array",
+      "items": {
+        "type": "object"
+      }
+    },
+    "tickets": {
+      "type": "array",
+      "description": "One ticket per custodian (D-036). Context only: code applies the human-change rule after the judge (L9).",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "itop_id",
+          "custodian",
+          "current_urgency",
+          "last_change_by_human",
+          "suggestions_enabled"
+        ],
+        "properties": {
+          "itop_id": {
+            "type": "string"
+          },
+          "custodian": {
+            "type": "string"
+          },
+          "current_urgency": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 4
+          },
+          "last_change_by_human": {
+            "type": "boolean"
+          },
+          "suggestions_enabled": {
+            "type": "boolean"
+          }
+        }
+      }
+    },
+    "profile_summary": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "sector",
+        "countries",
+        "peer_companies",
+        "stack_summary"
+      ],
+      "properties": {
+        "sector": {
+          "type": "string"
+        },
+        "countries": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "peer_companies": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "stack_summary": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          },
+          "description": "Mode 2 only: products, versions and OS from iTop"
+        }
+      }
+    }
+  }
+}

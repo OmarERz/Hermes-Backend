@@ -1,0 +1,92 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "feedback.schema.json",
+  "title": "Feedback on a recommendation",
+  "description": "Input of FeedbackService (NOT-06, D-044). Used by the frontend and the Slack module. It never changes the score by itself. The comment is untrusted input.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "assessment_id",
+    "user_email",
+    "channel",
+    "verdict",
+    "proposed_level",
+    "proposed_score",
+    "comment"
+  ],
+  "properties": {
+    "assessment_id": {
+      "type": "string"
+    },
+    "user_email": {
+      "type": "string",
+      "description": "Must belong to a Firebase user with the analyst or admin role"
+    },
+    "channel": {
+      "type": "string",
+      "enum": [
+        "frontend",
+        "slack"
+      ]
+    },
+    "verdict": {
+      "type": "string",
+      "enum": [
+        "relevant",
+        "false_positive",
+        "wrong_priority",
+        "investigating",
+        "stop_suggestions"
+      ]
+    },
+    "proposed_level": {
+      "type": [
+        "string",
+        "null"
+      ],
+      "enum": [
+        "critical",
+        "high",
+        "medium",
+        "low",
+        null
+      ],
+      "description": "Result of the ↑↓ arrows (one level per click). Required when verdict = wrong_priority"
+    },
+    "proposed_score": {
+      "type": [
+        "integer",
+        "null"
+      ],
+      "minimum": 0,
+      "maximum": 100,
+      "description": "Optional, for users who want precision"
+    },
+    "comment": {
+      "type": [
+        "string",
+        "null"
+      ],
+      "maxLength": 2000,
+      "description": "Optional but recommended"
+    }
+  },
+  "allOf": [
+    {
+      "if": {
+        "properties": {
+          "verdict": {
+            "const": "wrong_priority"
+          }
+        }
+      },
+      "then": {
+        "properties": {
+          "proposed_level": {
+            "type": "string"
+          }
+        }
+      }
+    }
+  ]
+}

@@ -1,0 +1,247 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "audit_record.schema.json",
+  "title": "Audit record of an LLM review (L13)",
+  "description": "One record per judge review or analyst run. Stored in the database and exportable as JSON Lines. Never contains API keys or tokens.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "review_id",
+    "date",
+    "agent",
+    "mode",
+    "package_id",
+    "fingerprint",
+    "model",
+    "response_model",
+    "prompt_version",
+    "prompt_hash",
+    "schema_version",
+    "schema_hash",
+    "parameters",
+    "input_ref",
+    "calls",
+    "score",
+    "second_review",
+    "attempts",
+    "tokens",
+    "cost_usd",
+    "latency_ms",
+    "status",
+    "ladder_level"
+  ],
+  "properties": {
+    "review_id": {
+      "type": "string"
+    },
+    "date": {
+      "type": "string",
+      "format": "date-time"
+    },
+    "agent": {
+      "type": "string",
+      "enum": [
+        "news_analyst",
+        "cve_analyst",
+        "judge"
+      ]
+    },
+    "mode": {
+      "type": [
+        "string",
+        "null"
+      ],
+      "enum": [
+        "scoring",
+        "dismissals",
+        "mapping",
+        "calibration",
+        null
+      ]
+    },
+    "package_id": {
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "fingerprint": {
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "model": {
+      "type": "string",
+      "description": "Configured ID, e.g. deepseek-v4-pro"
+    },
+    "response_model": {
+      "type": "object",
+      "description": "The 'model' field and, if present, the version identifier returned by the API"
+    },
+    "prompt_version": {
+      "type": "string"
+    },
+    "prompt_hash": {
+      "type": "string"
+    },
+    "schema_version": {
+      "type": "string"
+    },
+    "schema_hash": {
+      "type": "string"
+    },
+    "parameters": {
+      "type": "object",
+      "description": "temperature, max_calls, reasoning_mode, assigned budget"
+    },
+    "input_ref": {
+      "type": "string",
+      "description": "Reference to where the full input is stored"
+    },
+    "calls": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "n",
+          "tool",
+          "args",
+          "result",
+          "rule",
+          "reason"
+        ],
+        "properties": {
+          "n": {
+            "type": "integer"
+          },
+          "tool": {
+            "type": "string"
+          },
+          "args": {
+            "type": "object"
+          },
+          "result": {
+            "type": "string",
+            "enum": [
+              "ok",
+              "accepted",
+              "rejected",
+              "error"
+            ]
+          },
+          "rule": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "L5, L6, L7, L4.* if rejected"
+          },
+          "reason": {
+            "type": [
+              "string",
+              "null"
+            ]
+          }
+        }
+      }
+    },
+    "score": {
+      "type": [
+        "object",
+        "null"
+      ],
+      "additionalProperties": false,
+      "required": [
+        "base",
+        "proposed_adjustment",
+        "applied_adjustment",
+        "final",
+        "floor_applied",
+        "blocked_suggestion"
+      ],
+      "properties": {
+        "base": {
+          "type": "integer"
+        },
+        "proposed_adjustment": {
+          "type": "integer"
+        },
+        "applied_adjustment": {
+          "type": "integer"
+        },
+        "final": {
+          "type": "integer"
+        },
+        "floor_applied": {
+          "type": "boolean"
+        },
+        "blocked_suggestion": {
+          "type": [
+            "integer",
+            "null"
+          ],
+          "description": "Final score the judge would have proposed without the floor or the human-change rule"
+        }
+      }
+    },
+    "second_review": {
+      "type": [
+        "string",
+        "null"
+      ],
+      "description": "review_id of the blind review, if any"
+    },
+    "attempts": {
+      "type": "integer"
+    },
+    "tokens": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "input",
+        "cached_input",
+        "output",
+        "reasoning"
+      ],
+      "properties": {
+        "input": {
+          "type": "integer"
+        },
+        "cached_input": {
+          "type": "integer"
+        },
+        "output": {
+          "type": "integer"
+        },
+        "reasoning": {
+          "type": "integer"
+        }
+      }
+    },
+    "cost_usd": {
+      "type": "number"
+    },
+    "latency_ms": {
+      "type": "integer"
+    },
+    "status": {
+      "type": "string",
+      "enum": [
+        "applied",
+        "suggestion",
+        "partial_review",
+        "judge_disagreement",
+        "no_judge_review",
+        "rejected",
+        "queued"
+      ]
+    },
+    "ladder_level": {
+      "type": "integer",
+      "minimum": 0,
+      "maximum": 3
+    }
+  }
+}

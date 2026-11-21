@@ -1,0 +1,280 @@
+{
+  "type": "function",
+  "function": {
+    "name": "submit_news_analysis",
+    "description": "Submit the structured analysis of ONE news story. Every claim must carry a verbatim quote from the article. Do not decide relevance for any company. Use an empty string or empty list when a value does not exist; do not invent.",
+    "strict": true,
+    "parameters": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "news_id",
+        "event_types",
+        "exploitation_level",
+        "is_retrospective",
+        "is_roundup",
+        "cves",
+        "products",
+        "actors",
+        "malware",
+        "victims",
+        "vector",
+        "conditions",
+        "signals",
+        "out_of_taxonomy",
+        "summary",
+        "confidence"
+      ],
+      "properties": {
+        "news_id": {
+          "type": "string"
+        },
+        "event_types": {
+          "type": "array",
+          "items": {
+            "type": "string",
+            "enum": [
+              "active_exploitation",
+              "new_vulnerability",
+              "public_poc",
+              "organization_attack",
+              "actor_campaign",
+              "patch_advisory",
+              "not_security",
+              "other"
+            ]
+          }
+        },
+        "exploitation_level": {
+          "type": "string",
+          "enum": [
+            "none",
+            "denied",
+            "attempted",
+            "limited",
+            "active",
+            "mass",
+            "unknown"
+          ]
+        },
+        "is_retrospective": {
+          "type": "boolean"
+        },
+        "is_roundup": {
+          "type": "boolean"
+        },
+        "cves": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": [
+              "cve",
+              "exploitation_level",
+              "quote"
+            ],
+            "properties": {
+              "cve": {
+                "type": "string"
+              },
+              "exploitation_level": {
+                "type": "string",
+                "enum": [
+                  "none",
+                  "denied",
+                  "attempted",
+                  "limited",
+                  "active",
+                  "mass",
+                  "unknown"
+                ]
+              },
+              "quote": {
+                "type": "string"
+              }
+            }
+          }
+        },
+        "products": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": [
+              "vendor",
+              "product",
+              "candidate_cpe",
+              "affected_versions",
+              "quote"
+            ],
+            "properties": {
+              "vendor": {
+                "type": "string"
+              },
+              "product": {
+                "type": "string"
+              },
+              "candidate_cpe": {
+                "type": "string",
+                "description": "vendor:product in CPE format, or empty string"
+              },
+              "affected_versions": {
+                "type": "string"
+              },
+              "quote": {
+                "type": "string"
+              }
+            }
+          }
+        },
+        "actors": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": [
+              "name",
+              "aliases",
+              "quote"
+            ],
+            "properties": {
+              "name": {
+                "type": "string"
+              },
+              "aliases": {
+                "type": "array",
+                "items": {
+                  "type": "string"
+                }
+              },
+              "quote": {
+                "type": "string"
+              }
+            }
+          }
+        },
+        "malware": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "victims": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": [
+              "name",
+              "sector",
+              "country",
+              "quote"
+            ],
+            "properties": {
+              "name": {
+                "type": "string"
+              },
+              "sector": {
+                "type": "string",
+                "enum": [
+                  "transportation",
+                  "infrastructure",
+                  "technology",
+                  "financial-services",
+                  "government",
+                  "healthcare",
+                  "retail",
+                  "manufacturing",
+                  "energy",
+                  "telecommunications",
+                  "education",
+                  "hospitality-leisure",
+                  "utilities",
+                  "other",
+                  "unknown"
+                ]
+              },
+              "country": {
+                "type": "string",
+                "description": "ISO 3166-1 alpha-2 code or empty string"
+              },
+              "quote": {
+                "type": "string"
+              }
+            }
+          }
+        },
+        "vector": {
+          "type": "string",
+          "description": "Described initial access vector, or empty string"
+        },
+        "conditions": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": [
+              "type",
+              "description",
+              "quote"
+            ],
+            "properties": {
+              "type": {
+                "type": "string",
+                "enum": [
+                  "platform",
+                  "module",
+                  "configuration",
+                  "authentication",
+                  "local_access",
+                  "other"
+                ]
+              },
+              "description": {
+                "type": "string"
+              },
+              "quote": {
+                "type": "string"
+              }
+            }
+          }
+        },
+        "signals": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "public_poc",
+            "no_patch",
+            "ransomware_use",
+            "mass_exploitation"
+          ],
+          "properties": {
+            "public_poc": {
+              "type": "boolean"
+            },
+            "no_patch": {
+              "type": "boolean"
+            },
+            "ransomware_use": {
+              "type": "boolean"
+            },
+            "mass_exploitation": {
+              "type": "boolean"
+            }
+          }
+        },
+        "out_of_taxonomy": {
+          "type": "boolean"
+        },
+        "summary": {
+          "type": "string",
+          "description": "1–2 sentences in the configured output language (Spanish by default)"
+        },
+        "confidence": {
+          "type": "number",
+          "description": "0 to 1"
+        }
+      }
+    }
+  }
+}

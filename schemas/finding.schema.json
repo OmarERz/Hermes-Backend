@@ -1,0 +1,334 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "finding.schema.json",
+  "title": "Finding",
+  "description": "A CVE detected on a CI: the unit of final scoring (D-035). Produced by the simulated scan (and in the future by a Nessus connector). Internal contract: never produced by an LLM.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "finding_id",
+    "scan_id",
+    "group_id",
+    "date",
+    "ci",
+    "software",
+    "cve",
+    "match_source",
+    "certainty",
+    "severity",
+    "cvss",
+    "exploit_available",
+    "remediation",
+    "status"
+  ],
+  "properties": {
+    "finding_id": {
+      "type": "string"
+    },
+    "scan_id": {
+      "type": "string"
+    },
+    "group_id": {
+      "type": "string",
+      "description": "CVE + product group (unit of analysis)"
+    },
+    "date": {
+      "type": "string",
+      "format": "date-time"
+    },
+    "ci": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "ci_id",
+        "name",
+        "ip",
+        "os",
+        "service",
+        "criticality",
+        "exposed",
+        "confidentiality",
+        "personal_data",
+        "owner",
+        "custodian"
+      ],
+      "properties": {
+        "ci_id": {
+          "type": "string"
+        },
+        "name": {
+          "type": "string"
+        },
+        "ip": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "os": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "service": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "criticality": {
+          "type": "string",
+          "enum": [
+            "high",
+            "medium",
+            "low",
+            "unknown"
+          ],
+          "description": "iTop business_criticity: high = critical, medium = normal, low = low (factor A)"
+        },
+        "exposed": {
+          "type": "boolean"
+        },
+        "confidentiality": {
+          "type": "string",
+          "enum": [
+            "public",
+            "classified",
+            "highly_classified",
+            "unclassified"
+          ],
+          "description": "iTop extension (D-037). Missing = unclassified (P-013)"
+        },
+        "personal_data": {
+          "type": [
+            "boolean",
+            "null"
+          ],
+          "description": "The 'Private' label. null = unknown"
+        },
+        "owner": {
+          "type": [
+            "object",
+            "null"
+          ],
+          "additionalProperties": false,
+          "required": [
+            "person_id",
+            "name",
+            "email"
+          ],
+          "properties": {
+            "person_id": {
+              "type": "string"
+            },
+            "name": {
+              "type": "string"
+            },
+            "email": {
+              "type": [
+                "string",
+                "null"
+              ]
+            }
+          },
+          "description": "iTop owner_id → Person"
+        },
+        "custodian": {
+          "type": [
+            "object",
+            "null"
+          ],
+          "additionalProperties": false,
+          "required": [
+            "team_id",
+            "name"
+          ],
+          "properties": {
+            "team_id": {
+              "type": "string"
+            },
+            "name": {
+              "type": "string"
+            }
+          },
+          "description": "iTop custodian_id → Team. null = the default team is used (P-020)"
+        }
+      }
+    },
+    "software": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "itop_name",
+        "vendor",
+        "product",
+        "version",
+        "package_version",
+        "cpe"
+      ],
+      "properties": {
+        "itop_name": {
+          "type": "string"
+        },
+        "vendor": {
+          "type": "string"
+        },
+        "product": {
+          "type": "string"
+        },
+        "version": {
+          "type": "string"
+        },
+        "package_version": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "description": "Distribution package version, e.g. 7.2.4-1ubuntu0.2"
+        },
+        "cpe": {
+          "type": [
+            "string",
+            "null"
+          ]
+        }
+      }
+    },
+    "cve": {
+      "type": "string",
+      "pattern": "^CVE-\\d{4}-\\d{4,}$"
+    },
+    "match_source": {
+      "type": "string",
+      "enum": [
+        "nvd_cpe",
+        "cna_affected",
+        "kev"
+      ]
+    },
+    "certainty": {
+      "type": "number",
+      "minimum": 0,
+      "maximum": 1
+    },
+    "severity": {
+      "type": "string",
+      "enum": [
+        "critical",
+        "high",
+        "medium",
+        "low",
+        "unrated"
+      ]
+    },
+    "cvss": {
+      "type": [
+        "object",
+        "null"
+      ],
+      "additionalProperties": false,
+      "required": [
+        "version",
+        "score",
+        "vector",
+        "source",
+        "estimated"
+      ],
+      "properties": {
+        "version": {
+          "type": "string",
+          "enum": [
+            "3.0",
+            "3.1",
+            "4.0"
+          ]
+        },
+        "score": {
+          "type": "number",
+          "minimum": 0,
+          "maximum": 10
+        },
+        "vector": {
+          "type": "string"
+        },
+        "source": {
+          "type": "string",
+          "enum": [
+            "cna",
+            "nvd",
+            "inferred"
+          ]
+        },
+        "estimated": {
+          "type": "boolean"
+        }
+      }
+    },
+    "exploit_available": {
+      "type": "boolean"
+    },
+    "remediation": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "fixed_version",
+        "references",
+        "workarounds",
+        "kev_required_action"
+      ],
+      "properties": {
+        "fixed_version": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "references": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": [
+              "url",
+              "tags"
+            ],
+            "properties": {
+              "url": {
+                "type": "string"
+              },
+              "tags": {
+                "type": "array",
+                "items": {
+                  "type": "string"
+                }
+              }
+            }
+          }
+        },
+        "workarounds": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "kev_required_action": {
+          "type": [
+            "string",
+            "null"
+          ]
+        }
+      }
+    },
+    "status": {
+      "type": "string",
+      "enum": [
+        "new",
+        "persistent",
+        "fixed",
+        "reopened",
+        "no_data"
+      ]
+    }
+  }
+}

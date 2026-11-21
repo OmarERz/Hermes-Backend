@@ -1,0 +1,245 @@
+[
+  {
+    "type": "function",
+    "function": {
+      "name": "read_element",
+      "description": "Return the full text of a package element (news, CVE field or CI). Only IDs that exist in the package.",
+      "strict": true,
+      "parameters": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "element_id"
+        ],
+        "properties": {
+          "element_id": {
+            "type": "string"
+          }
+        }
+      }
+    }
+  },
+  {
+    "type": "function",
+    "function": {
+      "name": "propose_reason",
+      "description": "Mode 1. Propose ONE adjustment reason with evidence. Code answers accepted or rejected with the broken rule. The final adjustment is the sum of accepted reasons.",
+      "strict": true,
+      "parameters": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "reason_code",
+          "direction",
+          "points",
+          "evidence_id",
+          "quote",
+          "explanation"
+        ],
+        "properties": {
+          "reason_code": {
+            "type": "string",
+            "enum": [
+              "mass_exploitation",
+              "ransomware",
+              "zero_day",
+              "more_critical_asset",
+              "exploit_chain",
+              "requires_authentication",
+              "missing_configuration",
+              "unverified_poc",
+              "other"
+            ]
+          },
+          "direction": {
+            "type": "string",
+            "enum": [
+              "up",
+              "down"
+            ]
+          },
+          "points": {
+            "type": "integer",
+            "description": "Positive if up, negative if down"
+          },
+          "evidence_id": {
+            "type": "string"
+          },
+          "quote": {
+            "type": "string",
+            "description": "Verbatim sentence from the evidence_id element"
+          },
+          "explanation": {
+            "type": "string"
+          }
+        }
+      }
+    }
+  },
+  {
+    "type": "function",
+    "function": {
+      "name": "withdraw_reason",
+      "description": "Mode 1. Withdraw a previously proposed reason.",
+      "strict": true,
+      "parameters": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "proposed_reason_id"
+        ],
+        "properties": {
+          "proposed_reason_id": {
+            "type": "string"
+          }
+        }
+      }
+    }
+  },
+  {
+    "type": "function",
+    "function": {
+      "name": "finalize_review",
+      "description": "Mode 1. Close the review. With no accepted reasons, the adjustment is 0. Optionally include drafted mitigation steps (D-017).",
+      "strict": true,
+      "parameters": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "summary",
+          "mitigation_steps"
+        ],
+        "properties": {
+          "summary": {
+            "type": "string",
+            "description": "1–3 sentences in the configured output language (Spanish by default) for the message and the ticket"
+          },
+          "mitigation_steps": {
+            "type": "array",
+            "description": "Drafted mitigation steps, ordered (D-017). Use ONLY facts from N1 elements of the package (NVD, CNA, KEV, vendor advisory, OSV); never from news. Every version, command or URL in action must appear verbatim in quote, and quote must appear verbatim in element_id. Code validates each step and discards the whole draft if any check fails; the data-based mitigation is always shown. Empty list if there is nothing to add.",
+            "items": {
+              "type": "object",
+              "additionalProperties": false,
+              "required": [
+                "order",
+                "ci_id",
+                "action",
+                "element_id",
+                "quote"
+              ],
+              "properties": {
+                "order": {
+                  "type": "integer",
+                  "description": "1-based position; temporary mitigations before the fix"
+                },
+                "ci_id": {
+                  "type": "string",
+                  "description": "CI this step applies to, or empty string if it applies to all"
+                },
+                "action": {
+                  "type": "string",
+                  "description": "What to do, in the configured output language (Spanish by default)"
+                },
+                "element_id": {
+                  "type": "string",
+                  "description": "ID of the N1 package element that supports this step"
+                },
+                "quote": {
+                  "type": "string",
+                  "description": "Verbatim sentence from element_id that supports this step"
+                }
+              }
+            }
+          }
+        }
+      }
+    }
+  },
+  {
+    "type": "function",
+    "function": {
+      "name": "propose_alert",
+      "description": "Mode 2. Propose an alert for a relationship the correlation engine did not detect. If the relationship is inferred, say so and propose a verification action.",
+      "strict": true,
+      "parameters": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "news_id",
+          "ci_id",
+          "cited_product",
+          "relationship_type",
+          "relationship",
+          "evidence_id",
+          "quote",
+          "suggested_action",
+          "confidence"
+        ],
+        "properties": {
+          "news_id": {
+            "type": "string"
+          },
+          "ci_id": {
+            "type": "string",
+            "description": "ID of the affected iTop CI, or empty string"
+          },
+          "cited_product": {
+            "type": "string",
+            "description": "Product name exactly as it appears in the news, or empty string"
+          },
+          "relationship_type": {
+            "type": "string",
+            "enum": [
+              "direct",
+              "inferred_component",
+              "inferred_fork",
+              "inferred_supplier",
+              "inferred_peer",
+              "inferred_chain"
+            ]
+          },
+          "relationship": {
+            "type": "string",
+            "description": "Explicit relationship, e.g. 'Nginx → uses → OS OpenSSL'"
+          },
+          "evidence_id": {
+            "type": "string"
+          },
+          "quote": {
+            "type": "string"
+          },
+          "suggested_action": {
+            "type": "string"
+          },
+          "confidence": {
+            "type": "number"
+          }
+        }
+      }
+    }
+  },
+  {
+    "type": "function",
+    "function": {
+      "name": "dismiss_news",
+      "description": "Mode 2. Declare that the news does not apply to the company.",
+      "strict": true,
+      "parameters": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "news_id",
+          "reason"
+        ],
+        "properties": {
+          "news_id": {
+            "type": "string"
+          },
+          "reason": {
+            "type": "string"
+          }
+        }
+      }
+    }
+  }
+]

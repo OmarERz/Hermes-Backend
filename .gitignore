@@ -218,3 +218,14 @@ __marimo__/
 
 # Streamlit
 .streamlit/secrets.toml
+
+# --- Reto Lyft ---
+.env
+.env.*
+!.env.example
+secrets/
+*.pem
+*-firebase-adminsdk-*.json
+.ruff_cache/
+.mypy_cache/
+coverage.json

@@ -1,0 +1,79 @@
+# Project rules (docs/14 §3.2).
+# They turn spec invariants into static-analysis errors.
+# Paths assume the package layout of docs/03 §1; adjust them if it changes.
+rules:
+  - id: no-float-in-scoring
+    message: >-
+      The scoring engine uses decimal.Decimal, never float (EVA-10, D-029).
+      Use Decimal("0.25") instead of 0.25 or float(...).
+    severity: ERROR
+    languages: [python]
+    paths:
+      include:
+        - "**/core/scoring/**"
+    pattern-either:
+      - pattern: float(...)
+      - pattern: "$X: float"
+      - pattern: "def $F(...) -> float: ..."
+
+  - id: http-call-without-timeout
+    message: Every outgoing HTTP call needs an explicit timeout.
+    severity: ERROR
+    languages: [python]
+    patterns:
+      - pattern-either:
+          - pattern: requests.$M(...)
+          - pattern: httpx.$M(...)
+      - metavariable-regex:
+          metavariable: $M
+          regex: ^(get|post|put|patch|delete|head|request)$
+      - pattern-not: requests.$M(..., timeout=$T, ...)
+      - pattern-not: httpx.$M(..., timeout=$T, ...)
+
+  - id: no-langchain
+    message: LangChain and agent frameworks are not used; use the openai SDK (D-029).
+    severity: ERROR
+    languages: [python]
+    pattern-either:
+      - pattern: import langchain
+      - pattern: import langgraph
+      - pattern-regex: ^\s*from\s+lang(chain|graph)[\w.]*\s+import
+
+  - id: itop-write-outside-outbox
+    message: >-
+      Only the iTop outbox module may call core/create, core/update or
+      core/apply_stimulus (ARQ-01). Enqueue the write in itop_outbox instead.
+    severity: ERROR
+    languages: [python]
+    paths:
+      exclude:
+        - "**/core/itop/outbox*"
+        - "**/tests/**"
+    pattern-regex: '["''](core/create|core/update|core/apply_stimulus)["'']'
+
+  - id: secret-in-log
+    message: Do not log variables that look like keys or tokens (SEG-21, SEG-24).
+    severity: ERROR
+    languages: [python]
+    patterns:
+      - pattern-either:
+          - pattern: $LOG.$LEVEL(..., $SECRET, ...)
+          - pattern: $LOG.$LEVEL(f"...{$SECRET}...", ...)
+      - metavariable-regex:
+          metavariable: $LEVEL
+          regex: ^(debug|info|warning|error|exception|critical)$
+      - metavariable-regex:
+          metavariable: $SECRET
+          regex: (?i).*(api_key|apikey|token|secret|password|credential).*
+
+  - id: slack-imports-core
+    message: notifications_slack may only import notifications_api (D-043, NOT-07).
+    severity: ERROR
+    languages: [python]
+    paths:
+      include:
+        - "**/notifications_slack/**"
+    pattern-either:
+      - pattern: import core
+      - pattern: import core.$X
+      - pattern-regex: ^\s*from\s+(core|api|workers)(\.[\w.]+)?\s+import
