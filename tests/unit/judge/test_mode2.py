@@ -525,3 +525,21 @@ def test_refutations_ignore_a_trailing_major_version_and_blind_reviews_keep_vers
     double.use("case")
     result = review_candidate(double_llm_client(double), package(content), env(), ctx())
     assert result.status is ReviewStatus.JUDGE_DISAGREEMENT
+
+
+def test_the_blind_mode2_review_counts_the_cost_of_the_first_one() -> None:
+    seen: list[Decimal] = []
+
+    class Recording:
+        def allows(self, *, critical: bool, pending_usd: Decimal = Decimal(0)) -> bool:
+            seen.append(pending_usd)
+            return True
+
+    content = dismissal_package()
+    content["news"][0]["suspicious"] = True
+    price = FREE.__class__(input=Decimal(1000), cached_input=Decimal(0), output=Decimal(1000))
+    double = LlmDouble()
+    double.add_case("case", [dismiss(), dismiss()])
+    double.use("case")
+    review_candidate(double_llm_client(double), package(content), env(daily_budget=Recording(), price=price), ctx())
+    assert seen == [Decimal(0), Decimal("0.015000")]

@@ -6,11 +6,21 @@ from decimal import Decimal
 
 import pytest
 
-from core.judge.budget import FREE, ModelPrice, UnlimitedDailyBudget, complexity, token_cap
+from core.judge.budget import (
+    FREE,
+    LedgerDailyBudget,
+    ModelPrice,
+    OffsetDailyBudget,
+    UnlimitedDailyBudget,
+    complexity,
+    token_cap,
+)
 from core.judge.catalog import JudgeSettings, ReasonCatalog, ReasonSpec, SensitivityProfile, TokenCaps
 from core.judge.package import ReviewPackage
 from core.judge.prompt import MODE1_TOOLS, system_prompt, user_message, versions
+from core.judge.store import parse_model_price
 from core.llm import Usage
+from core.validation.budget import BudgetConfig
 from harness.judge import finding_package
 
 pytestmark = pytest.mark.unit
@@ -67,3 +77,44 @@ def test_user_message_wraps_the_view_and_versions_are_stable() -> None:
     prompt = system_prompt(ReasonCatalog.default(), SensitivityProfile.named("normal"), JudgeSettings())
     assert versions(prompt) == versions(prompt)
     assert versions(prompt).prompt_hash != versions(prompt + " ").prompt_hash
+
+
+def test_ledger_daily_budget_uses_the_shared_policy_and_the_critical_reserve() -> None:
+    spent = [Decimal("3.99")]
+    ledger = LedgerDailyBudget(lambda: spent[0], BudgetConfig(daily_usd=Decimal(5)), Decimal("0.01"))
+    assert ledger.allows(critical=False)  # 3.99 + 0.01 <= 4.00 (the day minus the 20% reserve)
+    spent[0] = Decimal("4.00")
+    assert not ledger.allows(critical=False)
+    assert ledger.allows(critical=True)  # critical work may use the reserve
+    spent[0] = Decimal("4.995")
+    assert not ledger.allows(critical=True)
+
+
+@pytest.mark.parametrize(
+    ("prices", "expected"),
+    [
+        (
+            {"m": {"input": "0.5", "cached_input": 0.05, "output": 2}},
+            ModelPrice(Decimal("0.5"), Decimal("0.05"), Decimal(2)),
+        ),
+        ({"m": {"input": "0.5"}}, None),
+        ({"m": {"input": "x", "cached_input": 1, "output": 1}}, None),
+        ({"other": {}}, None),
+        ({"m": "cheap"}, None),
+        ({"m": {"input": "-1", "cached_input": 0, "output": 1}}, None),
+        ({"m": {"input": "NaN", "cached_input": 0, "output": 1}}, None),
+        ({"m": {"input": "Infinity", "cached_input": 0, "output": 1}}, None),
+        (None, None),
+    ],
+)
+def test_model_prices_are_parsed_strictly(prices: object, expected: ModelPrice | None) -> None:
+    assert parse_model_price(prices, "m") == expected
+
+
+def test_pending_and_offset_costs_count_against_the_day() -> None:
+    ledger = LedgerDailyBudget(lambda: Decimal("3.98"), BudgetConfig(daily_usd=Decimal(5)), Decimal("0.01"))
+    assert ledger.allows(critical=False)
+    assert not ledger.allows(critical=False, pending_usd=Decimal("0.015"))  # the review in progress is not stored
+    offset = OffsetDailyBudget(ledger, Decimal("0.015"))  # a first review that ran but is not stored yet
+    assert not offset.allows(critical=False)
+    assert offset.allows(critical=True)

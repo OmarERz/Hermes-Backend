@@ -245,13 +245,14 @@ class JudgeSession:
         while True:
             if len(state.calls) >= self._settings.max_calls or state.rejections >= self._settings.max_rejections:
                 return self._close(self._partial_status(), Failure.LIMIT)
-            if state.calls and not self._can_afford(last_turn_tokens):
+            if self._attempts and not self._can_afford(last_turn_tokens):  # every turn after the first, even retries
                 return self._close(self._partial_status(), Failure.BUDGET)
             try:
                 call = self._caller.call_tool(model=self._settings.model, messages=messages, tools=self._tools)
             except (ToolArgumentsError, LlmResponseError) as exc:
                 self._attempts += 1
                 self._usage = self._usage + exc.usage
+                last_turn_tokens = exc.usage.input + exc.usage.output + exc.usage.reasoning
                 format_failures += 1
                 error = str(exc)
                 if format_failures > self._settings.format_retries or error == last_error:
@@ -279,7 +280,8 @@ class JudgeSession:
         """Checked between turns: the next turn (estimated as the last one) must fit the cap and the day."""
         used = self._usage.input + self._usage.output + self._usage.reasoning
         fits = used + last_turn_tokens <= self._cap
-        return fits and self._env.daily_budget.allows(critical=self._package.is_critical)
+        pending = self._env.price.cost(self._usage)  # this review is stored only when it closes
+        return fits and self._env.daily_budget.allows(critical=self._package.is_critical, pending_usd=pending)
 
     def _partial_status(self) -> ReviewStatus:
         """Ladder level 2 shows any adjustment as a suggestion, partial or not (docs/07 §8)."""

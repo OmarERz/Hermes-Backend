@@ -15,6 +15,7 @@ from dataclasses import dataclass, replace
 from sqlalchemy.orm import Session
 
 from core.db.models import ReviewPackage as ReviewPackageRow
+from core.judge.budget import OffsetDailyBudget
 from core.judge.double_review import combine_outcomes, needs_double_review
 from core.judge.mitigation import MitigationResult
 from core.judge.mode2 import Mode2Context, mode2_min_confidence, review_candidate
@@ -78,7 +79,9 @@ class JudgeService:
         first = self._session(package).run()
         if not needs_double_review(first, package, self._env.settings):
             return JudgeResult(first.status, first.adjustment, first.ci_adjustments, first)
-        second = self._session(package).run()
+        # the first review is not stored yet: the blind one counts its cost against the day (L12)
+        offset = replace(self._env, daily_budget=OffsetDailyBudget(self._env.daily_budget, first.cost_usd))
+        second = JudgeSession(self._caller, package, offset, self._tools).run()
         if second.adjustment is None:  # any failure of the second review: final = base (L11)
             return JudgeResult(ReviewStatus.NO_JUDGE_REVIEW, None, {}, first, second)
         combined = combine_outcomes(first, second, self._env.settings.double_review_max_diff)

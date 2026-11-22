@@ -25,6 +25,7 @@ from dataclasses import dataclass, replace
 from decimal import ROUND_HALF_UP, Decimal
 from typing import Any, Protocol
 
+from core.judge.budget import OffsetDailyBudget
 from core.judge.package import ElementKind, ReviewPackage, normalize_text
 from core.judge.prompt import MODE2_PROMPT_VERSION, mode2_system_prompt
 from core.judge.rules import MAX_QUOTE_CHARS, MIN_QUOTE_CHARS
@@ -458,7 +459,8 @@ def review_candidate(
     suspicious = any(e.suspicious for e in package.news_elements)
     if first.status is not ReviewStatus.APPLIED or not suspicious:
         return Mode2Result(first.status, first, alert=first.alert, dismissal=first.dismissal)
-    second = DismissalSession(caller, package, env, mode2, tools).run()
+    offset = replace(env, daily_budget=OffsetDailyBudget(env.daily_budget, first.cost_usd))  # first not stored yet
+    second = DismissalSession(caller, package, offset, mode2, tools).run()
     if second.status in (ReviewStatus.NO_JUDGE_REVIEW, ReviewStatus.PARTIAL_REVIEW):  # no decision to compare
         return Mode2Result(second.status, first, second)
     if first.alert is not None and second.alert is not None and _same_alert(first.alert, second.alert):

@@ -4,11 +4,12 @@ from __future__ import annotations
 
 from dataclasses import replace
 from datetime import date
+from decimal import Decimal
 from typing import Any
 
 import pytest
 
-from core.judge.budget import FREE, UnlimitedDailyBudget
+from core.judge.budget import FREE, ModelPrice, UnlimitedDailyBudget
 from core.judge.catalog import JudgeSettings, ReasonCatalog, SensitivityProfile
 from core.judge.double_review import combine, combine_outcomes, needs_double_review
 from core.judge.package import ReviewPackage
@@ -263,3 +264,17 @@ def test_crossing_critical_on_an_alert_package_uses_the_package_base() -> None:
     assert needs_double_review(replace(outcome, adjustment=-6), package(content), JudgeSettings())  # 93 -> 87
     content["base"]["score"] = 60
     assert not needs_double_review(outcome, package(content), JudgeSettings())
+
+
+def test_the_blind_review_counts_the_cost_of_the_first_one() -> None:
+    seen: list[Decimal] = []
+
+    class Recording:
+        def allows(self, *, critical: bool, pending_usd: Decimal = Decimal(0)) -> bool:
+            seen.append(pending_usd)
+            return True
+
+    price = ModelPrice(input=Decimal(1000), cached_input=Decimal(0), output=Decimal(1000))
+    double = double_with([propose(MASS), finalize(), propose(AUTH), finalize()])
+    JudgeService(double_llm_client(double), env(daily_budget=Recording(), price=price)).evaluate(package())
+    assert seen[2] == Decimal("0.030000")  # the blind review starts with the first one's two turns counted

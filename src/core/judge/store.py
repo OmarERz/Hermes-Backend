@@ -13,7 +13,7 @@ import logging
 import uuid
 from collections.abc import Callable, Iterable, Mapping
 from dataclasses import dataclass
-from datetime import datetime
+from datetime import date, datetime
 from decimal import Decimal
 from typing import Any
 
@@ -34,9 +34,11 @@ from core.db.models import (
     SoftwareProduct,
     VerifiedRelationship,
 )
-from core.judge.catalog import MORE_CRITICAL_ASSET, JudgeSettings, SensitivityProfile
+from core.judge.budget import FALLBACK_PRICE, TURN_ESTIMATE, LedgerDailyBudget, ModelPrice
+from core.judge.catalog import MORE_CRITICAL_ASSET, JudgeSettings, SensitivityProfile, load_reason_catalog
 from core.judge.mode2 import AlertDecision, relation_identity
-from core.judge.session import Failure, ReviewOutcome, ReviewStatus
+from core.judge.session import Failure, JudgeEnvironment, ReviewOutcome, ReviewStatus
+from core.validation.budget import BudgetConfig, spent_on
 
 logger = logging.getLogger(__name__)
 
@@ -340,3 +342,65 @@ def save_alert(session: Session, decision: AlertDecision, review_id: uuid.UUID, 
         )
         session.flush()
     return alert.id
+
+
+# --- budget ----------------------------------------------------------------------------------------------------
+_BUDGET_KEYS = ("daily_budget_usd", "critical_reserve")
+
+
+def _settings(session: Session, keys: Iterable[str]) -> dict[str, Any]:
+    rows = session.execute(
+        text("SELECT setting_key, value FROM setting_current WHERE setting_key = ANY(:keys)"), {"keys": list(keys)}
+    ).all()
+    return {str(row[0]): row[1] for row in rows}
+
+
+def load_model_price(session: Session, model: str) -> ModelPrice | None:
+    """USD per million tokens of `model` from the `model_prices` parameter (docs/11, MET-17), or None when it is not
+    configured. `model_prices` is not seeded yet: callers must treat None as an unknown cost."""
+    return parse_model_price(_settings(session, ["model_prices"]).get("model_prices"), model)
+
+
+def parse_model_price(prices: Any, model: str) -> ModelPrice | None:
+    """`{"<model>": {"input": .., "cached_input": .., "output": ..}}` -> the model's price, or None if malformed."""
+    entry = prices.get(model) if isinstance(prices, dict) else None
+    if not isinstance(entry, dict):
+        return None
+    try:
+        rates = [Decimal(str(entry[key])) for key in ("input", "cached_input", "output")]
+    except (KeyError, ArithmeticError):
+        return None
+    if not all(rate.is_finite() and rate >= 0 for rate in rates):
+        return None  # a negative or non-finite rate would make the budget lie
+    return ModelPrice(input=rates[0], cached_input=rates[1], output=rates[2])
+
+
+def load_daily_budget(session: Session, price: ModelPrice, today: date) -> LedgerDailyBudget:
+    """The judge's daily budget from `daily_budget_usd` and `critical_reserve` (docs/11) over `llm_usage_daily`."""
+    values = _settings(session, _BUDGET_KEYS)
+    defaults = BudgetConfig()
+    config = BudgetConfig(
+        daily_usd=Decimal(str(values.get("daily_budget_usd", defaults.daily_usd))),
+        critical_reserve=Decimal(str(values.get("critical_reserve", defaults.critical_reserve))),
+    )
+    return LedgerDailyBudget(lambda: spent_on(session, today), config, price.cost(TURN_ESTIMATE))
+
+
+def judge_environment(session: Session, today: date, ladder_level: int = 0) -> JudgeEnvironment:
+    """The production environment of the judge: active reasons, current parameters and profile, the model's price
+    and the shared daily budget over `llm_usage_daily` (L12). Without a `model_prices` entry a conservative fallback
+    price keeps the budget advancing (TODO(P-015): `model_prices` is not seeded)."""
+    settings, profile = load_judge_settings(session)
+    price = load_model_price(session, settings.model)
+    if price is None:
+        logger.warning("model_prices has no entry for %s: using the conservative fallback price", settings.model)
+        price = FALLBACK_PRICE
+    return JudgeEnvironment(
+        catalog=load_reason_catalog(session),
+        profile=profile,
+        settings=settings,
+        today=today,
+        daily_budget=load_daily_budget(session, price, today),
+        price=price,
+        ladder_level=ladder_level,
+    )
