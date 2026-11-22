@@ -38,5 +38,5 @@ def session(migrated_url: str) -> Iterator[Session]:
         yield db_session
         db_session.rollback()
     with engine.begin() as conn:
-        conn.execute(text("TRUNCATE raw_article, story, source_fetch, run, source, audit_log CASCADE"))
+        conn.execute(text("TRUNCATE raw_article, story, source_fetch, run, source, audit_log, app_user CASCADE"))
     engine.dispose()
