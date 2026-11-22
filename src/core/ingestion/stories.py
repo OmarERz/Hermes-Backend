@@ -112,8 +112,10 @@ def _neighbors(
     return [(story, Decimal(1) - Decimal(str(dist))) for story, dist in session.execute(stmt)]
 
 
-def _join(session: Session, article: m.RawArticle, story: m.Story) -> None:
+def join_story(session: Session, article: m.RawArticle, story: m.Story) -> None:
     article.story_id = story.id
+    if story.relevance_status == "filtered":
+        story.relevance_status = "pending"  # a new article may name something the first one did not: decide again
     representative = session.get(m.RawArticle, story.representative_article_id)
     if representative is not None and article.published_at < representative.published_at:
         story.representative_article_id = article.id  # the story takes its date from its oldest article
@@ -158,20 +160,20 @@ def _place(ctx: _Context, article: m.RawArticle, vector: list[float]) -> Placeme
 
     for story, rep in candidates:  # layer 2
         if same_event(mine, entities_of(story, rep)):
-            _join(session, article, story)
+            join_story(session, article, story)
             return Placement(article.id, story.id, "cve_event")
     neighbors = _neighbors(session, article, vector, ctx.settings)
     if neighbors and neighbors[0][1] >= ctx.settings.similarity:  # layer 3
-        _join(session, article, neighbors[0][0])
+        join_story(session, article, neighbors[0][0])
         return Placement(article.id, neighbors[0][0].id, "similarity", neighbors[0][1])
     for story, rep in candidates:  # layer 4
         if same_attack(mine, entities_of(story, rep)):
-            _join(session, article, story)
+            join_story(session, article, story)
             return Placement(article.id, story.id, "attack")
     by_id = {story.id: rep for story, rep in candidates}
     for story, similarity in neighbors:  # layer 5: gray zone, decided by the entities; every neighbor is checked
         if entities_agree(mine, entities_of(story, by_id[story.id])):
-            _join(session, article, story)
+            join_story(session, article, story)
             return Placement(article.id, story.id, "gray_zone", similarity)
     story = _new_story(session, article, vector, ctx.model, ctx.clock)
     return Placement(article.id, story.id, "new")
