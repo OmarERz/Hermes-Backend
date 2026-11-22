@@ -21,6 +21,7 @@ dev = [
     "pytest",
     "pytest-cov>=7.1.0",
     "ruff",
+    "testcontainers>=4.15.0",
 ]
 
 [build-system]

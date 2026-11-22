@@ -4,7 +4,7 @@
 SHELL := /bin/bash
 .SHELLFLAGS := -eu -o pipefail -c
 
-.PHONY: help verify lint typecheck boundaries test coverage semgrep secrets audit verify-full zap bruno review
+.PHONY: help verify lint typecheck boundaries test coverage semgrep secrets audit verify-full zap bruno emulator-token review
 
 help: ## List the available targets
 	@grep -E '^[a-z-]+:.*## ' $(MAKEFILE_LIST) | awk 'BEGIN {FS = ":.*## "}; {printf "  %-12s %s\n", $$1, $$2}'
@@ -102,6 +102,13 @@ zap: ## OWASP ZAP API scan in Docker against API_URL/api/openapi.json (needs API
 bruno: ## Bruno API collection (bruno/ folder, environment local)
 	@test -d bruno || { echo "bruno/ folder not found: the Bruno collection is created in F0.7 (D-070)" >&2; exit 2; }
 	cd bruno && npx --yes @usebruno/cli@$(BRUNO_CLI_VERSION) run --env local
+
+# Prints one Firebase Auth emulator ID token (D-069); the emulator comes from `docker compose up auth-emulator`.
+# Defaults to the emulator published on localhost; the tool itself refuses to run without an emulator host.
+emulator-token: ## Print an emulator ID token: make emulator-token ROLE=admin|analyst|reader
+	@test -n "$${ROLE:-}" || { echo "Usage: make emulator-token ROLE=admin|analyst|reader" >&2; exit 2; }
+	@FIREBASE_AUTH_EMULATOR_HOST="$${FIREBASE_AUTH_EMULATOR_HOST:-127.0.0.1:9099}" \
+	  uv run --locked python -m core.devtools.emulator token --role "$$ROLE"
 
 # TASK and REVIEWER reach the recipe as environment variables, so quotes in the task title stay intact.
 export TASK REVIEWER
