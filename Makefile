@@ -4,7 +4,7 @@
 SHELL := /bin/bash
 .SHELLFLAGS := -eu -o pipefail -c
 
-.PHONY: help verify lint typecheck boundaries test coverage semgrep secrets audit verify-full zap bruno review
+.PHONY: up compose-secrets help verify lint typecheck boundaries test coverage semgrep secrets audit verify-full zap bruno review
 
 help: ## List the available targets
 	@grep -E '^[a-z-]+:.*## ' $(MAKEFILE_LIST) | awk 'BEGIN {FS = ":.*## "}; {printf "  %-12s %s\n", $$1, $$2}'
@@ -110,3 +110,9 @@ review: ## Automatic review by the other agent: make review TASK="F0.1-T1 · ...
 	@test -n "$$TASK" || { echo 'Usage: make review TASK="FNN.M-Tk · description" REVIEWER=codex|claude' >&2; exit 2; }
 	@test -f scripts/review.sh || { echo "scripts/review.sh is local-only (D-062) and is not present in this clone" >&2; exit 2; }
 	bash scripts/review.sh "$$TASK"
+
+compose-secrets: ## Write the Docker secret files compose.yaml mounts (from your environment)
+	bash docker/compose-secrets.sh
+
+up: compose-secrets ## Start the local stack: write the Docker secret files, then docker compose up --build -d
+	docker compose up --build -d --wait

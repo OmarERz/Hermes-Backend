@@ -7,7 +7,7 @@ from pathlib import Path
 import pytest
 from pydantic import ValidationError
 
-from core.config import DEFAULT_LLM_BASE_URL, Settings
+from core.config import DEFAULT_LLM_BASE_URL, Settings, read_secret
 
 REQUIRED = {"DATABASE_URL": "postgresql://app:s3cret-pw@db:5432/hermes", "FIREBASE_PROJECT_ID": "demo-hermes"}
 
@@ -136,3 +136,11 @@ def test_blank_env_var_does_not_shadow_secret_file(monkeypatch: pytest.MonkeyPat
     settings = Settings(_env_file=None, _secrets_dir=tmp_path)  # type: ignore[call-arg]
     assert settings.itop_token is not None
     assert settings.itop_token.get_secret_value() == "from-secret-file"
+
+
+def test_read_secret_keeps_spaces_and_drops_final_newline(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.delenv("SAMPLE_SECRET", raising=False)
+    (tmp_path / "sample_secret").write_text("  padded value \n", encoding="utf-8")
+    assert read_secret("sample_secret", tmp_path) == "  padded value "
+    (tmp_path / "blank_secret").write_text("   \n", encoding="utf-8")
+    assert read_secret("blank_secret", tmp_path) is None

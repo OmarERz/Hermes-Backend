@@ -70,6 +70,15 @@ def make_engine(url: str, *, echo: bool = False) -> Engine:
     return create_engine(connection_url(url), echo=echo, pool_pre_ping=True)
 
 
+def with_password(raw: str, password: str | None) -> str:
+    """Add the password from a secret when the URL has none (compose mounts it as a Docker secret)."""
+    url = make_url(sqlalchemy_url(raw))
+    if url.password or not password:
+        return raw
+    return url.set(password=password).render_as_string(hide_password=False)
+
+
 def make_session_factory(settings: Settings) -> sessionmaker[Session]:
-    engine = make_engine(settings.database_url.get_secret_value())
+    password = settings.pgpassword.get_secret_value() if settings.pgpassword else None
+    engine = make_engine(with_password(settings.database_url.get_secret_value(), password))
     return sessionmaker(engine, expire_on_commit=False)

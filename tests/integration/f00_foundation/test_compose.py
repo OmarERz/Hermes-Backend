@@ -10,6 +10,7 @@ import os
 import secrets
 import shutil
 import subprocess
+import tempfile
 from collections.abc import Iterator
 from pathlib import Path
 
@@ -48,12 +49,25 @@ def stack() -> Iterator[dict[str, str]]:
         "APP_DB_PASSWORD": "a@p/" + secrets.token_urlsafe(12),
         "RETENTION_DB_PASSWORD": secrets.token_urlsafe(16),
     }
+    secrets_dir = tempfile.mkdtemp(prefix="hermes-e2e-secrets-")
+    env["COMPOSE_SECRETS_DIR"] = secrets_dir
+    written = subprocess.run(
+        [shutil.which("bash") or "/bin/bash", str(ROOT / "docker" / "compose-secrets.sh")],
+        env=env,
+        cwd=ROOT,
+        capture_output=True,
+        text=True,
+        check=False,
+        timeout=60,
+    )
+    assert written.returncode == 0, written.stderr
     up = compose(env, "up", "-d", "--build", "--wait", "--wait-timeout", "300")
     try:
         assert up.returncode == 0, up.stderr[-3000:]
         yield env
     finally:
         compose(env, "down", "-v", "--remove-orphans", timeout=300)
+        shutil.rmtree(secrets_dir, ignore_errors=True)
 
 
 def get(url: str) -> tuple[int, bytes]:

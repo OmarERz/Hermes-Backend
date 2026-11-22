@@ -6,8 +6,9 @@ import os
 
 from alembic import context
 
+from core.config import read_secret
 from core.db import models
-from core.db.session import make_engine
+from core.db.session import make_engine, with_password
 
 config = context.config
 # Importing the models registers every table on Base.metadata (autogenerate compares against it).
@@ -31,7 +32,8 @@ def database_url() -> str:
     url = config.attributes.get("url") or os.environ.get("MIGRATION_DATABASE_URL")
     if not url:
         raise RuntimeError("Set MIGRATION_DATABASE_URL (migrator role) to run migrations")
-    return str(url)
+    # compose mounts the migrator's password as a Docker secret instead of putting it in the URL
+    return with_password(str(url), read_secret("migrator_db_password"))
 
 
 def run_migrations_online() -> None:

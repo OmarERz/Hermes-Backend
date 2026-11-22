@@ -190,7 +190,7 @@ def test_downgrade_aborts_on_a_dependent_foreign_view(fresh_db: MigratedDatabase
         assert "slack_ticket_scores" in inspect(engine).get_view_names()
         # The whole downgrade rolled back: still at head, and the app keeps its grants and the purge.
         with engine.connect() as conn:
-            assert conn.execute(text("SELECT version_num FROM alembic_version")).scalar_one() == "0002"
+            assert conn.execute(text("SELECT version_num FROM alembic_version")).scalar_one() == "0003"
             assert conn.execute(text("SELECT has_table_privilege('app', 'ticket', 'SELECT')")).scalar_one()
             assert conn.execute(text("SELECT to_regprocedure('purge_retention()') IS NOT NULL")).scalar_one()
     finally:
@@ -247,3 +247,25 @@ def test_provision_is_atomic(postgres_url: str) -> None:
     """Invalid input changes nothing: no role password is touched when one entry is invalid."""
     with provisioned_database(postgres_url, "atomic") as db, pytest.raises(ValueError, match="Empty password"):
         provision(db.superuser_url, {"app": "new-one", "retention": ""}, ROOT / "migrations" / "provision.sql")
+
+
+def test_functions_pin_a_trusted_search_path(fresh_db: MigratedDatabase) -> None:
+    """Every function of 0001 has exactly pg_catalog, public, pg_temp; going back to 0002 restores the default."""
+    cfg = alembic_cfg(fresh_db.migrator_url)
+    command.upgrade(cfg, "head")
+    query = text(
+        "SELECT p.oid::regprocedure::text, p.proconfig FROM pg_proc p JOIN pg_roles r ON r.oid = p.proowner "
+        "WHERE r.rolname = 'migrator' AND p.proname NOT IN ('purge_retention', 'retention_days')"
+    )
+    engine = make_engine(fresh_db.superuser_url)
+    try:
+        with engine.connect() as conn:
+            pinned = dict(conn.execute(query).tuples().all())
+        assert len(pinned) == 13
+        assert all(config == ["search_path=pg_catalog, public, pg_temp"] for config in pinned.values()), pinned
+        command.downgrade(cfg, "0002")
+        with engine.connect() as conn:
+            restored = dict(conn.execute(query).tuples().all())
+        assert all(config is None for config in restored.values()), restored
+    finally:
+        engine.dispose()

@@ -25,6 +25,7 @@ from pathlib import Path
 import psycopg
 from psycopg import sql
 
+from core.config import read_secret
 from core.db.session import connection_url
 from core.logging import configure_logging
 
@@ -54,7 +55,12 @@ def libpq_url(raw: str) -> str:
     return connection_url(raw).replace("postgresql+psycopg://", "postgresql://", 1)
 
 
-def provision(superuser_url: str, passwords: Mapping[str, str], sql_path: Path = DEFAULT_SQL) -> None:
+def provision(
+    superuser_url: str,
+    passwords: Mapping[str, str],
+    sql_path: Path = DEFAULT_SQL,
+    superuser_password: str | None = None,
+) -> None:
     """Apply the provisioning SQL and set login passwords (only for the roles given), all in one transaction.
 
     Inputs are validated before anything is written; a failure leaves roles and passwords as they were.
@@ -67,7 +73,8 @@ def provision(superuser_url: str, passwords: Mapping[str, str], sql_path: Path =
     if empty:
         raise ValueError(f"Empty password for roles: {empty}")
     script = sql_path.read_text(encoding="utf-8")
-    with psycopg.connect(libpq_url(superuser_url)) as conn, conn.transaction():
+    # The superuser password goes as a separate parameter: never inside a URL that a parser could echo.
+    with psycopg.connect(libpq_url(superuser_url), password=superuser_password) as conn, conn.transaction():
         # Defence in depth: even a verifier is not worth logging.
         conn.execute("SET LOCAL log_statement = 'none'")
         conn.execute(script.encode("utf-8"))
@@ -78,12 +85,12 @@ def provision(superuser_url: str, passwords: Mapping[str, str], sql_path: Path =
             )
 
 
-def wait_for_database(url: str, timeout_s: float = 60.0) -> None:
+def wait_for_database(url: str, timeout_s: float = 60.0, password: str | None = None) -> None:
     """Wait until PostgreSQL accepts TCP connections (the init phase of the image listens on a socket only)."""
     deadline = time.monotonic() + timeout_s
     while True:
         try:
-            with psycopg.connect(libpq_url(url), connect_timeout=3):
+            with psycopg.connect(libpq_url(url), connect_timeout=3, password=password):
                 return
         except psycopg.OperationalError:
             if time.monotonic() >= deadline:
@@ -92,8 +99,9 @@ def wait_for_database(url: str, timeout_s: float = 60.0) -> None:
 
 
 def main() -> int:
-    passwords = {role: os.environ.get(env, "") for role, env in LOGIN_ROLES.items()}
-    configure_logging([*passwords.values(), os.environ.get("PGPASSWORD", "")])
+    passwords = {role: read_secret(env) or "" for role, env in LOGIN_ROLES.items()}
+    superuser_password = read_secret("postgres_password") or os.environ.get("PGPASSWORD", "")
+    configure_logging([*passwords.values(), superuser_password])
     url = os.environ.get("PROVISION_DATABASE_URL")
     if not url:
         log.error("Set PROVISION_DATABASE_URL to the superuser connection (see core/db/provision.py)")
@@ -102,8 +110,8 @@ def main() -> int:
     if missing:
         log.error("Missing settings: %s", ", ".join(missing))
         return 2
-    wait_for_database(url)
-    provision(url, passwords)
+    wait_for_database(url, password=superuser_password or None)
+    provision(url, passwords, superuser_password=superuser_password or None)
     log.info("database provisioned")
     return 0
 
