@@ -16,13 +16,17 @@ from typing import Any
 
 import httpx
 import pytest
+from fastapi.testclient import TestClient
 from firebase_admin import auth, initialize_app
+from pydantic import SecretStr
 from testcontainers.core.config import testcontainers_config
 from testcontainers.core.container import DockerContainer
 from testcontainers.core.image import DockerImage
 from testcontainers.core.waiting_utils import wait_for_logs
 
+from api.app import create_app
 from api.auth import FirebaseTokenVerifier, TokenError
+from core.config import Settings
 
 testcontainers_config.ryuk_disabled = True
 
@@ -167,3 +171,27 @@ def test_expired_token_is_rejected_although_the_emulator_skips_the_check(emulato
     with pytest.raises(TokenError) as info:
         FirebaseTokenVerifier(PROJECT).verify(unsigned_jwt(claims))
     assert info.value.reason == "token_expired"
+
+
+def client_for() -> TestClient:
+    settings = Settings(
+        _env_file=None, database_url=SecretStr("postgresql://app:pw@db/hermes"), firebase_project_id=PROJECT
+    )
+    return TestClient(create_app(settings, token_verifier=FirebaseTokenVerifier(PROJECT)))
+
+
+def test_roles_through_the_api(emulator_host: str, admin_app: Any) -> None:
+    client = client_for()
+    for role in ("reader", "analyst", "admin"):
+        _, token = mint(emulator_host, admin_app, role)
+        response = client.get("/api/me", headers={"Authorization": f"Bearer {token}"})
+        assert response.status_code == 200, response.text
+        assert response.json()["role"] == role
+
+
+def test_api_rejects_missing_garbage_and_roleless_tokens(emulator_host: str, admin_app: Any) -> None:
+    client = client_for()
+    assert client.get("/api/me").status_code == 401
+    assert client.get("/api/me", headers={"Authorization": "Bearer not-a-jwt"}).status_code == 401
+    _, roleless = mint(emulator_host, admin_app, None)
+    assert client.get("/api/me", headers={"Authorization": f"Bearer {roleless}"}).status_code == 401
