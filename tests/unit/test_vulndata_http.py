@@ -119,3 +119,16 @@ def test_limiter_is_applied_before_every_attempt() -> None:
     object.__setattr__(limiter, "acquire", lambda: calls.append(1))
     JsonSource(http=client, limiter=limiter, sleep=lambda _s: None).get(URL)
     assert len(calls) == 2
+
+
+def test_get_bytes_returns_the_raw_body_with_retries() -> None:
+    client, seen = scripted(status(503), lambda _r: httpx.Response(200, content=b"\x1f\x8bdata"))
+    assert JsonSource(http=client, sleep=lambda _s: None).get_bytes(URL) == b"\x1f\x8bdata"
+    assert len(seen) == 2
+
+
+def test_get_bytes_refuses_oversized_bodies(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr("core.vulndata.http.MAX_BODY_BYTES", 2)
+    client, _ = scripted(lambda _r: httpx.Response(200, content=b"abc"))
+    with pytest.raises(SourceUnavailableError, match="too large"):
+        JsonSource(http=client).get_bytes(URL)

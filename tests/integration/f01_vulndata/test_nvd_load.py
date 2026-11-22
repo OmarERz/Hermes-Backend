@@ -82,3 +82,13 @@ def test_changed_ranges_are_replaced_not_accumulated(engine: Engine) -> None:
         )
     load(engine, datetime(2026, 11, 23, tzinfo=UTC))
     assert not [r for r in snapshot(engine)["range"] if r[2] == "stale"]
+
+
+def test_reload_keeps_the_same_rows_not_just_the_same_values(engine: Engine) -> None:
+    ids = "SELECT id FROM cve_affected_range ORDER BY id"
+    load(engine, T0)
+    with engine.connect() as conn:
+        before = conn.execute(text(ids)).all()
+    load(engine, datetime(2026, 11, 23, tzinfo=UTC))
+    with engine.connect() as conn:
+        assert conn.execute(text(ids)).all() == before and before

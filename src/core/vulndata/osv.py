@@ -26,10 +26,22 @@ BackportStatus = Literal["affected", "fixed", "unknown"]
 class OsvVuln:
     id: str
     aliases: tuple[str, ...]
+    has_fix: bool = False  # some affected range names a `fixed` version: the evidence that a patch exists
 
     @property
     def cve_ids(self) -> frozenset[str]:
         return frozenset(i for i in (self.id, *self.aliases) if CVE_ID.match(i))
+
+
+def _has_fix(vuln: dict[str, Any]) -> bool:
+    return any(
+        isinstance(event, dict) and "fixed" in event
+        for affected in vuln.get("affected") or []
+        if isinstance(affected, dict)
+        for rng in affected.get("ranges") or []
+        if isinstance(rng, dict)
+        for event in rng.get("events") or []
+    )
 
 
 @dataclass
@@ -53,17 +65,22 @@ class OsvClient:
             for vuln in answer.get("vulns", []):
                 if isinstance(vuln, dict) and isinstance(vuln.get("id"), str):
                     aliases = tuple(str(a) for a in vuln.get("aliases") or [])
-                    found.append(OsvVuln(vuln["id"], aliases))
+                    found.append(OsvVuln(vuln["id"], aliases, _has_fix(vuln)))
             token = answer.get("next_page_token")
             if not token:
                 return found
         raise SourceUnavailableError("too many OSV pages")
 
     def backport_status(self, cve_id: str, package: str, ecosystem: str, version: str) -> BackportStatus:
-        """`fixed` when the distribution's advisory covers the CVE but not this package version."""
+        """`fixed` when the distribution's advisory covers the CVE, names a fix, and no longer affects this version.
+
+        `unknown` when OSV has no advisory for the CVE and package, or the advisory names no fixed version (a
+        `last_affected` only, or an older version than the one introduced): no evidence, so no suppression.
+        """
         if not CVE_ID.match(cve_id):
             raise ValueError("not a CVE id")
-        if not any(cve_id in v.cve_ids for v in self.query(package, ecosystem)):
+        covering = [v for v in self.query(package, ecosystem) if cve_id in v.cve_ids]
+        if not covering or not any(v.has_fix for v in covering):
             return "unknown"
         affecting = self.query(package, ecosystem, version)
         return "affected" if any(cve_id in v.cve_ids for v in affecting) else "fixed"

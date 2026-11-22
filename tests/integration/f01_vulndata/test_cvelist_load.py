@@ -96,3 +96,13 @@ def test_load_from_local_clone_files(engine: Engine, tmp_path: Path) -> None:
             session, [good, tmp_path / "broken.json", tmp_path / "list.json", tmp_path / "gone.json"], now=T0
         )
     assert (result.stored, result.skipped) == (1, 3)
+
+
+def test_reload_keeps_row_ids(engine: Engine) -> None:
+    query = "SELECT id FROM cve_affected_range UNION ALL SELECT id FROM cve_workaround ORDER BY 1"
+    with Session(engine) as session, session.begin():
+        load_cve_org(session, org_client(), ["CVE-2026-0001"], now=T0)
+    before = rows(engine, query)
+    with Session(engine) as session, session.begin():
+        load_cve_org(session, org_client(), ["CVE-2026-0001"], now=T0)
+    assert rows(engine, query) == before and len(before) == 5

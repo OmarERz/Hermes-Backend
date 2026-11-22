@@ -9,7 +9,7 @@ have (404) is a normal "not found", not an error. Rejected CVEs are skipped.
 from __future__ import annotations
 
 import json
-from collections.abc import Iterable
+from collections.abc import Iterable, Iterator
 from dataclasses import dataclass
 from datetime import datetime
 from pathlib import Path
@@ -59,27 +59,59 @@ def _ranges(affected: list[dict[str, Any]]) -> list[RangeRecord]:
         vendor, product = str(entry.get("vendor", "")).strip(), str(entry.get("product", "")).strip()
         if vendor.lower() in UNKNOWN_NAMES or product.lower() in UNKNOWN_NAMES:
             continue
-        versions = entry.get("versions") or []
-        if not versions and entry.get("defaultStatus") == "affected":
-            ranges.append(RangeRecord(CNA_AFFECTED, vendor, product))
-        for item in versions:
-            if item.get("status") != "affected" or item.get("versionType") in NOT_COMPARABLE:
-                continue
-            if (found := _version_range(vendor, product, item)) is not None:
-                ranges.append(found)
+        versions = [v for v in entry.get("versions") or [] if v.get("versionType") not in NOT_COMPARABLE]
+        found = [
+            r for item in versions if item.get("status") == "affected" for r in _version_ranges(vendor, product, item)
+        ]
+        if not found and entry.get("defaultStatus") == "affected":
+            found = _default_affected(vendor, product, versions)
+        ranges.extend(found)
     return list(dict.fromkeys(ranges))
 
 
-def _version_range(vendor: str, product: str, item: dict[str, Any]) -> RangeRecord | None:
+def _default_affected(vendor: str, product: str, versions: list[dict[str, Any]]) -> list[RangeRecord]:
+    """`defaultStatus: affected`: everything is affected except the listed unaffected versions.
+
+    A single unaffected version is read as "fixed from there on"; with several, the exclusions cannot be
+    expressed as one range and the product is left without a range rather than invented (pendientes-f12).
+    """
+    unaffected = [v for v in versions if v.get("status") == "unaffected" and str(v.get("version", "")).strip()]
+    if not unaffected:
+        return [RangeRecord(CNA_AFFECTED, vendor, product)]
+    if len(unaffected) == 1 and unaffected[0].get("lessThan") is None and unaffected[0].get("lessThanOrEqual") is None:
+        return [RangeRecord(CNA_AFFECTED, vendor, product, None, None, str(unaffected[0]["version"]).strip(), False)]
+    return []
+
+
+def _version_ranges(vendor: str, product: str, item: dict[str, Any]) -> list[RangeRecord]:
     version = str(item.get("version", "")).strip()
+    start: str | None = None if version.lower() in START_OF_TIME else version
     below, up_to = item.get("lessThan"), item.get("lessThanOrEqual")
-    start = None if version.lower() in START_OF_TIME else version
-    if below is None and up_to is None:
-        if start is None:
-            return None  # "unspecified" without bounds says nothing usable
-        return RangeRecord(CNA_AFFECTED, vendor, product, start, True, start, True)
-    end, end_inclusive = (str(below), False) if below is not None else (str(up_to), True)
-    return RangeRecord(CNA_AFFECTED, vendor, product, start, None if start is None else True, end, end_inclusive)
+    changes = [c for c in item.get("changes") or [] if isinstance(c, dict) and c.get("at")]
+    if not changes:
+        if below is None and up_to is None:
+            if start is None:
+                return []  # "unspecified" without bounds says nothing usable
+            return [RangeRecord(CNA_AFFECTED, vendor, product, start, True, start, True)]
+        end, end_inclusive = (str(below), False) if below is not None else (str(up_to), True)
+        return [RangeRecord(CNA_AFFECTED, vendor, product, start, None if start is None else True, end, end_inclusive)]
+    # `changes` flip the status at given versions: affected from the entry's version until the first flip, and so on
+    ranges: list[RangeRecord] = []
+    affected = True
+    for change in changes:
+        at, status = str(change["at"]), change.get("status")
+        if affected and status in {"unaffected", "unknown"}:
+            ranges.append(RangeRecord(CNA_AFFECTED, vendor, product, start, None if start is None else True, at, False))
+            affected = False
+        elif not affected and status == "affected":
+            start, affected = at, True
+    if affected:
+        tail_end: str | None = str(below) if below is not None else (str(up_to) if up_to is not None else None)
+        tail_inclusive = None if tail_end is None else below is None
+        ranges.append(
+            RangeRecord(CNA_AFFECTED, vendor, product, start, None if start is None else True, tail_end, tail_inclusive)
+        )
+    return ranges
 
 
 def parse_cve5(document: dict[str, Any]) -> CveRecord | None:
@@ -112,9 +144,10 @@ def parse_cve5(document: dict[str, Any]) -> CveRecord | None:
             tags = tuple(dict.fromkeys(TAGS[t] for t in ref.get("tags") or [] if t in TAGS))
             record.references.append(ReferenceRecord(ref["url"], tags))
     record.ranges = _ranges(cna.get("affected") or [])
-    for workaround in cna.get("workarounds") or []:
-        if text := _english([workaround]):
-            record.workarounds.append(WorkaroundRecord(text, "cna"))
+    for key in ("workarounds", "solutions"):  # both are mitigation text the CNA publishes (ESC-14)
+        for entry in cna.get(key) or []:
+            if text := _english([entry]):
+                record.workarounds.append(WorkaroundRecord(text, "cna"))
     return record
 
 
@@ -160,6 +193,11 @@ def load_cve_org(
         store_cve(session, record, now=now)
         result.stored += 1
     return result
+
+
+def clone_files(root: Path) -> Iterator[Path]:
+    """Every CVE file of a local clone of cvelistV5 (`git pull` keeps it current, FUE-02)."""
+    yield from sorted((root / "cves").glob("*/*/CVE-*.json"))
 
 
 def load_cve_files(session: Session, paths: Iterable[Path], *, now: datetime | None = None) -> LoadResult:

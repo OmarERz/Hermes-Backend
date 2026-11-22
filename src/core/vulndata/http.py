@@ -74,6 +74,22 @@ class JsonSource:
         headers: Mapping[str, str] | None = None,
         json: Any = None,
     ) -> Any:
+        return self._body(self._send(method, url, params, headers, json))
+
+    def get_bytes(self, url: str) -> bytes:
+        """A raw body (for example a compressed daily file), with the same retries and size cap."""
+        response = self._send("GET", url, None, None, None)
+        self._check_size(response)
+        return response.content
+
+    def _send(
+        self,
+        method: str,
+        url: str,
+        params: Mapping[str, str | int] | None,
+        headers: Mapping[str, str] | None,
+        json: Any,
+    ) -> httpx.Response:
         client = self.http or httpx.Client(timeout=httpx.Timeout(self.timeout))
         try:
             request = client.build_request(
@@ -92,7 +108,7 @@ class JsonSource:
     def post(self, url: str, body: Any, *, headers: Mapping[str, str] | None = None) -> Any:
         return self.request("POST", url, headers=headers, json=body)
 
-    def _with_retries(self, client: httpx.Client, request: httpx.Request) -> Any:
+    def _with_retries(self, client: httpx.Client, request: httpx.Request) -> httpx.Response:
         last = "no attempt made"
         for attempt in range(1, self.max_attempts + 1):
             delay: float | None = None
@@ -104,7 +120,7 @@ class JsonSource:
                 last = f"no response ({type(exc).__name__})"
             else:
                 if response.status_code == HTTP_OK:
-                    return self._body(response)
+                    return response
                 if response.status_code not in self.retryable:
                     raise SourceRefusedError(response.status_code)
                 last = f"HTTP {response.status_code}"
@@ -115,9 +131,13 @@ class JsonSource:
         raise SourceUnavailableError(f"{last} after {self.max_attempts} attempts")
 
     @staticmethod
-    def _body(response: httpx.Response) -> Any:
+    def _check_size(response: httpx.Response) -> None:
         if len(response.content) > MAX_BODY_BYTES:
             raise SourceUnavailableError("answer too large")
+
+    @classmethod
+    def _body(cls, response: httpx.Response) -> Any:
+        cls._check_size(response)
         try:
             return response.json()
         except ValueError:

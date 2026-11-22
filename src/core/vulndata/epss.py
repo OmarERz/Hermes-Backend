@@ -1,4 +1,8 @@
-"""FIRST EPSS client and loader (ESC-09, EVA scoring input).
+"""FIRST EPSS loaders (ESC-09, EVA scoring input).
+
+Bulk refresh reads the daily full CSV `epss_scores-current.csv.gz` (FUE-04): the API is only for spot queries.
+⚠️ The CSV address and its first line (`#model_version:...,score_date:<ISO date>`) follow FIRST's data page and
+could not be re-read in this session; the address is a parameter.
 
 `GET https://api.first.org/data/v1/epss?cve=CVE-A,CVE-B` answers `{"status": "OK", "data": [{"cve", "epss",
 "percentile", "date"}]}` with the numbers as strings (verified against the live API on 22 Nov 2026). Requests are
@@ -8,6 +12,7 @@ no use. One row per CVE and day (`epss_score` is a daily series).
 
 from __future__ import annotations
 
+import zlib
 from collections.abc import Iterator, Sequence
 from dataclasses import dataclass
 from datetime import date
@@ -22,6 +27,9 @@ from core.vulndata.http import JsonSource, SourceUnavailableError
 from core.vulndata.records import CVE_ID
 
 EPSS_URL: Final = "https://api.first.org/data/v1/epss"
+EPSS_DAILY_URL: Final = "https://epss.empiricalsecurity.com/epss_scores-current.csv.gz"
+MAX_CSV_BYTES: Final = 256 * 1024 * 1024
+GZIP_MAGIC: Final = b"\x1f\x8b"
 BATCH_SIZE: Final = 100
 FIVE_PLACES: Final = Decimal("0.00001")
 
@@ -56,6 +64,33 @@ def fetch_scores(source: JsonSource, cve_ids: Sequence[str], url: str = EPSS_URL
     return rows
 
 
+def parse_daily_csv(data: bytes) -> list[dict[str, Any]]:
+    """Rows of the daily file as the API shape (`cve`, `epss`, `percentile`, `date`); gzip is detected and bounded."""
+    if data.startswith(GZIP_MAGIC):
+        inflater = zlib.decompressobj(wbits=31)
+        data = inflater.decompress(data, MAX_CSV_BYTES)
+        if inflater.unconsumed_tail:
+            raise SourceUnavailableError("EPSS file too large")
+    lines = data.decode("utf-8", errors="replace").splitlines()
+    day = ""
+    if lines and lines[0].startswith("#"):
+        marker = next((p for p in lines[0].lstrip("#").split(",") if p.startswith("score_date:")), "")
+        day = marker.removeprefix("score_date:")[:10]
+        lines = lines[1:]
+    if not day or not lines or lines[0].strip() != "cve,epss,percentile":
+        raise SourceUnavailableError("unexpected EPSS file layout")
+    rows: list[dict[str, Any]] = []
+    for line in lines[1:]:
+        cve, _, rest = line.partition(",")
+        epss, _, percentile = rest.partition(",")
+        rows.append({"cve": cve, "epss": epss, "percentile": percentile, "date": day})
+    return rows
+
+
+def fetch_daily(source: JsonSource, url: str = EPSS_DAILY_URL) -> list[dict[str, Any]]:
+    return parse_daily_csv(source.get_bytes(url))
+
+
 def load_epss(session: Session, rows: list[dict[str, Any]]) -> EpssResult:
     """Upsert score rows for the CVEs we hold. The caller owns the transaction."""
     result = EpssResult()
@@ -80,6 +115,6 @@ def load_epss(session: Session, rows: list[dict[str, Any]]) -> EpssResult:
 
 
 def refresh_epss(session: Session, source: JsonSource, cve_ids: Sequence[str] | None = None) -> EpssResult:
-    """Fetch and store the latest scores for `cve_ids` (default: every CVE we hold)."""
-    ids = list(cve_ids) if cve_ids is not None else sorted(session.scalars(select(m.Cve.id)))
-    return load_epss(session, fetch_scores(source, ids))
+    """Store the latest scores: the daily file for every CVE we hold (default), or API spot queries for `cve_ids`."""
+    rows = fetch_scores(source, list(cve_ids)) if cve_ids is not None else fetch_daily(source)
+    return load_epss(session, rows)

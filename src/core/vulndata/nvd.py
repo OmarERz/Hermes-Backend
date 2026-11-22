@@ -66,7 +66,7 @@ def _cvss(metrics: dict[str, Any]) -> tuple[str, str, str, Any] | None:
                 continue
             is_nvd = entry.get("source") == NVD_SOURCE
             found.append(
-                (0 if is_nvd else 1, -CVSS_KEYS.index((key, version)), version, data, "nvd" if is_nvd else "cna")
+                (0 if is_nvd else 1, CVSS_KEYS.index((key, version)), version, data, "nvd" if is_nvd else "cna")
             )
     if not found:
         return None
@@ -79,6 +79,8 @@ def _ranges(configurations: list[dict[str, Any]]) -> list[RangeRecord]:
 
     def walk(nodes: list[dict[str, Any]]) -> None:
         for node in nodes:
+            if node.get("negate") is True:  # "not running X" conditions are not affected ranges
+                continue
             for match in node.get("cpeMatch") or []:
                 if match.get("vulnerable") is True and (record := _range(match)) is not None:
                     ranges.append(record)

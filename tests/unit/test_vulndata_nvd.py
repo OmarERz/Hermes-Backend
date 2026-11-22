@@ -61,6 +61,33 @@ def test_parse_cve_without_analysis_has_no_cvss_or_ranges() -> None:
     assert (record.cvss_score, record.cvss_source, record.ranges, record.cwes) == (None, None, [], [])
 
 
+def test_newest_cvss_version_of_the_same_source_wins() -> None:
+    def metric(version: str, score: float) -> dict[str, Any]:
+        return {
+            "source": "nvd@nist.gov",
+            "cvssData": {"version": version, "vectorString": f"v{version}", "baseScore": score},
+        }
+
+    cve = {
+        "id": "CVE-2026-0010",
+        "metrics": {
+            "cvssMetricV30": [metric("3.0", 5.5)],
+            "cvssMetricV40": [metric("4.0", 9.3)],
+            "cvssMetricV31": [metric("3.1", 8.0)],
+        },
+    }
+    record = parse_cve({"cve": cve})
+    assert record is not None and (record.cvss_version, record.cvss_score) == ("4.0", Decimal("9.3"))
+
+
+def test_negated_nodes_are_not_ranges() -> None:
+    cpe = {"vulnerable": True, "criteria": "cpe:2.3:a:acme:tool:*:*:*:*:*:*:*:*"}
+    record = parse_cve(
+        {"cve": {"id": "CVE-2026-0011", "configurations": [{"nodes": [{"negate": True, "cpeMatch": [cpe]}]}]}}
+    )
+    assert record is not None and record.ranges == []
+
+
 def test_parse_cna_only_score_and_escaped_cpe() -> None:
     record = parse_cve(page("nvd_page2.json")["vulnerabilities"][0])
     assert record is not None

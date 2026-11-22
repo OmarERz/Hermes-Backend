@@ -87,14 +87,28 @@ def test_epss_is_a_daily_series_and_reload_does_not_duplicate(engine: Engine) ->
         session.execute(text("INSERT INTO cve (id) VALUES ('CVE-2026-0001')"))
     for day, value in (("2026-11-21", "0.1"), ("2026-11-22", "0.2"), ("2026-11-22", "0.3")):
         with Session(engine) as session, session.begin():
-            refresh_epss(session, source(day, value))
+            refresh_epss(session, source(day, value), ["CVE-2026-0001"])
     assert rows(engine, "SELECT score_date::text, epss::text FROM epss_score ORDER BY 1") == [
         ("2026-11-21", "0.10000"),
         ("2026-11-22", "0.30000"),
     ]
 
 
+def test_daily_file_refresh_stores_only_what_we_hold(engine: Engine) -> None:
+    csv = (
+        "#model_version:v1,score_date:2026-11-22T00:00:00Z\ncve,epss,percentile\n"
+        "CVE-2026-0001,0.25,0.7\nCVE-2026-5555,0.9,0.99\n"
+    )
+    source = JsonSource(
+        http=httpx.Client(transport=httpx.MockTransport(lambda _r: httpx.Response(200, content=csv.encode())))
+    )
+    with Session(engine) as session, session.begin():
+        session.execute(text("INSERT INTO cve (id) VALUES ('CVE-2026-0001')"))
+        result = refresh_epss(session, source)
+    assert (result.stored, result.skipped) == (1, 1)
+
+
 def test_refresh_with_nothing_to_fetch_does_nothing(engine: Engine) -> None:
     source = JsonSource(http=httpx.Client(transport=httpx.MockTransport(lambda _r: httpx.Response(500))))
     with Session(engine) as session, session.begin():
-        assert refresh_epss(session, source).stored == 0
+        assert refresh_epss(session, source, []).stored == 0

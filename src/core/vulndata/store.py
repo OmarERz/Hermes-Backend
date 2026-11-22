@@ -11,11 +11,11 @@ from __future__ import annotations
 from datetime import UTC, datetime
 from typing import Final
 
-from sqlalchemy import delete, select
+from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from core.db import models as m
-from core.vulndata.records import CNA_AFFECTED, NVD_CPE, CveRecord
+from core.vulndata.records import CNA_AFFECTED, NVD_CPE, CveRecord, RangeRecord, WorkaroundRecord
 
 RANGE_SOURCE: Final = {"nvd": NVD_CPE, "cna": CNA_AFFECTED}
 
@@ -67,13 +67,22 @@ def _store_references(session: Session, record: CveRecord) -> None:
 
 
 def _store_ranges(session: Session, record: CveRecord) -> None:
+    """Make this source's ranges equal the record's, touching only the rows that differ (stable ids)."""
     source = RANGE_SOURCE[record.origin]
-    session.execute(
-        delete(m.CveAffectedRange).where(
+    wanted = set(record.ranges)
+    for row in session.scalars(
+        select(m.CveAffectedRange).where(
             m.CveAffectedRange.cve_id == record.cve_id, m.CveAffectedRange.source == source
         )
-    )
-    for item in dict.fromkeys(record.ranges):
+    ):
+        key = RangeRecord(
+            source, row.vendor, row.product, row.version_start, row.start_inclusive, row.version_end, row.end_inclusive
+        )
+        if key in wanted:
+            wanted.discard(key)
+        else:
+            session.delete(row)
+    for item in wanted:
         session.add(
             m.CveAffectedRange(
                 cve_id=record.cve_id,
@@ -91,10 +100,16 @@ def _store_ranges(session: Session, record: CveRecord) -> None:
 def _store_workarounds(session: Session, record: CveRecord) -> None:
     if record.origin != "cna":
         return
-    session.execute(
-        delete(m.CveWorkaround).where(m.CveWorkaround.cve_id == record.cve_id, m.CveWorkaround.source == "cna")
-    )
-    for item in dict.fromkeys(record.workarounds):
+    wanted = set(record.workarounds)
+    for row in session.scalars(
+        select(m.CveWorkaround).where(m.CveWorkaround.cve_id == record.cve_id, m.CveWorkaround.source == "cna")
+    ):
+        key = WorkaroundRecord(row.text, row.source, row.source_url)
+        if key in wanted:
+            wanted.discard(key)
+        else:
+            session.delete(row)
+    for item in wanted:
         session.add(
             m.CveWorkaround(cve_id=record.cve_id, text=item.text, source=item.source, source_url=item.source_url)
         )

@@ -1,0 +1,15 @@
+{
+  "cveMetadata": {"cveId": "CVE-2026-0005", "state": "PUBLISHED", "datePublished": "2026-10-10T00:00:00Z"},
+  "containers": {"cna": {
+    "descriptions": [{"lang": "en", "value": "Status changes."}],
+    "solutions": [{"lang": "en", "value": "Upgrade to 2.4.1."}],
+    "affected": [
+      {"vendor": "Acme", "product": "Server", "defaultStatus": "unaffected", "versions": [
+        {"version": "2.0", "status": "affected", "changes": [{"at": "2.3", "status": "unaffected"}, {"at": "2.4", "status": "affected"}, {"at": "2.4.1", "status": "unaffected"}]},
+        {"version": "3.0", "status": "affected", "changes": [{"at": "3.2", "status": "affected"}], "lessThan": "3.9"}
+      ]},
+      {"vendor": "Acme", "product": "Client", "defaultStatus": "affected", "versions": [{"version": "5.1", "status": "unaffected"}]},
+      {"vendor": "Acme", "product": "Many", "defaultStatus": "affected", "versions": [{"version": "5.1", "status": "unaffected"}, {"version": "6.1", "status": "unaffected"}]}
+    ]
+  }}
+}

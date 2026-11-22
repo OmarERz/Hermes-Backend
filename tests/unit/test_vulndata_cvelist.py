@@ -11,7 +11,7 @@ from typing import Any
 import httpx
 import pytest
 
-from core.vulndata.cvelist import CveOrgClient, parse_cve5, raw_path
+from core.vulndata.cvelist import CveOrgClient, clone_files, parse_cve5, raw_path
 from core.vulndata.http import JsonSource, SourceRefusedError
 from core.vulndata.records import CNA_AFFECTED, RangeRecord, ReferenceRecord, WorkaroundRecord
 
@@ -52,6 +52,25 @@ def test_affected_ranges() -> None:
         RangeRecord(CNA_AFFECTED, "F5", "nginx", "1.19.0", True, "1.19.0", True),
         RangeRecord(CNA_AFFECTED, "Acme", "Everything"),
     ]
+
+
+def test_status_changes_default_affected_and_solutions() -> None:
+    record = parse_cve5(document("cve5_0005.json"))
+    assert record is not None
+    assert record.ranges == [
+        RangeRecord(CNA_AFFECTED, "Acme", "Server", "2.0", True, "2.3", False),
+        RangeRecord(CNA_AFFECTED, "Acme", "Server", "2.4", True, "2.4.1", False),
+        RangeRecord(CNA_AFFECTED, "Acme", "Server", "3.0", True, "3.9", False),
+        RangeRecord(CNA_AFFECTED, "Acme", "Client", None, None, "5.1", False),
+    ]  # "Many" has two exclusions that one range cannot express: no range rather than a wrong one
+    assert record.workarounds == [WorkaroundRecord("Upgrade to 2.4.1.", "cna")]
+
+
+def test_clone_files_lists_cve_files(tmp_path: Path) -> None:
+    (tmp_path / "cves" / "2026" / "0xxx").mkdir(parents=True)
+    (tmp_path / "cves" / "2026" / "0xxx" / "CVE-2026-0001.json").write_text("{}")
+    (tmp_path / "cves" / "2026" / "0xxx" / "notes.txt").write_text("")
+    assert [p.name for p in clone_files(tmp_path)] == ["CVE-2026-0001.json"]
 
 
 def test_rejected_and_invalid_documents_are_skipped() -> None:
