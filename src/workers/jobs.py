@@ -15,6 +15,7 @@ from datetime import UTC, datetime, timedelta
 
 from sqlalchemy.orm import Session, sessionmaker
 
+from core.calibration.proposals import run_weekly
 from core.config import Settings
 from core.itop.client import reader_from_settings
 from core.itop.outbox import ItopOutboxWorker, writer_from_settings
@@ -75,9 +76,27 @@ class NightlyJob:
             evaluate(session, day, now)
 
 
+@dataclass
+class WeeklyCalibrationJob:
+    """Mode 4 in supervised mode (D-020): writes this week's proposals and applies none. It checks daily and the
+    job itself skips a week that already has a run, so a restart never doubles the proposals."""
+
+    session_factory: sessionmaker[Session]
+    clock: Callable[[], datetime] = field(default=lambda: datetime.now(UTC))
+
+    def __call__(self) -> None:
+        with self.session_factory() as session, session.begin():
+            result = run_weekly(session, self.clock())
+        if result.run_id is not None:
+            log.info("calibration: %d proposal(s) waiting for approval", len(result.created))
+
+
 def build_jobs(settings: Settings, session_factory: sessionmaker[Session]) -> list[PeriodicJob]:
     """The nightly metrics always; the iTop jobs only when iTop is configured."""
-    jobs = [PeriodicJob("nightly_metrics", NIGHTLY_SECONDS, NightlyJob(session_factory))]
+    jobs = [
+        PeriodicJob("nightly_metrics", NIGHTLY_SECONDS, NightlyJob(session_factory)),
+        PeriodicJob("weekly_calibration", NIGHTLY_SECONDS, WeeklyCalibrationJob(session_factory)),
+    ]
     if settings.itop_url is None or settings.itop_token is None:
         log.info("iTop is not configured: the ticket jobs are off")
         return jobs

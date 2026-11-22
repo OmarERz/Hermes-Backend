@@ -1,0 +1,23 @@
+meta {
+  name: proposals
+  type: http
+  seq: 1
+}
+
+get {
+  url: {{baseUrl}}/api/calibration/proposals
+  body: none
+  auth: bearer
+}
+
+auth:bearer {
+  token: {{token}}
+}
+
+assert {
+  res.status: eq 200
+}
+
+docs {
+  Mode 4 proposals (supervised): weight and source-level changes with their evidence and 30-day replay.
+}

@@ -10,6 +10,7 @@ from pydantic import SecretStr
 
 from api.app import create_app
 from api.auth import CurrentUser, Role, get_current_user
+from api.routes import samples
 from api.routes._auth import ROUTE_ROLES
 from core.config import Settings
 
@@ -94,7 +95,6 @@ GET_SAMPLES = [
     "/api/tickets",
     "/api/alerts",
     "/api/runs",
-    "/api/calibration/proposals",
     "/api/metrics",
     "/api/notifications/events",
     "/api/connections/status",
@@ -231,9 +231,6 @@ def test_runs_stix_calibration_and_notifications(client: TestClient) -> None:
     assert (
         client.post("/api/stix/export", json={"scope": "run"}).status_code == 422
     )  # scope data checked before the database
-    assert client.post("/api/calibration/proposals/cal-1/approve").json()["status"] == "approved"
-    assert client.post("/api/calibration/proposals/cal-1/reject").json()["status"] == "rejected"
-    assert client.post("/api/calibration/proposals/zzz/approve").status_code == 404
     assert client.post("/api/notifications/events/evt-1/retry").json()["status"] == "pending"
     assert client.post("/api/notifications/events/zzz/retry").status_code == 404
     assert client.post("/api/connections/test", json={"names": ["itop"]}).json()[0]["name"] == "itop"
@@ -243,24 +240,17 @@ def test_runs_stix_calibration_and_notifications(client: TestClient) -> None:
     assert client.get("/api/recommendations/asm-0002/feedback").json() == []
 
 
-def test_decided_proposal_and_non_error_event_conflict() -> None:
-    from api.routes import operations, samples  # noqa: PLC0415 - patched sample data
-
-    decided = samples.PROPOSALS[0].model_copy(update={"status": "approved"})
+def test_non_error_event_conflict() -> None:
     delivered = samples.NOTIFICATION_EVENTS[0].model_copy(update={"status": "delivered"})
-    original = (list(samples.PROPOSALS), list(samples.NOTIFICATION_EVENTS))
+    original = list(samples.NOTIFICATION_EVENTS)
     try:
-        samples.PROPOSALS[:] = [decided]
         samples.NOTIFICATION_EVENTS[:] = [delivered]
         as_role(Role.ADMIN)
         with TestClient(APP) as test_client:
-            assert test_client.post("/api/calibration/proposals/cal-1/approve").status_code == 409
             assert test_client.post("/api/notifications/events/evt-1/retry").status_code == 409
     finally:
-        samples.PROPOSALS[:] = original[0]
-        samples.NOTIFICATION_EVENTS[:] = original[1]
+        samples.NOTIFICATION_EVENTS[:] = original
         APP.dependency_overrides.clear()
-    assert operations.router
 
 
 def test_openapi_documents_error_envelope_for_every_route() -> None:

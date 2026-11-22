@@ -75,9 +75,10 @@ def test_a_stop_during_a_round_skips_the_remaining_jobs() -> None:
     assert runs == ["a"]
 
 
-def test_without_itop_only_the_nightly_metrics_run() -> None:
+def test_without_itop_only_the_nightly_metrics_and_the_calibration_run() -> None:
     assert [(job.name, job.interval) for job in build_jobs(SETTINGS, MagicMock())] == [
-        ("nightly_metrics", NIGHTLY_SECONDS)
+        ("nightly_metrics", NIGHTLY_SECONDS),
+        ("weekly_calibration", NIGHTLY_SECONDS),
     ]
 
 
@@ -86,6 +87,7 @@ def test_with_itop_the_outbox_and_the_sync_run() -> None:
     jobs = build_jobs(settings, MagicMock())
     assert [(job.name, job.interval) for job in jobs] == [
         ("nightly_metrics", NIGHTLY_SECONDS),
+        ("weekly_calibration", NIGHTLY_SECONDS),
         ("itop_outbox", ITOP_OUTBOX_SECONDS),
         ("ticket_sync", TICKET_SYNC_SECONDS),
     ]
