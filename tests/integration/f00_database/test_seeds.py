@@ -44,7 +44,11 @@ def test_scenario_commits(migrated: str, scenario: str) -> None:
             assert session.scalar(select(func.count()).select_from(m.JudgeReasonType)) == 9
             assert session.scalar(select(func.count()).select_from(m.SettingDefinition)) > 30
             findings = session.scalar(select(func.count()).select_from(m.Finding))
-            assert findings == (0 if scenario == "empty" else 2)
+            assert findings == {"empty": 0, "demo": 2, "edge": 4}[scenario]
+            keys = set(session.scalars(select(m.SettingDefinition.key)))
+            assert {"mode4.weekly_limit", "mode4.cooldown_weeks", "mode4.block_weeks"} <= keys
+            assert {"reliability.window_days", "reliability.min_resolved", "reliability.raise"} <= keys
+            assert "reliability.lower" in keys
     finally:
         engine.dispose()
 
@@ -55,7 +59,20 @@ def test_demo_group_is_active_and_edge_has_inventory_issues(migrated: str) -> No
         with Session(engine) as session, session.begin():
             seed(session, "edge")
         with engine.connect() as conn:
-            assert conn.execute(text("SELECT status FROM finding_group_status")).scalar_one() == "active"
+            statuses = conn.execute(text("SELECT status FROM finding_group_status")).scalars().all()
+            assert statuses == ["active", "active"]
+            # The orphan CI and the CVE without CVSS reach evaluation: both have findings.
+            edge_findings = conn.execute(
+                text(
+                    "SELECT a.name, g.cve_id FROM finding f JOIN finding_group g ON g.id = f.finding_group_id "
+                    "JOIN installed_software i ON i.id = f.installed_software_id JOIN asset a ON a.id = i.asset_id "
+                    "WHERE g.cve_id = 'CVE-2026-10002' ORDER BY a.name"
+                )
+            ).all()
+            assert [tuple(r) for r in edge_findings] == [
+                ("srv-pagos-01", "CVE-2026-10002"),
+                ("srv-sin-custodio", "CVE-2026-10002"),
+            ]
             issues = {r[0] for r in conn.execute(text("SELECT issue FROM inventory_issue"))}
         assert {"software_unmapped", "exposure_unknown", "unclassified", "owner_missing", "custodian_missing"} <= issues
     finally:

@@ -132,8 +132,33 @@ SETTINGS: list[tuple[str, str, str, Any, Any, Any, str, str, str]] = [
     ("critical_reserve", "budget", "decimal", "0.20", "0", "1", "validated", "admin", "Reserva para lo crítico"),
     ("complex_reasoning_mode", "judge", "bool", False, None, None, "validated", "admin", "Modo de razonamiento"),
     ("mode4_autonomous", "calibration", "bool", False, None, None, "validated", "admin", "Modo 4 autónomo"),
+    (
+        "mode4.weekly_limit",
+        "calibration",
+        "decimal",
+        "0.10",
+        "0",
+        "1",
+        "validated",
+        "admin",
+        "Límite semanal del modo 4",
+    ),
+    ("mode4.cooldown_weeks", "calibration", "int", 2, 0, 52, "validated", "admin", "Semanas de enfriamiento"),
+    ("mode4.block_weeks", "calibration", "int", 8, 0, 52, "validated", "admin", "Semanas de bloqueo"),
     ("reliability.window_days", "sources", "int", 180, 30, 730, "validated", "admin", "Ventana de confiabilidad"),
     ("reliability.min_resolved", "sources", "int", 20, 1, 1000, "validated", "admin", "Afirmaciones mínimas"),
+    (
+        "reliability.raise",
+        "sources",
+        "decimal",
+        "0.85",
+        "0",
+        "1",
+        "validated",
+        "admin",
+        "Tasa para subir confiabilidad",
+    ),
+    ("reliability.lower", "sources", "decimal", "0.5", "0", "1", "validated", "admin", "Tasa para bajar confiabilidad"),
     ("default_team", "tickets", "text", "Seguridad", None, None, "validated", "admin", "Equipo por defecto (P-020)"),
     (
         "human_ticket_suggestions",
@@ -340,36 +365,63 @@ def _inventory(session: Session, *, edge: bool) -> None:
     session.add_all([run, group])
     session.flush()
     for inst in installs:
-        finding = m.Finding(
-            id=_id(), finding_group_id=group.id, installed_software_id=inst.id, match_source="nvd_cpe", created_at=NOW
-        )
-        session.add(finding)
-        session.flush()
-        session.add(
-            m.FindingStatusChange(
-                id=_id(),
-                finding_id=finding.id,
-                run_id=run.id,
-                status="new",
-                observed_version=inst.version,
-                changed_at=NOW,
-            )
-        )
+        _add_finding(session, group, inst, run)
     if edge:
-        orphan = m.Asset(
-            id=_id(),
-            itop_ci_id="CI-3",
-            itop_class="Server",
-            name="srv-sin-custodio",
-            criticality="unknown",
-            exposed=None,
-            confidentiality="unclassified",
-            personal_data=None,
-            synced_at=NOW,
+        _edge_cases(session, product, payments, run)
+
+
+def _add_finding(session: Session, group: m.FindingGroup, inst: m.InstalledSoftware, run: m.Run) -> None:
+    finding = m.Finding(
+        id=_id(), finding_group_id=group.id, installed_software_id=inst.id, match_source="nvd_cpe", created_at=NOW
+    )
+    session.add(finding)
+    session.flush()
+    session.add(
+        m.FindingStatusChange(
+            id=_id(), finding_id=finding.id, run_id=run.id, status="new", observed_version=inst.version, changed_at=NOW
         )
-        session.add(orphan)
-        session.add(m.Cve(id="CVE-2026-10002", description="CVE sin CVSS publicado", published_at=NOW, fetched_at=NOW))
-        session.add(m.SoftwareProduct(id=_id(), itop_name="Software sin mapeo CPE", first_seen_at=NOW))
+    )
+
+
+def _edge_cases(session: Session, product: m.SoftwareProduct, payments: m.Asset, run: m.Run) -> None:
+    """Boundary cases that still flow through evaluation (docs/04 §2, docs/06 §8)."""
+    # A CI without custodian or classification: its finding goes to the default team with neutral context.
+    orphan = m.Asset(
+        id=_id(),
+        itop_ci_id="CI-3",
+        itop_class="Server",
+        name="srv-sin-custodio",
+        criticality="unknown",
+        exposed=None,
+        confidentiality="unclassified",
+        personal_data=None,
+        synced_at=NOW,
+    )
+    session.add(orphan)
+    session.flush()
+    orphan_install = m.InstalledSoftware(
+        id=_id(),
+        itop_instance_id="SI-3",
+        asset_id=orphan.id,
+        software_product_id=product.id,
+        version="3.0.7",
+        synced_at=NOW,
+    )
+    payments_install = session.scalars(
+        select(m.InstalledSoftware).where(m.InstalledSoftware.asset_id == payments.id)
+    ).one()
+    session.add(orphan_install)
+    # A CVE without CVSS: scored with the s_without_cvss fallback.
+    no_cvss = m.Cve(id="CVE-2026-10002", description="CVE sin CVSS publicado", published_at=NOW, fetched_at=NOW)
+    session.add(no_cvss)
+    session.flush()
+    group = m.FindingGroup(id=_id(), cve_id=no_cvss.id, software_product_id=product.id, created_at=NOW)
+    session.add(group)
+    session.flush()
+    _add_finding(session, group, orphan_install, run)
+    _add_finding(session, group, payments_install, run)
+    # A product without a CPE mapping: the scan cannot match it and reports it as unmapped.
+    session.add(m.SoftwareProduct(id=_id(), itop_name="Software sin mapeo CPE", first_seen_at=NOW))
 
 
 def seed(session: Session, scenario: str) -> None:
