@@ -11,25 +11,41 @@ from __future__ import annotations
 
 import logging
 import uuid
-from collections.abc import Iterable, Mapping
+from collections.abc import Callable, Iterable, Mapping
 from dataclasses import dataclass
 from datetime import datetime
+from decimal import Decimal
 from typing import Any
 
 from sqlalchemy import or_, select, text
 from sqlalchemy.orm import Session
 
 from core.db.ids import new_id
-from core.db.models import Asset, CompanyProfile, ErrorQueue, JudgeReason, LlmReview, MitigationDraftStep
+from core.db.models import (
+    Alert,
+    AlertAsset,
+    Asset,
+    CompanyProfile,
+    ErrorQueue,
+    InstalledSoftware,
+    JudgeReason,
+    LlmReview,
+    MitigationDraftStep,
+    SoftwareProduct,
+    VerifiedRelationship,
+)
 from core.judge.catalog import MORE_CRITICAL_ASSET, JudgeSettings, SensitivityProfile
+from core.judge.mode2 import AlertDecision, relation_identity
 from core.judge.session import Failure, ReviewOutcome, ReviewStatus
 
 logger = logging.getLogger(__name__)
 
 AGENT = "judge"
-MODE_SCORING = "scoring"
-QUEUED_FAILURES = frozenset({Failure.TRANSPORT, Failure.REQUEST, Failure.FORMAT, Failure.BUDGET})
+# LIMIT reaches the queue only from mode 2, where hitting the limits means no decision; a mode 1 review that hit
+# them still answered (partial_review with its accepted reasons) and its callers pass no failure.
+QUEUED_FAILURES = frozenset({Failure.TRANSPORT, Failure.REQUEST, Failure.FORMAT, Failure.BUDGET, Failure.LIMIT})
 QUEUE_RETRIES = 2  # PRE-01: retried in the next 2 runs, then pending in the front
+MODE2_MIN_CONFIDENCE = "mode2.min_confidence"
 _SETTING_KEYS = (
     "judge_model",
     "judge.max_calls",
@@ -57,10 +73,12 @@ class ReviewTarget:
 def load_judge_settings(session: Session) -> tuple[JudgeSettings, SensitivityProfile]:
     """Current values of the judge parameters (view setting_current, docs/11 §2) and the output language."""
     rows = session.execute(
-        text("SELECT setting_key, value FROM setting_current WHERE setting_key = ANY(:keys)"),
-        {"keys": list(_SETTING_KEYS)},
+        text("SELECT setting_key, value, is_default FROM setting_current WHERE setting_key = ANY(:keys)"),
+        {"keys": [*_SETTING_KEYS, MODE2_MIN_CONFIDENCE]},
     ).all()
-    values: dict[str, Any] = dict(rows)
+    values: dict[str, Any] = {key: value for key, value, _default in rows}
+    # mode2.min_confidence follows the profile unless an admin set it explicitly (docs/07 §12, docs/11)
+    explicit_mode2 = next((value for key, value, default in rows if key == MODE2_MIN_CONFIDENCE and not default), None)
     language = session.scalar(select(CompanyProfile.output_language).limit(1)) or JudgeSettings.output_language
     defaults = JudgeSettings()
     settings = JudgeSettings(
@@ -71,6 +89,7 @@ def load_judge_settings(session: Session) -> tuple[JudgeSettings, SensitivityPro
         double_review_threshold=int(values.get("double_review_threshold", defaults.double_review_threshold)),
         double_review_max_diff=int(values.get("double_review_max_diff", defaults.double_review_max_diff)),
         output_language=str(language),
+        mode2_min_confidence=Decimal(str(explicit_mode2)) if explicit_mode2 is not None else None,
     )
     return settings, SensitivityProfile.named(str(values.get("sensitivity_profile", "normal")))
 
@@ -125,6 +144,8 @@ def sync_error_queue(
     package is waiting for a retry."""
     if review_package_id is None:
         return False
+    # serialize concurrent reviews of the same package until commit, so only one entry is ever created
+    session.execute(text("SELECT pg_advisory_xact_lock(hashtext(:key))"), {"key": f"judge-queue:{review_package_id}"})
     entry = session.scalars(
         select(ErrorQueue)
         .where(ErrorQueue.review_package_id == review_package_id, ErrorQueue.status.in_(("pending", "gave_up")))
@@ -146,8 +167,8 @@ def sync_error_queue(
             created_at=now,
         )
         session.add(entry)
-    elif entry.status == "pending":
-        entry.attempts += 1
+    elif entry.status == "pending" and (entry.next_attempt_at is None or now > entry.next_attempt_at):
+        entry.attempts += 1  # one attempt per run: failures of the same run (same `now`) count once
     entry.reason = f"judge {failure}"
     entry.next_attempt_at = now
     if entry.attempts >= QUEUE_RETRIES:
@@ -160,7 +181,7 @@ def _review_columns(outcome: ReviewOutcome, target: ReviewTarget, status: Review
     mitigation = outcome.mitigation
     return {
         "agent": AGENT,
-        "mode": MODE_SCORING,
+        "mode": outcome.mode,
         "review_package_id": target.review_package_id,
         "model": outcome.model,
         "response_model": {"model": outcome.response_model},
@@ -243,3 +264,79 @@ def _uuid(value: str) -> uuid.UUID | None:
         return uuid.UUID(value)
     except ValueError:
         return None
+
+
+# --- mode 2 ----------------------------------------------------------------------------------------------------
+class DbInventory:
+    """The `Inventory` of mode 2 over the iTop cache: active assets and what they currently run."""
+
+    def __init__(self, session: Session) -> None:
+        self._session = session
+
+    def find_asset(self, ci_id: str) -> uuid.UUID | None:
+        asset_id = resolve_assets(self._session, [ci_id]).get(ci_id)
+        if asset_id is None:
+            return None
+        decommissioned = self._session.scalar(select(Asset.decommissioned_at).where(Asset.id == asset_id))
+        return asset_id if decommissioned is None else None
+
+    def products(self, asset_id: uuid.UUID) -> list[tuple[uuid.UUID, str]]:
+        rows = self._session.execute(
+            select(InstalledSoftware.id, SoftwareProduct.itop_name)
+            .join(SoftwareProduct, SoftwareProduct.id == InstalledSoftware.software_product_id)
+            .where(InstalledSoftware.asset_id == asset_id, InstalledSoftware.removed_at.is_(None))
+            .order_by(SoftwareProduct.itop_name)
+        ).all()
+        return [(software_id, name) for software_id, name in rows]
+
+
+def refuted_relationships(session: Session) -> Callable[[str, str, str], bool]:
+    """Relationships a person refuted (verified_relationship): mode 2 never proposes them again (docs/07 §7). The type
+    and each end are compared separately by identity (`relation_identity`), so 'Nginx Proxy Manager' is not 'Nginx'."""
+    rows = session.execute(
+        select(VerifiedRelationship.relationship_type, VerifiedRelationship.subject, VerifiedRelationship.object).where(
+            VerifiedRelationship.status == "refuted"
+        )
+    ).all()
+    refuted = {
+        (str(kind).casefold(), relation_identity(str(sub)), relation_identity(str(obj))) for kind, sub, obj in rows
+    }
+    return lambda kind, subject, obj: (kind.casefold(), subject, obj) in refuted
+
+
+def save_alert(session: Session, decision: AlertDecision, review_id: uuid.UUID, now: datetime) -> uuid.UUID:
+    """One alert per story (L15 deduplication): any alert the story already has (from correlation or the judge) is
+    reused."""
+    story_id = uuid.UUID(decision.story_id)
+    # serialize concurrent reviews of the same story until commit, so only one of them creates the alert
+    session.execute(text("SELECT pg_advisory_xact_lock(hashtext(:key))"), {"key": f"judge-alert:{story_id}"})
+    existing = session.scalars(
+        select(Alert.id).where(Alert.story_id == story_id).order_by(Alert.created_at).limit(1)
+    ).one_or_none()
+    if existing is not None:
+        return existing
+    alert = Alert(
+        id=new_id(),
+        story_id=story_id,
+        relevance=decision.relevance,
+        relationship_type=decision.relationship_type,
+        relationship_detail=decision.relationship,
+        verification_action=decision.verification_action,
+        confidence=decision.confidence,
+        llm_review_id=review_id,
+        status="open",
+        created_at=now,
+    )
+    session.add(alert)
+    session.flush()
+    if decision.asset_id is not None:
+        session.add(
+            AlertAsset(
+                alert_id=alert.id,
+                asset_id=decision.asset_id,
+                installed_software_id=decision.installed_software_id,
+                version_confirmed=False,  # an inferred relationship never confirms the version (E = 0.6)
+            )
+        )
+        session.flush()
+    return alert.id

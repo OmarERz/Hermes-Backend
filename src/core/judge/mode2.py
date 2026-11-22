@@ -18,6 +18,7 @@ The judge never writes iTop or Slack (L8): this module only decides; persistence
 from __future__ import annotations
 
 import re
+import unicodedata
 import uuid
 from collections.abc import Callable, Mapping, Sequence
 from dataclasses import dataclass, replace
@@ -72,7 +73,7 @@ class EmptyInventory:
         return ()
 
 
-def _never_refuted(_relationship_type: str, _text: str) -> bool:
+def _never_refuted(_relationship_type: str, _subject: str, _object: str) -> bool:
     return False
 
 
@@ -80,9 +81,8 @@ def _never_refuted(_relationship_type: str, _text: str) -> bool:
 class Mode2Context:
     min_confidence: Decimal
     inventory: Inventory
-    # (relationship type, casefolded relationship text + cited product) -> a person refuted a relationship of that
-    # type whose two ends both appear in the text, however it is phrased (docs/07 §7)
-    refuted: Callable[[str, str], bool] = _never_refuted
+    # (relationship type, subject identity, object identity) -> a person refuted it (see `relation_identity`)
+    refuted: Callable[[str, str, str], bool] = _never_refuted
 
 
 @dataclass(frozen=True)
@@ -167,7 +167,7 @@ def _decide(args: Mapping[str, Any], package: ReviewPackage, ctx: Mode2Context) 
     _require(texts_ok, "L7.text", "Faltan la relación explícita o la acción de verificación, o son demasiado largas.")
     product = normalize_text(str(args["cited_product"]))
     _require(
-        not product or _word_in(product, prose, fold=False),
+        not product or _names_product(product, prose),
         "L15.product",
         "El producto citado no aparece textual en la noticia.",
     )
@@ -183,7 +183,13 @@ def _decide(args: Mapping[str, Any], package: ReviewPackage, ctx: Mode2Context) 
     mapped = RELATIONSHIP_TYPES.get(kind)
     subject, obj = relationship_parts(relationship, product)
     explicit = len([p for p in _ARROW.split(relationship) if p]) >= _RELATIONSHIP_ENDS
-    ends_on_product = not product or _word_in(product_name(product), obj)
+    if product:
+        ends_on_product = _word_in(product_name(product), obj)
+    else:  # no cited product: the object's head must not be a stack product the news never names (E11)
+        ends_on_product = not any(
+            (name := product_name(entry)) and _word_in(name, _head(obj)) and not _word_in(name, prose)
+            for entry in package.stack_summary
+        )
     _require(
         mapped is None or (explicit and ends_on_product),
         "L15.relationship",
@@ -191,7 +197,7 @@ def _decide(args: Mapping[str, Any], package: ReviewPackage, ctx: Mode2Context) 
         "noticia.",
     )
     _require(
-        not ctx.refuted(mapped or kind, f"{relationship} {product}".casefold()),
+        not ctx.refuted(mapped or kind, relation_identity(subject), relation_identity(obj)),
         "L15.refuted",
         "Una persona ya refutó esta relación; no se vuelve a proponer.",
     )
@@ -221,19 +227,46 @@ _TRAILING_VERSION = re.compile(r"\s+v?\d[\w.+-]*$")
 
 
 def _in_stack(product: str, stack_summary: Sequence[str]) -> bool:
-    """A `direct` relationship needs the product in the iTop stack ('Nginx 1.24.0' matches 'Nginx' or 'nginx 1.24')."""
-    wanted = product.casefold()
-    for entry in stack_summary:
-        full = normalize_text(entry).casefold()
-        name = _TRAILING_VERSION.sub("", full)
-        if name and (_word_in(name, wanted) or _word_in(wanted, full)):
-            return True
-    return False
+    """A `direct` relationship needs the same product in the iTop stack ('Nginx 1.24.0' is 'Nginx', not 'Nginx Proxy
+    Manager')."""
+    wanted = product_name(product)
+    return bool(wanted) and any(product_name(entry) == wanted for entry in stack_summary)
 
 
-def _word_in(needle: str, text: str, *, fold: bool = True) -> bool:
-    if fold:
-        needle, text = needle.casefold(), text.casefold()
+def _names_product(product: str, prose: str) -> bool:
+    """The product appears as written, as whole words (a fragment of a longer word is not the product)."""
+    return re.search(rf"(?<![\w]){re.escape(product)}(?![\w])", prose) is not None
+
+
+_ARTICLES = frozenset({"el", "la", "los", "las", "un", "una", "the", "a", "an"})
+_CONNECTORS = frozenset({"de", "del", "en", "para", "con", "sobre", "of", "on", "in", "for", "from", "with"})
+
+
+def _head(end: str) -> str:
+    """What an end of a relationship is about: without leading articles, up to the first connector ('el servidor
+    Nginx' -> 'servidor nginx'; 'OpenSSL del sistema operativo Ubuntu' -> 'openssl')."""
+    words = end.casefold().split()
+    while words and words[0] in _ARTICLES:
+        words = words[1:]
+    kept: list[str] = []
+    for word in words:
+        if word in _CONNECTORS:
+            break
+        kept.append(word)
+    return " ".join(kept)
+
+
+def relation_identity(end: str) -> str:
+    """Identity of one end of a relationship, the same on both sides (stored refutations and new proposals): no
+    accents, casefolded, without articles and connectors and without a trailing version. Qualifiers stay:
+    'la OpenSSL del sistema operativo Ubuntu' is 'openssl sistema operativo ubuntu', not the Windows one."""
+    plain = "".join(c for c in unicodedata.normalize("NFKD", end) if not unicodedata.combining(c))
+    words = [w for w in product_name(plain).split() if w not in _ARTICLES and w not in _CONNECTORS]
+    return product_name(" ".join(words))
+
+
+def _word_in(needle: str, text: str) -> bool:
+    needle, text = needle.casefold(), text.casefold()
     return bool(needle) and re.search(rf"(?<![\w]){re.escape(needle)}(?![\w])", text) is not None
 
 
@@ -302,6 +335,12 @@ class DismissalSession(JudgeSession):
         self._last_rule = rule
         return {"result": result, "rule": rule, "reason": reason}, rule, reason
 
+    def _read_element(self, args: Mapping[str, Any]) -> ToolResult:
+        result, rule, reason = super()._read_element(args)
+        if rule is not None:
+            return self._content_rejection("error", rule, str(reason))
+        return result, rule, reason
+
     def _propose_alert(self, args: Mapping[str, Any]) -> ToolResult:
         decision, rule, reason = check_alert(args, self._package, self._mode2)
         if decision is None:
@@ -351,11 +390,20 @@ class Mode2Result:
 
 
 def _same_alert(first: AlertDecision, second: AlertDecision) -> bool:
-    """The blind review corroborates the alert: same relevance, type, CI, cited product and ticketing installation."""
+    """The blind review corroborates the alert: same story, relevance, type, CI, cited product, both ends of the
+    relationship and ticketing installation."""
 
     def key(alert: AlertDecision) -> tuple[object, ...]:
-        product = product_name(alert.cited_product or "")
-        return (alert.relevance, alert.relationship_type, alert.asset_id, product, alert.installed_software_id)
+        return (
+            alert.story_id,
+            alert.relevance,
+            alert.relationship_type,
+            alert.asset_id,
+            relation_identity(alert.cited_product or ""),
+            relation_identity(alert.subject),
+            relation_identity(alert.object),
+            alert.installed_software_id,
+        )
 
     return key(first) == key(second)
 
@@ -375,8 +423,8 @@ def review_candidate(
     if first.status is not ReviewStatus.APPLIED or not suspicious:
         return Mode2Result(first.status, first, alert=first.alert, dismissal=first.dismissal)
     second = DismissalSession(caller, package, env, mode2, tools).run()
-    if second.status is ReviewStatus.NO_JUDGE_REVIEW:
-        return Mode2Result(ReviewStatus.NO_JUDGE_REVIEW, first, second)
+    if second.status in (ReviewStatus.NO_JUDGE_REVIEW, ReviewStatus.PARTIAL_REVIEW):  # no decision to compare
+        return Mode2Result(second.status, first, second)
     if first.alert is not None and second.alert is not None and _same_alert(first.alert, second.alert):
         return Mode2Result(ReviewStatus.APPLIED, first, second, alert=first.alert)
     if first.dismissal is not None and second.dismissal is not None:

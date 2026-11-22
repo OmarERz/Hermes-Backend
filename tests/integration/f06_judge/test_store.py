@@ -2,9 +2,10 @@
 
 from __future__ import annotations
 
+import threading
 import uuid
 from collections.abc import Iterator
-from datetime import UTC, date, datetime
+from datetime import UTC, date, datetime, timedelta
 from pathlib import Path
 from typing import Any
 
@@ -193,7 +194,7 @@ def test_fallback_is_stored(engine: Engine) -> None:
         (Failure.FORMAT, True),
         (Failure.BUDGET, True),
         (Failure.LADDER, False),
-        (Failure.LIMIT, False),
+        (Failure.LIMIT, True),  # only mode 2 passes it: limits without a decision
         (None, False),
     ],
 )
@@ -209,18 +210,24 @@ def test_which_failures_are_queued(engine: Engine, failure: Failure | None, queu
         assert sync_error_queue(session, None, failure, NOW) is False
 
 
+def later(hours: int) -> datetime:
+    """The `now` of a later run."""
+    return NOW + timedelta(hours=hours)
+
+
 def test_queue_counts_attempts_gives_up_and_resolves(engine: Engine) -> None:
     with Session(engine) as session, session.begin():
         package_id = package_row(session, finding_package())
         assert sync_error_queue(session, package_id, Failure.TRANSPORT, NOW)
-        assert sync_error_queue(session, package_id, Failure.FORMAT, NOW)  # one entry, attempt 1
-        assert not sync_error_queue(session, package_id, Failure.TRANSPORT, NOW)  # attempt 2: given up
+        assert sync_error_queue(session, package_id, Failure.TRANSPORT, NOW)  # same run: still attempt 0
+        assert sync_error_queue(session, package_id, Failure.FORMAT, later(1))  # next run: attempt 1
+        assert not sync_error_queue(session, package_id, Failure.TRANSPORT, later(2))  # attempt 2: given up
         entry = session.scalars(select(m.ErrorQueue).where(m.ErrorQueue.review_package_id == package_id)).one()
         assert (entry.attempts, entry.status, entry.reason) == (2, "gave_up", "judge transport")
         other = package_row(session, finding_package())
         sync_error_queue(session, other, Failure.TRANSPORT, NOW)
         sync_error_queue(session, other, Failure.LADDER, NOW)  # skipped on purpose: still pending
-        assert sync_error_queue(session, other, Failure.LIMIT, NOW) is False  # partial answer resolves it
+        assert sync_error_queue(session, other, None, NOW) is False  # an answer resolves it
         resolved = session.scalars(select(m.ErrorQueue).where(m.ErrorQueue.review_package_id == other)).one()
         assert resolved.status == "resolved"
 
@@ -228,9 +235,9 @@ def test_queue_counts_attempts_gives_up_and_resolves(engine: Engine) -> None:
 def test_a_given_up_entry_stays_single_and_is_resolved_by_a_later_success(engine: Engine) -> None:
     with Session(engine) as session, session.begin():
         package_id = package_row(session, finding_package())
-        for _ in range(3):
-            sync_error_queue(session, package_id, Failure.TRANSPORT, NOW)
-        assert not sync_error_queue(session, package_id, Failure.FORMAT, NOW)  # still given up, no new row
+        for hours in range(3):
+            sync_error_queue(session, package_id, Failure.TRANSPORT, later(hours))
+        assert not sync_error_queue(session, package_id, Failure.FORMAT, later(3))  # still given up, no new row
         entries = session.scalars(select(m.ErrorQueue).where(m.ErrorQueue.review_package_id == package_id)).all()
         assert [(e.status, e.attempts, e.reason) for e in entries] == [("gave_up", 2, "judge format")]
         assert not sync_error_queue(session, package_id, None, NOW)
@@ -301,3 +308,29 @@ def test_settings_come_from_setting_current(engine: Engine) -> None:
         settings, profile = load_judge_settings(session)
         assert settings.double_review_threshold == 12
         assert profile.name.value == "minimal"
+
+
+def test_two_concurrent_failures_create_one_queue_entry(engine: Engine) -> None:
+
+    with Session(engine) as session, session.begin():
+        package_id = package_row(session, finding_package())
+    first = Session(engine)
+    first.begin()
+    assert sync_error_queue(first, package_id, Failure.TRANSPORT, NOW)  # holds the package lock until commit
+    done: list[bool] = []
+
+    def second() -> None:
+        with Session(engine) as other, other.begin():
+            done.append(sync_error_queue(other, package_id, Failure.TRANSPORT, NOW))
+
+    worker = threading.Thread(target=second)
+    worker.start()
+    worker.join(timeout=1)
+    assert worker.is_alive()  # blocked by the advisory lock
+    first.commit()
+    first.close()
+    worker.join(timeout=10)
+    assert done == [True]
+    with Session(engine) as session:
+        entries = session.scalars(select(m.ErrorQueue).where(m.ErrorQueue.review_package_id == package_id)).all()
+        assert [(e.status, e.attempts) for e in entries] == [("pending", 0)]  # same run: one attempt

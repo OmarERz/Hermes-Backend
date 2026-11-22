@@ -20,6 +20,7 @@ from core.judge.mode2 import (
     Mode2Context,
     check_alert,
     mode2_min_confidence,
+    relation_identity,
     relationship_parts,
     review_candidate,
 )
@@ -119,6 +120,14 @@ def test_e11_an_inferred_claim_that_nginx_is_affected_is_rejected() -> None:
     for relationship in ("Nginx está afectado", "OpenSSL → afecta → Nginx"):
         _none, rule, _reason = check_alert(alert_args(relationship=relationship), package(), ctx())
         assert rule == "L15.relationship"
+    for relationship in ("OpenSSL → afecta → Nginx", "OpenSSL → afecta → el servidor Nginx"):
+        _none, rule, _reason = check_alert(alert_args(relationship=relationship, cited_product=""), package(), ctx())
+        assert rule == "L15.relationship"  # about a stack product the news never names
+    fine, rule, _reason = check_alert(
+        alert_args(relationship="Ubuntu → incluye → libssl del sistema", cited_product=""), package(), ctx()
+    )
+    assert rule is None
+    assert fine is not None
 
 
 def test_a_product_named_as_part_of_another_name_is_not_the_same_product() -> None:
@@ -134,6 +143,17 @@ def test_a_product_named_as_part_of_another_name_is_not_the_same_product() -> No
     assert not decision.ticket_eligible  # Nginx is not Nginx Proxy Manager
     _none, rule, _reason = check_alert(alert_args(cited_product="OpenSS"), package(), ctx())
     assert rule == "L15.product"  # a fragment of a word is not the product named in the news
+    direct = alert_args(relationship_type="direct", cited_product="Nginx Proxy Manager")
+    _none, rule, _reason = check_alert(direct, package(content), ctx())
+    assert rule == "L15.direct"  # Nginx Proxy Manager is not the Nginx of the stack
+
+
+def test_a_product_followed_by_a_capitalized_word_is_still_named() -> None:
+    content = dismissal_package()
+    content["news"][0]["summary"] += " See the OpenSSL Security Advisory."
+    decision, rule, _reason = check_alert(alert_args(cited_product="OpenSSL"), package(content), ctx())
+    assert rule is None
+    assert decision is not None
 
 
 def test_e11_nginx_is_affected_is_rejected() -> None:
@@ -163,11 +183,12 @@ def test_ticket_only_with_a_cited_ci_whose_product_the_news_names() -> None:
     assert other is not None
     assert not other.ticket_eligible  # the news names Nginx, but the alert cites OpenSSL
     assert other.installed_software_id is None
-    no_product, _rule, _reason = check_alert(
+    no_product, rule, _reason = check_alert(
         alert_args(ci_id="CI-7", cited_product=""), package(), ctx(inventory=inventory)
     )
+    assert rule is None
     assert no_product is not None
-    assert not no_product.ticket_eligible
+    assert not no_product.ticket_eligible  # allowed by the contract, but never a ticket
 
 
 def test_direct_relationship_needs_a_stack_product_named_in_the_news() -> None:
@@ -239,18 +260,41 @@ def test_minimum_confidence_follows_the_profile_or_the_explicit_setting() -> Non
     assert mode2_min_confidence(explicit) == Decimal("0.75")
 
 
-def test_a_refuted_relationship_is_not_proposed_again_however_it_is_phrased() -> None:
+def test_a_refuted_relationship_is_not_proposed_again() -> None:
     refuted_rows = {("component", "nginx", "openssl")}
 
-    def refuted(kind: str, text: str) -> bool:
-        return any(kind == k and a in text and b in text for k, a, b in refuted_rows)
+    def refuted(kind: str, subject: str, obj: str) -> bool:
+        return (kind, subject, obj) in refuted_rows
 
-    for phrasing in ("Nginx → usa → OpenSSL del sistema operativo Ubuntu", "Nginx → depende de → la OpenSSL del SO"):
+    for phrasing in ("Nginx → usa → OpenSSL", "Nginx → usa → la OpenSSL 3.x", "Nginx → depende de → OpenSSL"):
         _none, rule, _reason = check_alert(alert_args(relationship=phrasing), package(), ctx(refuted=refuted))
         assert rule == "L15.refuted"
+    windows = alert_args(relationship="Nginx → usa → OpenSSL del sistema operativo Windows")
+    assert check_alert(windows, package(), ctx(refuted=refuted))[1] is None  # another component
     decision, rule, _reason = check_alert(
         alert_args(relationship_type="inferred_fork"), package(), ctx(refuted=refuted)
     )
+    assert rule is None
+    assert decision is not None
+    other = alert_args(relationship="Nginx Proxy Manager → usa → OpenSSL")
+    assert check_alert(other, package(), ctx(refuted=refuted))[1] is None  # another subject
+
+
+def test_relation_identity() -> None:
+    assert relation_identity("OpenSSL 3.x") == "openssl"
+    assert relation_identity("la OpenSSL del sistema operativo Ubuntu") == "openssl sistema operativo ubuntu"
+    assert relation_identity("OpenSSL del sistema operativo Windows") == "openssl sistema operativo windows"
+    assert relation_identity("  Señal   Ágil 2.0 ") == "senal agil"
+    assert relation_identity("Nginx Proxy Manager") == "nginx proxy manager"
+
+
+def test_a_stack_product_that_only_shares_a_prefix_does_not_block() -> None:
+    content = dismissal_package(
+        profile_summary={"sector": "x", "countries": [], "peer_companies": [], "stack_summary": ["Go 1.22"]}
+    )
+    content["news"][0]["summary"] += " Google Chrome bundles it."
+    args = alert_args(relationship="Google Chrome → incluye → BoringSSL", cited_product="")
+    decision, rule, _reason = check_alert(args, package(content), ctx())
     assert rule is None
     assert decision is not None
 
@@ -400,12 +444,28 @@ def test_the_blind_review_must_corroborate_product_and_ticketing_installation() 
     content["news"][0]["suspicious"] = True
     inventory = FakeInventory({NGINX_ASSET: [(OPENSSL_SOFTWARE, "OpenSSL")]})
     double = LlmDouble()
-    double.add_case(
-        "case", [propose({**INFERRED, "ci_id": "CI-7"}), propose({**INFERRED, "ci_id": "CI-7", "cited_product": ""})]
-    )
+    double.add_case("case", [propose({**INFERRED, "ci_id": "CI-7"}), propose(INFERRED, "b")])
     double.use("case")
     result = review_candidate(double_llm_client(double), package(content), env(), ctx(inventory=inventory))
-    assert result.status is ReviewStatus.JUDGE_DISAGREEMENT  # the second one never backed the ticket
+    assert result.status is ReviewStatus.JUDGE_DISAGREEMENT  # the second one never backed the CI or the ticket
+
+
+def test_the_blind_review_must_corroborate_the_subject() -> None:
+    content = dismissal_package()
+    content["news"][0]["suspicious"] = True
+    other = {**INFERRED, "relationship": "Postfix → usa → OpenSSL 3.x del sistema"}
+    double = LlmDouble()
+    double.add_case("case", [propose(INFERRED), propose(other, "b")])
+    double.use("case")
+    result = review_candidate(double_llm_client(double), package(content), env(), ctx())
+    assert result.status is ReviewStatus.JUDGE_DISAGREEMENT
+
+
+def test_repeated_reads_of_a_missing_element_end_the_review() -> None:
+    read = tool_call_completion("read_element", {"element_id": "N9"}, call_id="r")
+    outcome, double = run([read, read, dismiss()])
+    assert outcome.status is ReviewStatus.PARTIAL_REVIEW
+    double.assert_calls(2)
 
 
 def test_the_same_content_error_twice_ends_the_review() -> None:
@@ -413,3 +473,13 @@ def test_the_same_content_error_twice_ends_the_review() -> None:
     assert outcome.status is ReviewStatus.PARTIAL_REVIEW
     assert outcome.failure is Failure.LIMIT
     double.assert_calls(2)
+
+
+def test_a_partial_blind_review_leaves_the_candidate_undecided() -> None:
+    content = dismissal_package()
+    content["news"][0]["suspicious"] = True
+    double = LlmDouble()
+    double.add_case("case", [propose(INFERRED, "a"), dismiss(news_id="N9"), dismiss(news_id="N9")])
+    double.use("case")
+    result = review_candidate(double_llm_client(double), package(content), env(), ctx())
+    assert (result.status, result.alert) == (ReviewStatus.PARTIAL_REVIEW, None)
