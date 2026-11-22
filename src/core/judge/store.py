@@ -121,14 +121,16 @@ def sync_error_queue(
     session: Session, review_package_id: uuid.UUID | None, failure: Failure | None, now: datetime
 ) -> bool:
     """PRE-01 for one package: queue (or count a new attempt on) a failed review, resolve it after a good one.
-    Returns True when the package is (still) queued."""
+    A given-up entry stays given up (pending in the front) until a later review succeeds. Returns True when the
+    package is waiting for a retry."""
     if review_package_id is None:
         return False
     entry = session.scalars(
         select(ErrorQueue)
-        .where(ErrorQueue.review_package_id == review_package_id, ErrorQueue.status == "pending")
-        .order_by(ErrorQueue.created_at)
+        .where(ErrorQueue.review_package_id == review_package_id, ErrorQueue.status.in_(("pending", "gave_up")))
+        .order_by(ErrorQueue.created_at.desc())
         .limit(1)
+        .with_for_update()
     ).one_or_none()
     if failure not in QUEUED_FAILURES:
         if entry is not None and failure is not Failure.LADDER:  # the judge answered (fully or partially)
@@ -144,7 +146,7 @@ def sync_error_queue(
             created_at=now,
         )
         session.add(entry)
-    else:
+    elif entry.status == "pending":
         entry.attempts += 1
     entry.reason = f"judge {failure}"
     entry.next_attempt_at = now

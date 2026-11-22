@@ -148,5 +148,7 @@ def test_a_failed_second_review_queues_the_package(engine: Engine) -> None:
     assert stored.result.failure is Failure.TRANSPORT
     assert stored.queued
     with Session(engine) as session:
-        assert session.get_one(m.LlmReview, stored.review_id).status == "no_judge_review"
+        first = session.get_one(m.LlmReview, stored.review_id)
+        assert first.status == "no_judge_review"
+        assert first.parameters["failure"] == "transport"  # the cause is on the main L13 record too
         assert session.scalars(select(m.ErrorQueue.status)).all() == ["pending"]

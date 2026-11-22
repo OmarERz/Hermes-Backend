@@ -10,7 +10,7 @@ from __future__ import annotations
 
 import uuid
 from collections.abc import Mapping
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 
 from sqlalchemy.orm import Session
 
@@ -84,7 +84,10 @@ class JudgeService:
         """Evaluate and store: the first review carries the final status, the blind one links to it (A-2); the
         package is queued for a later run when the result fell back to the base (PRE-01)."""
         result = self.evaluate(package)
-        first_id = save_review(session, result.first, target, status=result.status)
+        first = result.first
+        if result.failure is not None and first.failure is None:  # the blind review failed: record the cause
+            first = replace(first, failure=result.failure)
+        first_id = save_review(session, first, target, status=result.status)
         second_id: uuid.UUID | None = None
         if result.second is not None:
             second_id = save_review(session, result.second, target, second_review_of=first_id)

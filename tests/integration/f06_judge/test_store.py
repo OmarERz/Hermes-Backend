@@ -225,6 +225,19 @@ def test_queue_counts_attempts_gives_up_and_resolves(engine: Engine) -> None:
         assert resolved.status == "resolved"
 
 
+def test_a_given_up_entry_stays_single_and_is_resolved_by_a_later_success(engine: Engine) -> None:
+    with Session(engine) as session, session.begin():
+        package_id = package_row(session, finding_package())
+        for _ in range(3):
+            sync_error_queue(session, package_id, Failure.TRANSPORT, NOW)
+        assert not sync_error_queue(session, package_id, Failure.FORMAT, NOW)  # still given up, no new row
+        entries = session.scalars(select(m.ErrorQueue).where(m.ErrorQueue.review_package_id == package_id)).all()
+        assert [(e.status, e.attempts, e.reason) for e in entries] == [("gave_up", 2, "judge format")]
+        assert not sync_error_queue(session, package_id, None, NOW)
+        assert entries[0].status == "resolved"
+        assert sync_error_queue(session, package_id, Failure.TRANSPORT, NOW)  # a new outage opens a new entry
+
+
 def test_second_review_is_linked(engine: Engine) -> None:
     first = run([tool_call_completion("finalize_review", {"summary": "Uno.", "mitigation_steps": []})])
     second = run([])
