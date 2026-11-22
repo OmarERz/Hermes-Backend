@@ -302,3 +302,37 @@ def test_new_news_correlates_each_story_and_commits(session: Session) -> None:
     assert [o.matches[0].match_code for o in outcomes] == ["cve_exact"]
     session.execute(m.Correlation.__table__.delete())
     session.commit()
+
+
+def test_a_scan_with_an_unrelated_group_does_not_turn_a_correlated_story_into_an_alert(session: Session) -> None:
+    story = add_story(
+        session, cves={CVE: "active"}, products=[("openssl", "openssl", None)], event_types=["active_exploitation"]
+    )
+    first = correlate_story(session, story.id, NOW)
+    assert first is not None
+    assert len(first.matches) == 1
+    unrelated = correlate_story(session, story.id, NOW + timedelta(hours=1), groups=[])
+    assert unrelated is not None
+    assert (unrelated.matches, unrelated.alert_id, unrelated.dismissal_candidate) == ([], None, False)
+    assert session.scalar(select(func.count()).select_from(m.Alert)) == 0
+
+
+def test_a_news_item_naming_an_os_in_itop_is_an_r2_alert_on_those_cis(session: Session) -> None:
+    asset = m.Asset(
+        id=new_id(),
+        itop_ci_id="CI-900",
+        itop_class="Server",
+        name="srv-windows",
+        os="Windows Server 2019",
+        criticality="medium",
+        confidentiality="public",
+        synced_at=NOW,
+    )
+    session.add(asset)
+    session.flush()
+    outcome = correlate_story(session, add_story(session, products=[("microsoft", "windows server", "2019")]).id, NOW)
+    assert outcome is not None
+    assert outcome.relevances == {"R2"}
+    assert outcome.alert_id is not None
+    touched = session.scalars(select(m.AlertAsset.asset_id).where(m.AlertAsset.alert_id == outcome.alert_id)).all()
+    assert touched == [asset.id]

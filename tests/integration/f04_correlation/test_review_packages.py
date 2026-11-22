@@ -128,6 +128,10 @@ def test_only_the_five_strongest_and_most_recent_news_go_in(session: Session) ->
     titles = [n["title"] for n in package["news"]]
     assert titles == ["1h", "3h", "5h", "10h", "20h"]  # strength first, then the most recent; the rest are left out
     assert [n["element_id"] for n in package["news"]] == ["N1", "N2", "N3", "N4", "N5"]
+    cut = [m_.story_id for m_ in matches if str(m_.story_id) not in {n["story_id"] for n in package["news"]}]
+    expected = session.scalars(select(m.RawArticle.canonical_url).where(m.RawArticle.story_id.in_(cut))).all()
+    assert len(cut) == 2
+    assert sorted(package["additional_urls"]) == sorted(expected)
     assert errors(package) == []
 
 

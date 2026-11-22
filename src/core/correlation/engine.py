@@ -14,7 +14,7 @@ from dataclasses import dataclass, field
 from datetime import datetime, timedelta
 from typing import Any
 
-from sqlalchemy import select, text
+from sqlalchemy import func, select, text
 from sqlalchemy.orm import Session
 
 from core.correlation.keys import (
@@ -283,6 +283,16 @@ def _actor_history(session: Session, facts: StoryFacts) -> bool:
     return session.scalars(query).first() is not None
 
 
+def _os_asset_ids(session: Session, facts: StoryFacts) -> list[uuid.UUID]:
+    """Live CIs whose operating system is one the news names (family and version)."""
+    rows = session.execute(
+        select(m.Asset.id, m.Asset.os).where(m.Asset.decommissioned_at.is_(None), m.Asset.os.is_not(None))
+    )
+    return [
+        asset_id for asset_id, os_text in rows if any(os_matches(p.product, p.version, os_text) for p in facts.products)
+    ]
+
+
 def _names_of(item: PresentProduct) -> set[str]:
     return {item.itop_name, *(p for _, p in item.vendor_products)}
 
@@ -291,7 +301,9 @@ def story_relevances(session: Session, facts: StoryFacts) -> set[str]:
     """R2 (a product or OS of the news is in iTop), R3 (peer victim, same sector or vector in iTop) and R4."""
     relevances: set[str] = set()
     present = _present_products(session)
-    if any(_mentioned(mention, item) for mention in facts.products for item in present):
+    if any(_mentioned(mention, item) for mention in facts.products for item in present) or _os_asset_ids(
+        session, facts
+    ):
         relevances.add("R2")
     peer_names, peer_ids = _peer_names(session)
     sectors = _profile_sectors(session)
@@ -356,6 +368,12 @@ def _alert_assets(session: Session, alert_id: uuid.UUID, facts: StoryFacts) -> N
                 )
             )
             known.add(item.asset_id)
+    for asset_id in _os_asset_ids(session, facts):
+        if asset_id not in known:
+            session.add(
+                m.AlertAsset(alert_id=alert_id, asset_id=asset_id, installed_software_id=None, version_confirmed=True)
+            )
+            known.add(asset_id)
 
 
 def correlate_story(
@@ -387,7 +405,8 @@ def correlate_story(
         if placed.relevance:
             outcome.relevances.add(placed.relevance)
     session.flush()
-    if not outcome.matches:
+    already = session.scalar(select(func.count()).select_from(m.Correlation).where(m.Correlation.story_id == story_id))
+    if not outcome.matches and not already:  # a story already tied to other groups is not an alert or a dismissal
         relevances = story_relevances(session, facts)
         outcome.relevances = relevances
         top = highest_relevance(relevances - {"R1"})

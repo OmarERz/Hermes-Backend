@@ -98,8 +98,8 @@ def _profile_summary(session: Session, stack: bool) -> dict[str, Any]:
     return summary
 
 
-def _news_block(session: Session, matches: list[NewsMatch], limit: int) -> list[dict[str, Any]]:
-    """COR-04: the strongest and most recent `limit` stories; the others are left out of the package."""
+def _news_block(session: Session, matches: list[NewsMatch], limit: int) -> tuple[list[dict[str, Any]], list[str]]:
+    """COR-04: the strongest and most recent `limit` stories in full; the others only as URLs."""
     dated: list[tuple[NewsMatch, datetime]] = []
     for match in matches:
         newest = session.scalar(
@@ -108,6 +108,15 @@ def _news_block(session: Session, matches: list[NewsMatch], limit: int) -> list[
         dated.append((match, newest or datetime.fromtimestamp(0, UTC)))
     dated.sort(key=lambda item: (-item[0].match.strength, -item[1].timestamp(), str(item[0].story_id)))
     items: list[dict[str, Any]] = []
+    extra_urls: list[str] = []
+    for _match, _newest in dated[limit:]:
+        extra_urls += list(
+            session.scalars(
+                select(m.RawArticle.canonical_url)
+                .where(m.RawArticle.story_id == _match.story_id)
+                .order_by(m.RawArticle.published_at)
+            )
+        )
     for index, (match, _newest) in enumerate(dated[:limit], start=1):
         story = session.get(m.Story, match.story_id)
         analysis = session.scalars(select(m.NewsAnalysis).where(m.NewsAnalysis.story_id == match.story_id)).first()
@@ -143,7 +152,7 @@ def _news_block(session: Session, matches: list[NewsMatch], limit: int) -> list[
                 "suspicious": any(a.is_suspicious for a in articles),
             }
         )
-    return items
+    return items, extra_urls
 
 
 def _cve_block(session: Session, cve_id: str) -> tuple[dict[str, Any], dict[str, Any], dict[str, Any] | None]:
@@ -272,6 +281,7 @@ def build_finding_package(
         .where(m.FindingGroup.id == group.id)
     )
     relevance = sorted({m_.relevance for m_ in matches if m_.relevance})
+    news, extra_urls = _news_block(session, matches, get_int(session, "top_news_per_package"))
     package: dict[str, Any] = {
         "package_id": str(group.id),
         "type": "finding",
@@ -291,7 +301,8 @@ def build_finding_package(
         "kev": kev,
         "epss": epss,
         "base": {**scored.base, "relevance": relevance},
-        "news": _news_block(session, matches, get_int(session, "top_news_per_package")),
+        "news": news,
+        "additional_urls": extra_urls,
         "iocs": [
             {"type": ioc.ioc_type, "value": ioc.value, "malware_family": ioc.malware_family}
             for ioc in session.scalars(
@@ -333,7 +344,7 @@ def _story_package(session: Session, kind: str, facts: StoryFacts, scorer: BaseS
         "kev": {"listed": False, "date": None, "required_action": None, "known_ransomware": False},
         "epss": None,
         "base": base,
-        "news": _news_block(session, [NewsMatch(facts.story_id, NO_MATCH, None)], 1),
+        "news": _news_block(session, [NewsMatch(facts.story_id, NO_MATCH, None)], 1)[0],
         "iocs": [],
         "tickets": [],
         "profile_summary": _profile_summary(session, stack=True),
