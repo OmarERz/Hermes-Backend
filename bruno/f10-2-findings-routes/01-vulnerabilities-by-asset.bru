@@ -1,0 +1,24 @@
+meta {
+  name: vulnerabilities-by-asset
+  type: http
+  seq: 1
+}
+
+get {
+  url: {{baseUrl}}/api/vulnerabilities?view=asset&limit=5
+  body: none
+  auth: bearer
+}
+
+auth:bearer {
+  token: {{token}}
+}
+
+assert {
+  res.status: eq 200
+  res.body.view: eq asset
+}
+
+docs {
+  CI view: risk = highest final of its findings, never a sum (FRO-11).
+}

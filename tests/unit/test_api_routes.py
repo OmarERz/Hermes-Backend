@@ -87,8 +87,6 @@ GET_SAMPLES = [
     "/api/sources",
     "/api/pending/inventory",
     "/api/cpe/candidates?q=pago",
-    "/api/tickets",
-    "/api/alerts",
     "/api/runs",
     "/api/calibration/proposals",
     "/api/metrics",
@@ -289,7 +287,6 @@ def test_runs_stix_calibration_and_notifications(client: TestClient) -> None:
     assert client.post("/api/connections/test", json={"names": ["itop"]}).json()[0]["name"] == "itop"
     assert client.put("/api/setup/steps/3", json={"done": True}).json()["done"] is True
     assert client.put("/api/setup/steps/99", json={}).status_code == 404
-    assert client.get("/api/tickets", params={"urgency": 1}).json()["items"][0]["itop_id"] == "R-000123"
 
 
 def test_decided_proposal_and_non_error_event_conflict() -> None:

@@ -3122,6 +3122,7 @@
     },
     "/api/alerts": {
       "get": {
+        "description": "Threat alerts without a finding: R2 and R3 packages and mode 2 inferences, newest first.",
         "operationId": "list_alerts_api_alerts_get",
         "parameters": [
           {
@@ -9314,6 +9315,7 @@
     },
     "/api/tickets": {
       "get": {
+        "description": "Tickets already created in iTop (D-036), most urgent first, then newest. Before the first sync with iTop\nthe urgency is the band of the ticket score (TIC-03). A CI counts as fixed when none of its linked findings\nis current or it was decommissioned.",
         "operationId": "list_tickets_api_tickets_get",
         "parameters": [
           {

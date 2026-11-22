@@ -69,7 +69,9 @@ def test_recommendation_shows_score_ci_snapshot_mitigation_and_ticket(get: Get, 
 
 def test_recommendation_without_judge_shows_the_most_restrictive_ci(get: Get, scenario: Scenario) -> None:
     rec = get(f"/api/recommendations/{scenario.assessments['A3']}")
-    assert (rec["final"], rec["judge_adjustment"], rec["previous_final"], rec["ticket_url"]) == (75, 0, None, None)
+    assert (rec["final"], rec["judge_adjustment"], rec["previous_final"]) == (75, 0, None)
+    # G2's only ticket belongs to another custodian than the CI shown: it is still the group's ticket.
+    assert rec["ticket_url"] == "https://itop.example.test/pages/UI.php?operation=details&class=UserRequest&id=778"
     assert "impulsada por srv-sin-custodio" in rec["justification"]
     assert "Sin revisión del juez" in rec["justification"]
     assert rec["mitigation_draft"] is None
@@ -97,3 +99,8 @@ def test_feedback_received_with_history_and_version(get: Get, scenario: Scenario
     assert [(f["verdict"], f["on_older_version"]) for f in latest] == [("investigating", False)]
     assert get(f"/api/recommendations/{scenario.assessments['A4']}/feedback") == []
     assert get(f"/api/recommendations/{scenario.assessments['A1']}")["feedback_count"] == 2
+
+
+def test_a_ticket_still_waiting_for_itop_gives_no_link(get: Get, scenario: Scenario) -> None:
+    rec = get(f"/api/recommendations/{scenario.assessments['A4']}")
+    assert (rec["cve"], rec["ticket_url"], rec["asset"]["finding_status"]) == ("CVE-2026-10003", None, "fixed")

@@ -98,11 +98,14 @@ def add_assessment(session: Session, sc: Scenario, spec: Spec) -> uuid.UUID:
     return assessment.id
 
 
-def add_review(session: Session, *, mitigation: bool = True) -> uuid.UUID:
-    """An applied judge review with one accepted reason (+8) and, when asked, an accepted mitigation draft."""
+def add_review(session: Session, *, mitigation: bool = True, agent: str = "judge") -> uuid.UUID:
+    """An applied judge review with one accepted reason (+8) and, when asked, an accepted mitigation draft.
+
+    Any other agent gets the bare review row (a news analysis needs one).
+    """
     review = m.LlmReview(
-        agent="judge",
-        mode="scoring",
+        agent=agent,
+        mode="scoring" if agent == "judge" else None,
         model="deepseek-v4-pro",
         response_model={},
         prompt_version="judge-mode1-v1",
@@ -128,6 +131,8 @@ def add_review(session: Session, *, mitigation: bool = True) -> uuid.UUID:
     )
     session.add(review)
     session.flush()
+    if agent != "judge":
+        return review.id
     session.add(
         m.JudgeReason(
             llm_review_id=review.id,
@@ -278,6 +283,7 @@ def build_scenario(session: Session) -> Scenario:
         session.add(m.TicketFinding(ticket_id=ticket.id, finding_id=sc.findings[("G1", ci)], added_at=T1))
     session.flush()
     _add_feedback(session, sc)
+    add_tickets_and_alerts(session, sc)
     return sc
 
 
@@ -330,6 +336,93 @@ def _add_feedback(session: Session, sc: Scenario) -> None:
             ),
         ]
     )
+    session.flush()
+
+
+def add_tickets_and_alerts(session: Session, sc: Scenario) -> None:
+    """A G2 ticket not synced yet (no urgency), a G3 ticket still waiting for iTop, and three alerts."""
+    g2_ticket = m.Ticket(
+        finding_group_id=sc.groups["G2"],
+        custodian_team_id=sc.teams["Seguridad"],
+        itop_ticket_id="778",
+        status="resolved",
+        suggestions_enabled=True,
+        created_at=T2,
+        itop_created_at=T2,
+        resolved_at=T2,
+    )
+    waiting = m.Ticket(
+        finding_group_id=sc.groups["G3"],
+        custodian_team_id=sc.teams["Seguridad"],
+        status="pending_creation",
+        suggestions_enabled=True,
+        created_at=T2,
+    )
+    session.add_all([g2_ticket, waiting])
+    session.flush()
+    session.add(m.TicketFinding(ticket_id=g2_ticket.id, finding_id=sc.findings[("G2", "CI-3")], added_at=T2))
+    source = m.Source(
+        code="demo-news",
+        name="Noticias de prueba",
+        kind="rss",
+        url="https://news.example.test/feed",
+        trust_tier="N2",
+        is_structural=False,
+        is_custom=False,
+        enabled=True,
+        created_at=T0,
+    )
+    session.add(source)
+    session.flush()
+    fetch = m.SourceFetch(source_id=source.id, run_id=sc.run_id, started_at=T0, status="ok", items_new=3)
+    session.add(fetch)
+    session.flush()
+    actor = m.Actor(name="Actor Uno")
+    session.add(actor)
+    session.flush()
+    for n, (relevance, at) in enumerate((("R3", T1), ("inferred", T2), ("R4", T2)), start=1):
+        article = m.RawArticle(
+            source_fetch_id=fetch.id,
+            canonical_url=f"https://news.example.test/{n}",
+            title=f"Noticia {n}",
+            published_at=at,
+            captured_at=at,
+            is_suspicious=False,
+        )
+        session.add(article)
+        session.flush()
+        story = m.Story(representative_article_id=article.id, relevance_status="relevant", created_at=at)
+        session.add(story)
+        session.flush()
+        article.story_id = story.id
+        alert = m.Alert(story_id=story.id, relevance=relevance, status="open", created_at=at)
+        if relevance == "inferred":
+            alert.relationship_type = "component"
+            alert.relationship_detail = "Componente probable en srv-pagos-01."
+            alert.llm_review_id = add_review(session, mitigation=False)
+        session.add(alert)
+        session.flush()
+        if relevance == "inferred":
+            session.add(m.AlertAsset(alert_id=alert.id, asset_id=sc.assets["CI-1"], version_confirmed=False))
+        if relevance == "R3":
+            review_id = add_review(session, mitigation=False, agent="news_analyst")
+            analysis = m.NewsAnalysis(
+                story_id=story.id,
+                llm_review_id=review_id,
+                summary="Campaña contra el sector financiero.",
+                event_type="campaign",
+                output={},
+                created_at=at,
+            )
+            session.add(analysis)
+            session.flush()
+            session.add_all(
+                [
+                    m.NewsActorMention(analysis_id=analysis.id, actor_id=actor.id, quote="Actor Uno"),
+                    m.NewsVictim(analysis_id=analysis.id, name="Empresa Par", quote="Empresa Par"),
+                    m.NewsAttackVector(analysis_id=analysis.id, vector_code="phishing", quote="phishing"),
+                ]
+            )
     session.flush()
 
 

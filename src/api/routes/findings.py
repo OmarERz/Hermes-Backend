@@ -16,7 +16,6 @@ from api.pagination import (
     Signer,
     decode_key,
     encode_key,
-    paginate,
 )
 from api.routes import samples
 from api.routes._auth import guard
@@ -47,6 +46,7 @@ from api.routes.models import (
 from core.views import comparison, history
 from core.views import groups as views
 from core.views import recommendations as recs
+from core.views import tickets_alerts as ta
 from core.views.common import iso, parse_uuid
 from notifications_api import FeedbackResult
 
@@ -399,12 +399,60 @@ def recommendation_feedback(id: str, session: SessionDep) -> list[FeedbackEntry]
 
 @router.get("/api/tickets", dependencies=[guard("GET", "/api/tickets")], responses=PAGINATED_RESPONSES)
 def list_tickets(
-    params: PageQuery, signer: Signer, urgency: int | None = Query(default=None, ge=1, le=4)
+    params: PageQuery,
+    signer: Signer,
+    session: SessionDep,
+    itop_url: ItopUrl,
+    urgency: int | None = Query(default=None, ge=1, le=4),
 ) -> Page[Ticket]:
-    tickets = [t for t in samples.TICKETS if urgency is None or t.urgency == urgency]
-    return paginate(tickets, params, signer)
+    """Tickets already created in iTop (D-036), most urgent first, then newest. Before the first sync with iTop
+    the urgency is the band of the ticket score (TIC-03). A CI counts as fixed when none of its linked findings
+    is current or it was decommissioned."""
+    key = decode_key(params, "tickets", ("int", "time", "uuid"))
+    found, next_key = ta.list_tickets(
+        session,
+        itop_url,
+        urgency=urgency,
+        after=None if key is None else (key[0], key[1], key[2]),
+        limit=params.limit,
+    )
+    return Page[Ticket](
+        items=[
+            Ticket(
+                itop_id=t.itop_id,
+                url=t.url,
+                cve=t.cve,
+                custodian=t.custodian,
+                urgency=t.urgency,
+                status=t.status,
+                fixed_cis=t.fixed_cis,
+                total_cis=t.total_cis,
+            )
+            for t in found
+        ],
+        next_cursor=encode_key(signer, "tickets", next_key),
+    )
 
 
 @router.get("/api/alerts", dependencies=[guard("GET", "/api/alerts")], responses=PAGINATED_RESPONSES)
-def list_alerts(params: PageQuery, signer: Signer) -> Page[Alert]:
-    return paginate(samples.ALERTS, params, signer)
+def list_alerts(params: PageQuery, signer: Signer, session: SessionDep) -> Page[Alert]:
+    """Threat alerts without a finding: R2 and R3 packages and mode 2 inferences, newest first."""
+    key = decode_key(params, "alerts", ("time", "uuid"))
+    found, next_key = ta.list_alerts(session, after=None if key is None else (key[0], key[1]), limit=params.limit)
+    return Page[Alert](
+        items=[
+            Alert(
+                id=str(a.id),
+                created_at=iso(a.created_at),
+                relevance=cast(Literal["R2", "R3", "inferred"], a.relevance),
+                inferred=a.inferred,
+                actor=a.actor,
+                victim=a.victim,
+                vector=a.vector,
+                summary=a.summary,
+                ci_id=a.ci_id,
+            )
+            for a in found
+        ],
+        next_cursor=encode_key(signer, "alerts", next_key),
+    )
