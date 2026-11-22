@@ -15,7 +15,10 @@ from core.config import Settings
 from workers.__main__ import run
 
 SETTINGS = Settings(  # type: ignore[call-arg]
-    _env_file=None, database_url=SecretStr("postgresql://app:pw@db/hermes"), firebase_project_id="demo-hermes"
+    _env_file=None,
+    database_url=SecretStr("postgresql://app:pw@db/hermes"),
+    firebase_project_id="demo-hermes",
+    cursor_signing_key=SecretStr("k" * 40),
 )
 
 

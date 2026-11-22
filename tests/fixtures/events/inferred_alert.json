@@ -1,0 +1,51 @@
+{
+  "event_id": "evt-sample-inferred_alert",
+  "contract_version": "1.0",
+  "type": "inferred_alert",
+  "priority": "digest",
+  "date": "2026-01-15T10:30:00Z",
+  "ticket": null,
+  "vulnerability": null,
+  "alert": {
+    "relevance": "inferred",
+    "inferred": true,
+    "actor": null,
+    "victim": null,
+    "vector": null,
+    "relationship": "Synthetic relationship inferred by the model between a news item and an asset."
+  },
+  "score": {
+    "base": 40,
+    "judge_adjustment": 0,
+    "final": 40,
+    "level": "low",
+    "previous": null,
+    "driving_ci": null
+  },
+  "assets": [
+    {
+      "ci_id": "CI-0001",
+      "name": "srv-example-01",
+      "score": null,
+      "criticality": "high",
+      "exposed": true,
+      "confidentiality": "classified",
+      "personal_data": null,
+      "owner": "Alex Example",
+      "status": "inferred"
+    }
+  ],
+  "justification": "Relación inferida por IA entre una noticia sintética y un componente del activo; no confirmada por el código.",
+  "mitigation": "Verificar si el componente citado está presente y expuesto en el activo antes de tratarlo como afectado.",
+  "mitigation_draft": null,
+  "news": [
+    {
+      "title": "Synthetic headline about CVE-2099-0001",
+      "url": "https://news.example.test/story-1",
+      "source": "Example News",
+      "date": "2026-01-14"
+    }
+  ],
+  "assessment_id": "asm-0001",
+  "frontend_url": "https://hermes.example.test/recommendations/asm-0001"
+}

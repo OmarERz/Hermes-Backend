@@ -9,7 +9,7 @@
 set -euo pipefail
 dir="${COMPOSE_SECRETS_DIR:-.compose-secrets}"
 env_file="${ENV_FILE:-.env}"
-required=(POSTGRES_PASSWORD MIGRATOR_DB_PASSWORD APP_DB_PASSWORD RETENTION_DB_PASSWORD)
+required=(POSTGRES_PASSWORD MIGRATOR_DB_PASSWORD APP_DB_PASSWORD RETENTION_DB_PASSWORD CURSOR_SIGNING_KEY)
 optional=(ITOP_TOKEN NVD_API_KEY DEEPSEEK_API_KEY ABUSECH_AUTH_KEY RANSOMWARELIVE_API_KEY)
 
 # value_of NAME: exported value, else the last NAME=... line of the env file, read with the env-file syntax that

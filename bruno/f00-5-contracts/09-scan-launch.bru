@@ -1,0 +1,32 @@
+meta {
+  name: scan-launch
+  type: http
+  seq: 9
+}
+
+post {
+  url: {{baseUrl}}/api/scans
+  body: json
+  auth: bearer
+}
+
+auth:bearer {
+  token: {{token}}
+}
+
+body:json {
+  {}
+}
+
+vars:post-response {
+  runId: res.body.id
+}
+
+assert {
+  res.status: eq 202
+  res.body.status: eq queued
+}
+
+docs {
+  Launches a simulated scan and keeps its id in {{runId}} for the next requests.
+}

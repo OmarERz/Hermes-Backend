@@ -1,0 +1,24 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "feedback_result.schema.json",
+  "title": "Result of recording a feedback",
+  "description": "Output of FeedbackService.record (NOT-04, NOT-06). Internal contract: never produced by an LLM.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "feedback_id",
+    "replaced_previous"
+  ],
+  "properties": {
+    "feedback_id": {
+      "type": "string",
+      "format": "uuid",
+      "pattern": "^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$",
+      "maxLength": 36
+    },
+    "replaced_previous": {
+      "type": "boolean",
+      "description": "true if an earlier active feedback of the same user and assessment was archived (NOT-06)"
+    }
+  }
+}

@@ -1,0 +1,31 @@
+meta {
+  name: config-update
+  type: http
+  seq: 3
+}
+
+put {
+  url: {{baseUrl}}/api/config
+  body: json
+  auth: bearer
+}
+
+auth:bearer {
+  token: {{token}}
+}
+
+body:json {
+  {
+    "expected_version": 3,
+    "changes": {"ui.language": "en"}
+  }
+}
+
+assert {
+  res.status: eq 200
+  res.body.version: eq 4
+}
+
+docs {
+  Optimistic concurrency (API-03) and per-parameter roles; needs an admin token.
+}

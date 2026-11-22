@@ -1,0 +1,20 @@
+meta {
+  name: unauthenticated-401
+  type: http
+  seq: 1
+}
+
+get {
+  url: {{baseUrl}}/api/config
+  body: none
+  auth: none
+}
+
+assert {
+  res.status: eq 401
+  res.body.error.code: eq unauthorized
+}
+
+docs {
+  Without a token every API-06 route answers 401 in the error envelope.
+}

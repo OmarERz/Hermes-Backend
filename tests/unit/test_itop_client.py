@@ -239,6 +239,7 @@ def settings(**values: Any) -> Settings:
         "_env_file": None,
         "database_url": SecretStr("postgresql://app:pw@db/hermes"),
         "firebase_project_id": "demo",
+        "cursor_signing_key": SecretStr("k" * 40),
     }
     return Settings(**(base | values))
 

@@ -8,7 +8,10 @@ from api.auth import Role, TokenError, VerifiedIdentity
 from core.config import Settings
 
 SETTINGS = Settings(
-    _env_file=None, database_url=SecretStr("postgresql://app:pw@db/hermes"), firebase_project_id="demo-hermes"
+    _env_file=None,
+    cursor_signing_key=SecretStr("k" * 40),
+    database_url=SecretStr("postgresql://app:pw@db/hermes"),
+    firebase_project_id="demo-hermes",
 )
 
 
