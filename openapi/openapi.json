@@ -1066,6 +1066,16 @@
       "FeedbackRequest": {
         "additionalProperties": false,
         "description": "Body of POST /api/feedback. The user and channel come from the token, never from the body.",
+        "if": {
+          "properties": {
+            "verdict": {
+              "const": "wrong_priority"
+            }
+          },
+          "required": [
+            "verdict"
+          ]
+        },
         "properties": {
           "assessment_id": {
             "title": "Assessment Id",
@@ -1129,6 +1139,16 @@
           "assessment_id",
           "verdict"
         ],
+        "then": {
+          "properties": {
+            "proposed_level": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "proposed_level"
+          ]
+        },
         "title": "FeedbackRequest",
         "type": "object"
       },
@@ -3034,7 +3054,7 @@
         "operationId": "list_alerts_api_alerts_get",
         "parameters": [
           {
-            "description": "Opaque cursor",
+            "description": "Opaque cursor from `next_cursor`: base64url(payload).base64url(signature). A cursor that is not ours or was altered is answered with 400 `invalid_cursor`.",
             "in": "query",
             "name": "cursor",
             "required": false,
@@ -3042,13 +3062,14 @@
               "anyOf": [
                 {
                   "maxLength": 1024,
+                  "pattern": "^[A-Za-z0-9_-]+\\.[A-Za-z0-9_-]+$",
                   "type": "string"
                 },
                 {
                   "type": "null"
                 }
               ],
-              "description": "Opaque cursor",
+              "description": "Opaque cursor from `next_cursor`: base64url(payload).base64url(signature). A cursor that is not ours or was altered is answered with 400 `invalid_cursor`.",
               "title": "Cursor"
             }
           },
@@ -3086,7 +3107,7 @@
                 }
               }
             },
-            "description": "La solicitud no es válida."
+            "description": "Cursor inválido o alterado (code: invalid_cursor)"
           },
           "401": {
             "content": {
@@ -3456,7 +3477,7 @@
             }
           },
           {
-            "description": "Opaque cursor",
+            "description": "Opaque cursor from `next_cursor`: base64url(payload).base64url(signature). A cursor that is not ours or was altered is answered with 400 `invalid_cursor`.",
             "in": "query",
             "name": "cursor",
             "required": false,
@@ -3464,13 +3485,14 @@
               "anyOf": [
                 {
                   "maxLength": 1024,
+                  "pattern": "^[A-Za-z0-9_-]+\\.[A-Za-z0-9_-]+$",
                   "type": "string"
                 },
                 {
                   "type": "null"
                 }
               ],
-              "description": "Opaque cursor",
+              "description": "Opaque cursor from `next_cursor`: base64url(payload).base64url(signature). A cursor that is not ours or was altered is answered with 400 `invalid_cursor`.",
               "title": "Cursor"
             }
           },
@@ -3508,7 +3530,7 @@
                 }
               }
             },
-            "description": "La solicitud no es válida."
+            "description": "Cursor inválido o alterado (code: invalid_cursor)"
           },
           "401": {
             "content": {
@@ -3607,7 +3629,7 @@
         "operationId": "list_proposals_api_calibration_proposals_get",
         "parameters": [
           {
-            "description": "Opaque cursor",
+            "description": "Opaque cursor from `next_cursor`: base64url(payload).base64url(signature). A cursor that is not ours or was altered is answered with 400 `invalid_cursor`.",
             "in": "query",
             "name": "cursor",
             "required": false,
@@ -3615,13 +3637,14 @@
               "anyOf": [
                 {
                   "maxLength": 1024,
+                  "pattern": "^[A-Za-z0-9_-]+\\.[A-Za-z0-9_-]+$",
                   "type": "string"
                 },
                 {
                   "type": "null"
                 }
               ],
-              "description": "Opaque cursor",
+              "description": "Opaque cursor from `next_cursor`: base64url(payload).base64url(signature). A cursor that is not ours or was altered is answered with 400 `invalid_cursor`.",
               "title": "Cursor"
             }
           },
@@ -3659,7 +3682,7 @@
                 }
               }
             },
-            "description": "La solicitud no es válida."
+            "description": "Cursor inválido o alterado (code: invalid_cursor)"
           },
           "401": {
             "content": {
@@ -4128,7 +4151,7 @@
         "operationId": "comparison_table_api_comparison_table_get",
         "parameters": [
           {
-            "description": "Opaque cursor",
+            "description": "Opaque cursor from `next_cursor`: base64url(payload).base64url(signature). A cursor that is not ours or was altered is answered with 400 `invalid_cursor`.",
             "in": "query",
             "name": "cursor",
             "required": false,
@@ -4136,13 +4159,14 @@
               "anyOf": [
                 {
                   "maxLength": 1024,
+                  "pattern": "^[A-Za-z0-9_-]+\\.[A-Za-z0-9_-]+$",
                   "type": "string"
                 },
                 {
                   "type": "null"
                 }
               ],
-              "description": "Opaque cursor",
+              "description": "Opaque cursor from `next_cursor`: base64url(payload).base64url(signature). A cursor that is not ours or was altered is answered with 400 `invalid_cursor`.",
               "title": "Cursor"
             }
           },
@@ -4180,7 +4204,7 @@
                 }
               }
             },
-            "description": "La solicitud no es válida."
+            "description": "Cursor inválido o alterado (code: invalid_cursor)"
           },
           "401": {
             "content": {
@@ -4641,7 +4665,7 @@
         "operationId": "config_versions_api_config_versions_get",
         "parameters": [
           {
-            "description": "Opaque cursor",
+            "description": "Opaque cursor from `next_cursor`: base64url(payload).base64url(signature). A cursor that is not ours or was altered is answered with 400 `invalid_cursor`.",
             "in": "query",
             "name": "cursor",
             "required": false,
@@ -4649,13 +4673,14 @@
               "anyOf": [
                 {
                   "maxLength": 1024,
+                  "pattern": "^[A-Za-z0-9_-]+\\.[A-Za-z0-9_-]+$",
                   "type": "string"
                 },
                 {
                   "type": "null"
                 }
               ],
-              "description": "Opaque cursor",
+              "description": "Opaque cursor from `next_cursor`: base64url(payload).base64url(signature). A cursor that is not ours or was altered is answered with 400 `invalid_cursor`.",
               "title": "Cursor"
             }
           },
@@ -4693,7 +4718,7 @@
                 }
               }
             },
-            "description": "La solicitud no es válida."
+            "description": "Cursor inválido o alterado (code: invalid_cursor)"
           },
           "401": {
             "content": {
@@ -6210,7 +6235,7 @@
             }
           },
           {
-            "description": "Opaque cursor",
+            "description": "Opaque cursor from `next_cursor`: base64url(payload).base64url(signature). A cursor that is not ours or was altered is answered with 400 `invalid_cursor`.",
             "in": "query",
             "name": "cursor",
             "required": false,
@@ -6218,13 +6243,14 @@
               "anyOf": [
                 {
                   "maxLength": 1024,
+                  "pattern": "^[A-Za-z0-9_-]+\\.[A-Za-z0-9_-]+$",
                   "type": "string"
                 },
                 {
                   "type": "null"
                 }
               ],
-              "description": "Opaque cursor",
+              "description": "Opaque cursor from `next_cursor`: base64url(payload).base64url(signature). A cursor that is not ours or was altered is answered with 400 `invalid_cursor`.",
               "title": "Cursor"
             }
           },
@@ -6262,7 +6288,7 @@
                 }
               }
             },
-            "description": "La solicitud no es válida."
+            "description": "Cursor inválido o alterado (code: invalid_cursor)"
           },
           "401": {
             "content": {
@@ -6488,7 +6514,7 @@
         "operationId": "list_peers_api_peer_companies_get",
         "parameters": [
           {
-            "description": "Opaque cursor",
+            "description": "Opaque cursor from `next_cursor`: base64url(payload).base64url(signature). A cursor that is not ours or was altered is answered with 400 `invalid_cursor`.",
             "in": "query",
             "name": "cursor",
             "required": false,
@@ -6496,13 +6522,14 @@
               "anyOf": [
                 {
                   "maxLength": 1024,
+                  "pattern": "^[A-Za-z0-9_-]+\\.[A-Za-z0-9_-]+$",
                   "type": "string"
                 },
                 {
                   "type": "null"
                 }
               ],
-              "description": "Opaque cursor",
+              "description": "Opaque cursor from `next_cursor`: base64url(payload).base64url(signature). A cursor that is not ours or was altered is answered with 400 `invalid_cursor`.",
               "title": "Cursor"
             }
           },
@@ -6540,7 +6567,7 @@
                 }
               }
             },
-            "description": "La solicitud no es válida."
+            "description": "Cursor inválido o alterado (code: invalid_cursor)"
           },
           "401": {
             "content": {
@@ -6634,6 +6661,7 @@
         ]
       },
       "post": {
+        "description": "The new company is kept for the life of the app, so the id in the answer works in PUT and DELETE.",
         "operationId": "create_peer_api_peer_companies_post",
         "requestBody": {
           "content": {
@@ -7374,7 +7402,7 @@
         "operationId": "list_recommendations_api_recommendations_get",
         "parameters": [
           {
-            "description": "Opaque cursor",
+            "description": "Opaque cursor from `next_cursor`: base64url(payload).base64url(signature). A cursor that is not ours or was altered is answered with 400 `invalid_cursor`.",
             "in": "query",
             "name": "cursor",
             "required": false,
@@ -7382,13 +7410,14 @@
               "anyOf": [
                 {
                   "maxLength": 1024,
+                  "pattern": "^[A-Za-z0-9_-]+\\.[A-Za-z0-9_-]+$",
                   "type": "string"
                 },
                 {
                   "type": "null"
                 }
               ],
-              "description": "Opaque cursor",
+              "description": "Opaque cursor from `next_cursor`: base64url(payload).base64url(signature). A cursor that is not ours or was altered is answered with 400 `invalid_cursor`.",
               "title": "Cursor"
             }
           },
@@ -7426,7 +7455,7 @@
                 }
               }
             },
-            "description": "La solicitud no es válida."
+            "description": "Cursor inválido o alterado (code: invalid_cursor)"
           },
           "401": {
             "content": {
@@ -7783,7 +7812,7 @@
         "operationId": "list_runs_api_runs_get",
         "parameters": [
           {
-            "description": "Opaque cursor",
+            "description": "Opaque cursor from `next_cursor`: base64url(payload).base64url(signature). A cursor that is not ours or was altered is answered with 400 `invalid_cursor`.",
             "in": "query",
             "name": "cursor",
             "required": false,
@@ -7791,13 +7820,14 @@
               "anyOf": [
                 {
                   "maxLength": 1024,
+                  "pattern": "^[A-Za-z0-9_-]+\\.[A-Za-z0-9_-]+$",
                   "type": "string"
                 },
                 {
                   "type": "null"
                 }
               ],
-              "description": "Opaque cursor",
+              "description": "Opaque cursor from `next_cursor`: base64url(payload).base64url(signature). A cursor that is not ours or was altered is answered with 400 `invalid_cursor`.",
               "title": "Cursor"
             }
           },
@@ -7835,7 +7865,7 @@
                 }
               }
             },
-            "description": "La solicitud no es válida."
+            "description": "Cursor inválido o alterado (code: invalid_cursor)"
           },
           "401": {
             "content": {
@@ -7948,7 +7978,23 @@
             "content": {
               "text/event-stream": {
                 "schema": {
-                  "type": "string"
+                  "properties": {
+                    "data": {
+                      "description": "JSON text: run_id, progress (0-100) and message",
+                      "type": "string"
+                    },
+                    "event": {
+                      "enum": [
+                        "progress"
+                      ],
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "event",
+                    "data"
+                  ],
+                  "type": "object"
                 }
               }
             },
@@ -8445,7 +8491,7 @@
         "operationId": "list_sources_api_sources_get",
         "parameters": [
           {
-            "description": "Opaque cursor",
+            "description": "Opaque cursor from `next_cursor`: base64url(payload).base64url(signature). A cursor that is not ours or was altered is answered with 400 `invalid_cursor`.",
             "in": "query",
             "name": "cursor",
             "required": false,
@@ -8453,13 +8499,14 @@
               "anyOf": [
                 {
                   "maxLength": 1024,
+                  "pattern": "^[A-Za-z0-9_-]+\\.[A-Za-z0-9_-]+$",
                   "type": "string"
                 },
                 {
                   "type": "null"
                 }
               ],
-              "description": "Opaque cursor",
+              "description": "Opaque cursor from `next_cursor`: base64url(payload).base64url(signature). A cursor that is not ours or was altered is answered with 400 `invalid_cursor`.",
               "title": "Cursor"
             }
           },
@@ -8497,7 +8544,7 @@
                 }
               }
             },
-            "description": "La solicitud no es válida."
+            "description": "Cursor inválido o alterado (code: invalid_cursor)"
           },
           "401": {
             "content": {
@@ -9003,7 +9050,7 @@
             }
           },
           {
-            "description": "Opaque cursor",
+            "description": "Opaque cursor from `next_cursor`: base64url(payload).base64url(signature). A cursor that is not ours or was altered is answered with 400 `invalid_cursor`.",
             "in": "query",
             "name": "cursor",
             "required": false,
@@ -9011,13 +9058,14 @@
               "anyOf": [
                 {
                   "maxLength": 1024,
+                  "pattern": "^[A-Za-z0-9_-]+\\.[A-Za-z0-9_-]+$",
                   "type": "string"
                 },
                 {
                   "type": "null"
                 }
               ],
-              "description": "Opaque cursor",
+              "description": "Opaque cursor from `next_cursor`: base64url(payload).base64url(signature). A cursor that is not ours or was altered is answered with 400 `invalid_cursor`.",
               "title": "Cursor"
             }
           },
@@ -9055,7 +9103,7 @@
                 }
               }
             },
-            "description": "La solicitud no es válida."
+            "description": "Cursor inválido o alterado (code: invalid_cursor)"
           },
           "401": {
             "content": {
@@ -9288,7 +9336,7 @@
             }
           },
           {
-            "description": "Last seen on or after (ISO 8601)",
+            "description": "Last seen on or after (RFC 3339)",
             "in": "query",
             "name": "date_from",
             "required": false,
@@ -9302,12 +9350,12 @@
                   "type": "null"
                 }
               ],
-              "description": "Last seen on or after (ISO 8601)",
+              "description": "Last seen on or after (RFC 3339)",
               "title": "Date From"
             }
           },
           {
-            "description": "Last seen on or before (ISO 8601)",
+            "description": "Last seen on or before (RFC 3339)",
             "in": "query",
             "name": "date_to",
             "required": false,
@@ -9321,7 +9369,7 @@
                   "type": "null"
                 }
               ],
-              "description": "Last seen on or before (ISO 8601)",
+              "description": "Last seen on or before (RFC 3339)",
               "title": "Date To"
             }
           },
@@ -9341,7 +9389,7 @@
             }
           },
           {
-            "description": "Opaque cursor",
+            "description": "Opaque cursor from `next_cursor`: base64url(payload).base64url(signature). A cursor that is not ours or was altered is answered with 400 `invalid_cursor`.",
             "in": "query",
             "name": "cursor",
             "required": false,
@@ -9349,13 +9397,14 @@
               "anyOf": [
                 {
                   "maxLength": 1024,
+                  "pattern": "^[A-Za-z0-9_-]+\\.[A-Za-z0-9_-]+$",
                   "type": "string"
                 },
                 {
                   "type": "null"
                 }
               ],
-              "description": "Opaque cursor",
+              "description": "Opaque cursor from `next_cursor`: base64url(payload).base64url(signature). A cursor that is not ours or was altered is answered with 400 `invalid_cursor`.",
               "title": "Cursor"
             }
           },
@@ -9393,7 +9442,7 @@
                 }
               }
             },
-            "description": "La solicitud no es válida."
+            "description": "Cursor inválido o alterado (code: invalid_cursor)"
           },
           "401": {
             "content": {

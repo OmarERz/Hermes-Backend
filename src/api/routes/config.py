@@ -9,9 +9,10 @@ from fastapi import APIRouter, Depends
 
 from api.auth import CurrentUser, Role, get_current_user
 from api.errors import ApiError, ErrorDetail
-from api.pagination import Page, PageQuery, Signer, paginate
+from api.pagination import PAGINATED_RESPONSES, Page, PageQuery, Signer, paginate
 from api.routes import samples
 from api.routes._auth import guard
+from api.routes._state import PeerStore
 from api.routes.models import (
     CompanyProfile,
     ConfigDocument,
@@ -107,7 +108,7 @@ def put_config(update: ConfigUpdate, user: CurrentUserDep) -> ConfigDocument:
     return ConfigDocument(version=samples.CONFIG_VERSION + 1, values={**samples.CONFIG_VALUES, **update.changes})
 
 
-@router.get("/api/config/versions", dependencies=[guard("GET", "/api/config/versions")])
+@router.get("/api/config/versions", dependencies=[guard("GET", "/api/config/versions")], responses=PAGINATED_RESPONSES)
 def config_versions(params: PageQuery, signer: Signer) -> Page[ConfigVersion]:
     return paginate(samples.CONFIG_VERSIONS, params, signer)
 
@@ -149,29 +150,36 @@ def put_profile(update: ProfileUpdate) -> CompanyProfile:
     return CompanyProfile(**update.model_dump(exclude={"expected_version"}), version=samples.PROFILE.version + 1)
 
 
-@router.get("/api/peer-companies", dependencies=[guard("GET", "/api/peer-companies")])
-def list_peers(params: PageQuery, signer: Signer) -> Page[PeerCompany]:
-    return paginate(samples.PEERS, params, signer)
+@router.get("/api/peer-companies", dependencies=[guard("GET", "/api/peer-companies")], responses=PAGINATED_RESPONSES)
+def list_peers(params: PageQuery, signer: Signer, peers: PeerStore) -> Page[PeerCompany]:
+    return paginate(peers, params, signer)
 
 
 @router.post("/api/peer-companies", status_code=201, dependencies=[guard("POST", "/api/peer-companies")])
-def create_peer(peer: PeerCompanyInput) -> PeerCompany:
-    return PeerCompany(id="peer-3", **peer.model_dump())
+def create_peer(peer: PeerCompanyInput, peers: PeerStore) -> PeerCompany:
+    """The new company is kept for the life of the app, so the id in the answer works in PUT and DELETE."""
+    created = PeerCompany(id=f"peer-{len(peers) + 1}", **peer.model_dump())
+    while any(p.id == created.id for p in peers):
+        created = created.model_copy(update={"id": f"{created.id}x"})
+    peers.append(created)
+    return created
 
 
-def _peer(peer_id: str) -> PeerCompany:
-    for peer in samples.PEERS:
+def _peer(peers: list[PeerCompany], peer_id: str) -> PeerCompany:
+    for peer in peers:
         if peer.id == peer_id:
             return peer
     raise ApiError(404, "not_found", "La empresa par no existe.")
 
 
 @router.put("/api/peer-companies/{id}", dependencies=[guard("PUT", "/api/peer-companies/{id}")])
-def update_peer(id: str, peer: PeerCompanyInput) -> PeerCompany:  # noqa: A002 - path parameter name of API-06
-    _peer(id)
-    return PeerCompany(id=id, **peer.model_dump())
+def update_peer(id: str, peer: PeerCompanyInput, peers: PeerStore) -> PeerCompany:  # noqa: A002 - API-06 name
+    current = _peer(peers, id)
+    updated = PeerCompany(id=id, **peer.model_dump())
+    peers[peers.index(current)] = updated
+    return updated
 
 
 @router.delete("/api/peer-companies/{id}", status_code=204, dependencies=[guard("DELETE", "/api/peer-companies/{id}")])
-def delete_peer(id: str) -> None:  # noqa: A002
-    _peer(id)
+def delete_peer(id: str, peers: PeerStore) -> None:  # noqa: A002
+    peers.remove(_peer(peers, id))

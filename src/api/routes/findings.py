@@ -8,7 +8,7 @@ from typing import Annotated, Literal
 from fastapi import APIRouter, Query
 
 from api.errors import ApiError
-from api.pagination import Page, PageQuery, Signer, paginate
+from api.pagination import PAGINATED_RESPONSES, Page, PageQuery, Signer, paginate
 from api.routes import samples
 from api.routes._auth import guard
 from api.routes.models import (
@@ -49,9 +49,9 @@ def _level_of(risk: int) -> Level:
 
 def _in_range(last_seen: str, filters: VulnerabilityFilters) -> bool:
     seen = datetime.fromisoformat(last_seen)
-    return (filters.date_from is None or seen >= filters.date_from) and (
-        filters.date_to is None or seen <= filters.date_to
-    )
+    after = filters.date_from is None or seen >= datetime.fromisoformat(filters.date_from.upper())
+    before = filters.date_to is None or seen <= datetime.fromisoformat(filters.date_to.upper())
+    return after and before
 
 
 def _group_matches(group: VulnerabilityGroup, f: VulnerabilityFilters) -> bool:
@@ -80,7 +80,7 @@ def _asset_matches(asset: AssetRisk, f: VulnerabilityFilters) -> bool:
     )
 
 
-@router.get("/api/vulnerabilities", dependencies=[guard("GET", "/api/vulnerabilities")])
+@router.get("/api/vulnerabilities", dependencies=[guard("GET", "/api/vulnerabilities")], responses=PAGINATED_RESPONSES)
 def list_vulnerabilities(
     params: PageQuery,
     signer: Signer,
@@ -160,7 +160,9 @@ def comparison_summary() -> ComparisonSummary:
     )
 
 
-@router.get("/api/comparison/table", dependencies=[guard("GET", "/api/comparison/table")])
+@router.get(
+    "/api/comparison/table", dependencies=[guard("GET", "/api/comparison/table")], responses=PAGINATED_RESPONSES
+)
 def comparison_table(params: PageQuery, signer: Signer) -> Page[ComparisonRow]:
     return paginate(samples.COMPARISON_ROWS, params, signer)
 
@@ -176,7 +178,7 @@ def assessment_breakdown(id: str) -> Breakdown:  # noqa: A002
     )
 
 
-@router.get("/api/recommendations", dependencies=[guard("GET", "/api/recommendations")])
+@router.get("/api/recommendations", dependencies=[guard("GET", "/api/recommendations")], responses=PAGINATED_RESPONSES)
 def list_recommendations(params: PageQuery, signer: Signer) -> Page[Recommendation]:
     return paginate(samples.RECOMMENDATIONS, params, signer)
 
@@ -194,8 +196,6 @@ def post_feedback(feedback: FeedbackRequest) -> FeedbackResult:
     """Same `FeedbackService` as Slack (NOT-06). Never changes the score by itself."""
     if not any(r.assessment_id == feedback.assessment_id for r in samples.RECOMMENDATIONS):
         raise _not_found("La evaluación")
-    if feedback.verdict == "wrong_priority" and feedback.proposed_level is None:
-        raise ApiError(422, "validation_error", "Con «Prioridad incorrecta» debes indicar el nivel propuesto.")
     return FeedbackResult(feedback_id="0b1f3c5e-7a2d-4e8f-9a6b-1c2d3e4f5a6b", replaced_previous=False)
 
 
@@ -206,7 +206,7 @@ def recommendation_feedback(id: str) -> list[FeedbackEntry]:  # noqa: A002
     return samples.FEEDBACK if id == "asm-0001" else []
 
 
-@router.get("/api/tickets", dependencies=[guard("GET", "/api/tickets")])
+@router.get("/api/tickets", dependencies=[guard("GET", "/api/tickets")], responses=PAGINATED_RESPONSES)
 def list_tickets(
     params: PageQuery, signer: Signer, urgency: int | None = Query(default=None, ge=1, le=4)
 ) -> Page[Ticket]:
@@ -214,6 +214,6 @@ def list_tickets(
     return paginate(tickets, params, signer)
 
 
-@router.get("/api/alerts", dependencies=[guard("GET", "/api/alerts")])
+@router.get("/api/alerts", dependencies=[guard("GET", "/api/alerts")], responses=PAGINATED_RESPONSES)
 def list_alerts(params: PageQuery, signer: Signer) -> Page[Alert]:
     return paginate(samples.ALERTS, params, signer)

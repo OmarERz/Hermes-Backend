@@ -40,6 +40,8 @@ def create_app(
 
     app.state.cursor_signer = CursorSigner(settings.cursor_signing_key.get_secret_value())
     app.state.runs = list(samples.RUNS)
+    app.state.peers = list(samples.PEERS)
+    app.state.sources = list(samples.SOURCES)
     install_error_handlers(app)
     if token_verifier is None or role_manager is None:
         firebase = FirebaseTokenVerifier(settings.firebase_project_id, settings.firebase_credentials_file)
