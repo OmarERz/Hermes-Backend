@@ -9,7 +9,7 @@ from __future__ import annotations
 
 import json
 import time
-from collections.abc import Callable, Iterator, Sequence
+from collections.abc import Callable, Sequence
 from dataclasses import dataclass, field
 from typing import Any, Final
 from urllib.parse import urlsplit
@@ -25,7 +25,6 @@ LOCAL_HOSTS: Final = frozenset({"host.docker.internal", "itop"})
 RETRYABLE_STATUS: Final = frozenset({429, 500, 502, 503, 504})
 HTTP_OK: Final = 200
 MAX_BACKOFF_SECONDS: Final = 30.0
-CHUNK_SIZE: Final = 200
 
 
 class ItopError(Exception):
@@ -56,12 +55,6 @@ class ItopObject:
             return None
         text = str(value).strip()
         return None if text in {"", "0"} else text
-
-
-def chunks(items: Sequence[str], size: int = CHUNK_SIZE) -> Iterator[Sequence[str]]:
-    """Slices for `IN (...)` queries, so a query never grows with the inventory (prototype pattern)."""
-    for start in range(0, len(items), size):
-        yield items[start : start + size]
 
 
 def _retry_after(response: httpx.Response) -> float | None:

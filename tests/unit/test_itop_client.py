@@ -12,7 +12,7 @@ from pydantic import SecretStr
 
 from core.config import Settings
 from core.itop import oql
-from core.itop.client import ItopError, ItopReader, ItopUnavailableError, chunks, reader_from_settings
+from core.itop.client import ItopError, ItopReader, ItopUnavailableError, reader_from_settings
 from doubles.itop import ItopDouble
 
 URL = "http://localhost:8080"
@@ -245,9 +245,3 @@ def test_oql_quotes_and_rejects_injection() -> None:
             oql.select(bad)
         with pytest.raises(ValueError, match="invalid class or field name"):
             oql.eq(bad, "x")
-
-
-def test_chunks_split_in_blocks_of_200() -> None:
-    items = [str(i) for i in range(450)]
-    assert [len(c) for c in chunks(items)] == [200, 200, 50]
-    assert list(chunks([])) == []
