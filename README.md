@@ -15,7 +15,11 @@ notification events.
 ```bash
 uv sync          # install dependencies
 make verify      # quality gate
+make up          # local stack: writes the Docker secret files from your env file, then docker compose up
 ```
+
+Copy `.env.example` to `.env` and set at least `POSTGRES_PASSWORD`, `MIGRATOR_DB_PASSWORD`, `APP_DB_PASSWORD` and
+`RETENTION_DB_PASSWORD` before `make up`.
 
 ## License
 

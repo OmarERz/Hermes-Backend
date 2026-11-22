@@ -1,0 +1,13 @@
+ALTER FUNCTION check_formula_weights_of(uuid) RESET search_path;
+ALTER FUNCTION check_formula_weights() RESET search_path;
+ALTER FUNCTION check_activated_version() RESET search_path;
+ALTER FUNCTION lock_formula_version() RESET search_path;
+ALTER FUNCTION check_formula_levels_of(uuid,text) RESET search_path;
+ALTER FUNCTION check_formula_levels() RESET search_path;
+ALTER FUNCTION check_urgency_bands_of(uuid) RESET search_path;
+ALTER FUNCTION check_urgency_bands() RESET search_path;
+ALTER FUNCTION check_finding_product() RESET search_path;
+ALTER FUNCTION check_product_locked() RESET search_path;
+ALTER FUNCTION check_ticket_finding_group() RESET search_path;
+ALTER FUNCTION check_group_locked() RESET search_path;
+ALTER FUNCTION normalize_text(text) RESET search_path;
