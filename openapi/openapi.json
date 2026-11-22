@@ -860,6 +860,41 @@
         "title": "CpeCandidate",
         "type": "object"
       },
+      "CurrentUser": {
+        "description": "The authenticated user, as returned by ``GET /api/me``.",
+        "properties": {
+          "display_name": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Display Name"
+          },
+          "email": {
+            "title": "Email",
+            "type": "string"
+          },
+          "role": {
+            "$ref": "#/components/schemas/Role"
+          },
+          "uid": {
+            "title": "Uid",
+            "type": "string"
+          }
+        },
+        "required": [
+          "uid",
+          "email",
+          "display_name",
+          "role"
+        ],
+        "title": "CurrentUser",
+        "type": "object"
+      },
       "ErrorBody": {
         "properties": {
           "code": {
@@ -1921,6 +1956,55 @@
         "title": "Recommendation",
         "type": "object"
       },
+      "Role": {
+        "enum": [
+          "reader",
+          "analyst",
+          "admin"
+        ],
+        "title": "Role",
+        "type": "string"
+      },
+      "RoleAssigned": {
+        "properties": {
+          "known_user": {
+            "title": "Known User",
+            "type": "boolean"
+          },
+          "role": {
+            "$ref": "#/components/schemas/Role"
+          },
+          "sessions_revoked": {
+            "title": "Sessions Revoked",
+            "type": "boolean"
+          },
+          "uid": {
+            "title": "Uid",
+            "type": "string"
+          }
+        },
+        "required": [
+          "uid",
+          "role",
+          "sessions_revoked",
+          "known_user"
+        ],
+        "title": "RoleAssigned",
+        "type": "object"
+      },
+      "RoleAssignment": {
+        "additionalProperties": false,
+        "properties": {
+          "role": {
+            "$ref": "#/components/schemas/Role"
+          }
+        },
+        "required": [
+          "role"
+        ],
+        "title": "RoleAssignment",
+        "type": "object"
+      },
       "Run": {
         "additionalProperties": false,
         "properties": {
@@ -2659,6 +2743,13 @@
         "title": "VulnerabilityList",
         "type": "object"
       }
+    },
+    "securitySchemes": {
+      "HTTPBearer": {
+        "description": "Firebase ID token",
+        "scheme": "bearer",
+        "type": "http"
+      }
     }
   },
   "info": {
@@ -2667,6 +2758,155 @@
   },
   "openapi": "3.1.0",
   "paths": {
+    "/api/admin/users/{uid}/role": {
+      "put": {
+        "description": "Assign a role as a Firebase custom claim, revoke the user's sessions and audit the change (D-030).",
+        "operationId": "assign_role_api_admin_users__uid__role_put",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "uid",
+            "required": true,
+            "schema": {
+              "pattern": "^[^/\\x00-\\x1f\\x7f]{1,128}$",
+              "title": "Uid",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/RoleAssignment"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RoleAssigned"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "La solicitud no es válida."
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Missing, invalid, expired or revoked token"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Not an admin, or inactive user"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "The uid does not exist in Firebase"
+          },
+          "405": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Método no permitido para esta ruta."
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "An admin cannot change their own role"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Invalid uid or body"
+          },
+          "429": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Demasiadas solicitudes; intenta de nuevo más tarde."
+          },
+          "500": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Error interno del servidor."
+          },
+          "503": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Identity provider unavailable"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "Assign Role",
+        "tags": [
+          "admin"
+        ]
+      }
+    },
     "/api/alerts": {
       "get": {
         "operationId": "list_alerts_api_alerts_get",
@@ -2807,6 +3047,11 @@
             "description": "Error interno del servidor."
           }
         },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
         "summary": "List Alerts",
         "tags": [
           "findings"
@@ -2929,6 +3174,11 @@
             "description": "Error interno del servidor."
           }
         },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
         "summary": "Assessment Breakdown",
         "tags": [
           "findings"
@@ -3051,6 +3301,11 @@
             "description": "Error interno del servidor."
           }
         },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
         "summary": "Asset Detail",
         "tags": [
           "findings"
@@ -3214,6 +3469,11 @@
             "description": "Error interno del servidor."
           }
         },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
         "summary": "Audit",
         "tags": [
           "operations"
@@ -3360,6 +3620,11 @@
             "description": "Error interno del servidor."
           }
         },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
         "summary": "List Proposals",
         "tags": [
           "operations"
@@ -3482,6 +3747,11 @@
             "description": "Error interno del servidor."
           }
         },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
         "summary": "Approve Proposal",
         "tags": [
           "operations"
@@ -3604,6 +3874,11 @@
             "description": "Error interno del servidor."
           }
         },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
         "summary": "Reject Proposal",
         "tags": [
           "operations"
@@ -3715,6 +3990,11 @@
             "description": "Error interno del servidor."
           }
         },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
         "summary": "Comparison Summary",
         "tags": [
           "findings"
@@ -3861,6 +4141,11 @@
             "description": "Error interno del servidor."
           }
         },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
         "summary": "Comparison Table",
         "tags": [
           "findings"
@@ -3972,6 +4257,11 @@
             "description": "Error interno del servidor."
           }
         },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
         "summary": "Get Config",
         "tags": [
           "configuration"
@@ -4092,6 +4382,11 @@
             "description": "Error interno del servidor."
           }
         },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
         "summary": "Put Config",
         "tags": [
           "configuration"
@@ -4208,6 +4503,11 @@
             "description": "Error interno del servidor."
           }
         },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
         "summary": "Config Schema",
         "tags": [
           "configuration"
@@ -4354,6 +4654,11 @@
             "description": "Error interno del servidor."
           }
         },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
         "summary": "Config Versions",
         "tags": [
           "configuration"
@@ -4477,6 +4782,11 @@
             "description": "Error interno del servidor."
           }
         },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
         "summary": "Restore Version",
         "tags": [
           "configuration"
@@ -4593,6 +4903,11 @@
             "description": "Error interno del servidor."
           }
         },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
         "summary": "Connections Status",
         "tags": [
           "operations"
@@ -4718,6 +5033,11 @@
             "description": "Error interno del servidor."
           }
         },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
         "summary": "Connections Test",
         "tags": [
           "operations"
@@ -4846,6 +5166,11 @@
             "description": "Error interno del servidor."
           }
         },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
         "summary": "Cpe Candidates",
         "tags": [
           "sources and inventory"
@@ -4968,6 +5293,11 @@
             "description": "Error interno del servidor."
           }
         },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
         "summary": "Post Feedback",
         "tags": [
           "findings"
@@ -5094,6 +5424,11 @@
             "description": "Error interno del servidor."
           }
         },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
         "summary": "Finding History",
         "tags": [
           "findings"
@@ -5216,6 +5551,11 @@
             "description": "Error interno del servidor."
           }
         },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
         "summary": "Simulate",
         "tags": [
           "configuration"
@@ -5464,9 +5804,141 @@
             "description": "Error interno del servidor."
           }
         },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
         "summary": "Put Mapping",
         "tags": [
           "sources and inventory"
+        ]
+      }
+    },
+    "/api/me": {
+      "get": {
+        "description": "Current user and role (API-01).",
+        "operationId": "me_api_me_get",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/CurrentUser"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "La solicitud no es válida."
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Missing, invalid, expired or revoked token"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Inactive user"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "El recurso solicitado no existe."
+          },
+          "405": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Método no permitido para esta ruta."
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "The e-mail belongs to another account"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Los datos enviados no son válidos."
+          },
+          "429": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Demasiadas solicitudes; intenta de nuevo más tarde."
+          },
+          "500": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Error interno del servidor."
+          },
+          "503": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Identity provider unavailable"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "Me",
+        "tags": [
+          "auth"
         ]
       }
     },
@@ -5575,6 +6047,11 @@
             "description": "Error interno del servidor."
           }
         },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
         "summary": "Metrics",
         "tags": [
           "operations"
@@ -5736,6 +6213,11 @@
             "description": "Error interno del servidor."
           }
         },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
         "summary": "Notification Events",
         "tags": [
           "operations"
@@ -5858,6 +6340,11 @@
             "description": "Error interno del servidor."
           }
         },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
         "summary": "Retry Event",
         "tags": [
           "operations"
@@ -6004,6 +6491,11 @@
             "description": "Error interno del servidor."
           }
         },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
         "summary": "List Peers",
         "tags": [
           "configuration"
@@ -6123,6 +6615,11 @@
             "description": "Error interno del servidor."
           }
         },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
         "summary": "Create Peer",
         "tags": [
           "configuration"
@@ -6238,6 +6735,11 @@
             "description": "Error interno del servidor."
           }
         },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
         "summary": "Delete Peer",
         "tags": [
           "configuration"
@@ -6368,6 +6870,11 @@
             "description": "Error interno del servidor."
           }
         },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
         "summary": "Update Peer",
         "tags": [
           "configuration"
@@ -6479,6 +6986,11 @@
             "description": "Error interno del servidor."
           }
         },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
         "summary": "Pending Inventory",
         "tags": [
           "sources and inventory"
@@ -6590,6 +7102,11 @@
             "description": "Error interno del servidor."
           }
         },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
         "summary": "Get Profile",
         "tags": [
           "configuration"
@@ -6709,6 +7226,11 @@
             "description": "Error interno del servidor."
           }
         },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
         "summary": "Put Profile",
         "tags": [
           "configuration"
@@ -6855,6 +7377,11 @@
             "description": "Error interno del servidor."
           }
         },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
         "summary": "List Recommendations",
         "tags": [
           "findings"
@@ -6977,6 +7504,11 @@
             "description": "Error interno del servidor."
           }
         },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
         "summary": "Get Recommendation",
         "tags": [
           "findings"
@@ -7103,6 +7635,11 @@
             "description": "Error interno del servidor."
           }
         },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
         "summary": "Recommendation Feedback",
         "tags": [
           "findings"
@@ -7249,6 +7786,11 @@
             "description": "Error interno del servidor."
           }
         },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
         "summary": "List Runs",
         "tags": [
           "operations"
@@ -7371,6 +7913,11 @@
             "description": "Error interno del servidor."
           }
         },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
         "summary": "Run Events",
         "tags": [
           "operations"
@@ -7493,6 +8040,11 @@
             "description": "Error interno del servidor."
           }
         },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
         "summary": "Launch Scan",
         "tags": [
           "operations"
@@ -7608,6 +8160,11 @@
             "description": "Error interno del servidor."
           }
         },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
         "summary": "Setup Status",
         "tags": [
           "operations"
@@ -7740,6 +8297,11 @@
             "description": "Error interno del servidor."
           }
         },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
         "summary": "Setup Step",
         "tags": [
           "operations"
@@ -7886,6 +8448,11 @@
             "description": "Error interno del servidor."
           }
         },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
         "summary": "List Sources",
         "tags": [
           "sources and inventory"
@@ -8006,6 +8573,11 @@
             "description": "Error interno del servidor."
           }
         },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
         "summary": "Create Source",
         "tags": [
           "sources and inventory"
@@ -8138,6 +8710,11 @@
             "description": "Error interno del servidor."
           }
         },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
         "summary": "Patch Source",
         "tags": [
           "sources and inventory"
@@ -8260,6 +8837,11 @@
             "description": "Error interno del servidor."
           }
         },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
         "summary": "Stix Export",
         "tags": [
           "operations"
@@ -8424,6 +9006,11 @@
             "description": "Error interno del servidor."
           }
         },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
         "summary": "List Tickets",
         "tags": [
           "findings"
@@ -8624,6 +9211,11 @@
             "description": "Error interno del servidor."
           }
         },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
         "summary": "List Vulnerabilities",
         "tags": [
           "findings"
@@ -8746,6 +9338,11 @@
             "description": "Error interno del servidor."
           }
         },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
         "summary": "Vulnerability Detail",
         "tags": [
           "findings"

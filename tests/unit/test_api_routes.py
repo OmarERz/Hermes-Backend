@@ -9,12 +9,13 @@ from fastapi.testclient import TestClient
 from pydantic import SecretStr
 
 from api.app import create_app
-from api.routes._auth import ROUTE_ROLES, Role, authenticate
+from api.auth import CurrentUser, Role, get_current_user
+from api.routes._auth import ROUTE_ROLES
 from core.config import Settings
 
 pytestmark = pytest.mark.unit
 
-F0_2_ROUTES = {"/api/health"}  # /api/me and the role assignment arrive with F0.2
+F0_2_ROUTES = {"/api/health", "/api/me", "/api/admin/users/{uid}/role"}  # outside ROUTE_ROLES (F0.2)
 SETTINGS = Settings(  # type: ignore[call-arg]
     _env_file=None,
     database_url=SecretStr("postgresql://a:b@db/h"),
@@ -32,7 +33,9 @@ def client() -> Iterator[TestClient]:
 
 
 def as_role(role: Role) -> None:
-    APP.dependency_overrides[authenticate] = lambda: role
+    APP.dependency_overrides[get_current_user] = lambda: CurrentUser(
+        uid="sample-user", email="sample@example.com", display_name=None, role=role
+    )
 
 
 def app_routes() -> set[tuple[str, str]]:
@@ -64,13 +67,13 @@ def test_without_authentication_every_route_answers_401(client: TestClient, meth
 
 
 def test_a_lower_role_gets_403(client: TestClient) -> None:
-    as_role(Role.reader)
+    as_role(Role.READER)
     response = client.post("/api/formula/simulate", json={"changes": {"weights.D": "0.1"}})
     assert response.status_code == 403
     assert response.json()["error"]["code"] == "forbidden"
-    as_role(Role.analyst)
+    as_role(Role.ANALYST)
     assert client.get("/api/audit").status_code == 403
-    as_role(Role.admin)
+    as_role(Role.ADMIN)
     assert client.get("/api/audit").status_code == 200
 
 
@@ -109,21 +112,21 @@ GET_SAMPLES = [
 
 @pytest.mark.parametrize("url", GET_SAMPLES)
 def test_get_routes_return_sample_data(client: TestClient, url: str) -> None:
-    as_role(Role.admin)
+    as_role(Role.ADMIN)
     response = client.get(url)
     assert response.status_code == 200, response.text
     assert response.json()
 
 
 def test_connection_status_never_contains_a_key(client: TestClient) -> None:
-    as_role(Role.admin)
+    as_role(Role.ADMIN)
     body = client.get("/api/connections/status").text
     assert "DEEPSEEK_API_KEY" in body  # the variable name, to tell what is missing
     assert "sk-" not in body
 
 
 def test_pagination_cursor_flow_and_invalid_cursor(client: TestClient) -> None:
-    as_role(Role.reader)
+    as_role(Role.READER)
     first = client.get("/api/recommendations", params={"limit": 1}).json()
     assert len(first["items"]) == 1
     assert first["next_cursor"]
@@ -137,13 +140,13 @@ def test_pagination_cursor_flow_and_invalid_cursor(client: TestClient) -> None:
 
 
 def test_criticality_view_has_a_section_per_band(client: TestClient) -> None:
-    as_role(Role.reader)
+    as_role(Role.READER)
     bands = client.get("/api/vulnerabilities", params={"view": "criticality"}).json()["bands"]
     assert [b["level"] for b in bands] == ["critical", "high", "medium", "low"]
 
 
 def test_not_found_uses_the_envelope(client: TestClient) -> None:
-    as_role(Role.reader)
+    as_role(Role.READER)
     for url in (
         "/api/vulnerabilities/nope",
         "/api/assets/nope",
@@ -156,7 +159,7 @@ def test_not_found_uses_the_envelope(client: TestClient) -> None:
 
 
 def test_config_write_rules(client: TestClient) -> None:
-    as_role(Role.reader)
+    as_role(Role.READER)
     stale = client.put("/api/config", json={"expected_version": 1, "changes": {"weights.D": "0.10"}})
     assert stale.status_code == 409
     assert stale.json()["error"]["code"] == "version_conflict"
@@ -173,7 +176,7 @@ def test_config_write_rules(client: TestClient) -> None:
 
 
 def test_feedback_rules(client: TestClient) -> None:
-    as_role(Role.analyst)
+    as_role(Role.ANALYST)
     ok = client.post("/api/feedback", json={"assessment_id": "asm-0001", "verdict": "relevant"})
     assert ok.status_code == 201
     assert ok.json()["replaced_previous"] is False
@@ -188,7 +191,7 @@ def test_feedback_rules(client: TestClient) -> None:
 
 
 def test_other_write_routes(client: TestClient) -> None:
-    as_role(Role.admin)
+    as_role(Role.ADMIN)
     assert client.post("/api/peer-companies", json={"name": "N", "sector": "S", "country": "MX"}).status_code == 201
     assert (
         client.put("/api/peer-companies/peer-1", json={"name": "N", "sector": "S", "country": "MX"}).status_code == 200
@@ -219,7 +222,7 @@ def test_other_write_routes(client: TestClient) -> None:
 
 
 def test_runs_stix_calibration_and_notifications(client: TestClient) -> None:
-    as_role(Role.admin)
+    as_role(Role.ADMIN)
     assert client.post("/api/scans", json={}).status_code == 202
     events = client.get("/api/runs/run-1/events")
     assert events.headers["content-type"].startswith("text/event-stream")
@@ -249,7 +252,7 @@ def test_decided_proposal_and_non_error_event_conflict() -> None:
     try:
         samples.PROPOSALS[:] = [decided]
         samples.NOTIFICATION_EVENTS[:] = [delivered]
-        as_role(Role.admin)
+        as_role(Role.ADMIN)
         with TestClient(APP) as test_client:
             assert test_client.post("/api/calibration/proposals/cal-1/approve").status_code == 409
             assert test_client.post("/api/notifications/events/evt-1/retry").status_code == 409
