@@ -8,9 +8,10 @@ from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
 from datetime import datetime, timedelta
 from enum import StrEnum
-from typing import Final
+from typing import Final, Literal
 
 LEVELS: Final[dict[int, str]] = {1: "critical", 2: "high", 3: "medium", 4: "low"}
+Priority = Literal["immediate", "normal", "digest"]
 DEPARTMENT_MIN_CIS: Final = 10  # TODO(P-012): confirm the impact rule (critical exposed CI or >= 10 CIs)
 
 
@@ -127,7 +128,7 @@ class PriorityThresholds:
     normal: int = 50
 
 
-def priority(score: int | None, thresholds: PriorityThresholds) -> str:
+def priority(score: int | None, thresholds: PriorityThresholds) -> Priority:
     """`immediate` (>= 90), `normal` (>= 50) or `digest`; an event without a score is a digest."""
     # TODO(P-004): default thresholds until the user confirms them.
     if score is None:

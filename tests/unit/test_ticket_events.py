@@ -64,7 +64,7 @@ def test_a_new_ticket_payload_is_valid_and_complete() -> None:
     }
     assert payload["assets"][0]["exposed"] is False  # unknown exposure (P-013)
     assert payload["assets"][2]["status"] == "fixed"
-    assert payload["justification"].startswith("Puntuación 91 (critical) impulsada por web-01")
+    assert payload["justification"].startswith("Puntuación 91 (Crítica) impulsada por web-01")
     assert "mass_exploitation (+6)" in payload["justification"]
 
 
@@ -89,3 +89,41 @@ def test_ticket_links() -> None:
     assert completed["ticket"]["itop_id"] == "42"
     assert completed["ticket"]["url"].endswith("&id=42")
     assert payload["ticket"]["itop_id"] == ""  # the original is not modified
+    moved = complete_ticket_link(completed, "43", "https://itop.example.test")
+    assert moved["ticket"]["url"].endswith("&id=43")  # a new id never keeps the old link
+    assert complete_ticket_link(completed, "42", None)["ticket"]["url"].endswith("&id=42")
+
+
+def test_owners_follow_the_contacts_order_and_identity() -> None:
+    twins = TicketContext(
+        cve="CVE-2026-1",
+        product="p",
+        custodian="c",
+        custodian_itop_id="1",
+        cis=[
+            CiLine("a", "a", 50, "low", None, "public", None, "Ana", "p1", "a1@example.test"),
+            CiLine("b", "b", 90, "low", None, "public", None, "Ana", "p2", "a2@example.test"),
+        ],
+        score=90,
+        driving_ci="b",
+        judge_adjustment=5,
+    )
+    payload = ticket_event_payload(
+        EVENT_ID, TicketEvent("new_ticket", "immediate", 1, None, None), twins, ("", ""), NOW
+    )
+    assert payload["ticket"]["owners"] == [
+        {"name": "Ana", "email": "a2@example.test"},
+        {"name": "Ana", "email": "a1@example.test"},
+    ]
+    assert payload["score"]["base"] == 85  # unknown base: final minus the adjustment
+
+
+def test_naive_dates_are_refused() -> None:
+    with pytest.raises(ValueError, match="timezone-aware"):
+        ticket_event_payload(
+            EVENT_ID,
+            TicketEvent("fixed", "digest", None, None, None),
+            CONTEXT,
+            ("", ""),
+            datetime.fromisoformat("2026-11-22T12:00:00"),
+        )

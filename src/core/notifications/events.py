@@ -18,8 +18,8 @@ from sqlalchemy.orm import Session
 
 from core.db import models as m
 from core.db.ids import new_id
-from core.tickets.content import TicketContext
-from core.tickets.rules import level
+from core.tickets.content import LEVEL_ES, TicketContext, sorted_cis
+from core.tickets.rules import Priority, level
 
 CONTRACT_VERSION: Final = "1.0"
 LEAST_URGENT: Final = 4
@@ -35,10 +35,11 @@ def ticket_url(itop_base_url: str | None, itop_id: str | None) -> str:
 
 
 def _owners(context: TicketContext) -> list[dict[str, Any]]:
+    """Distinct owners of the current CIs, keyed and ordered like the ticket's `contacts_list`."""
     owners: dict[str, dict[str, Any]] = {}
-    for ci in context.current_cis:
-        if ci.owner_name and ci.owner_name not in owners:
-            owners[ci.owner_name] = {"name": ci.owner_name, "email": ci.owner_email}
+    for ci in sorted_cis(context.current_cis):
+        if ci.owner_name:
+            owners.setdefault(ci.owner_itop_id or ci.owner_name, {"name": ci.owner_name, "email": ci.owner_email})
     return list(owners.values())
 
 
@@ -48,7 +49,7 @@ def justification(context: TicketContext, urgency: int | None) -> str:
     if context.score is None or urgency is None:
         return "No quedan CIs vigentes en este ticket."
     text = (
-        f"Puntuación {context.score} ({level(urgency)}) impulsada por {context.driving_ci}: "
+        f"Puntuación {context.score} ({LEVEL_ES[level(urgency)]}) impulsada por {context.driving_ci}: "
         f"base {context.base}, ajuste del juez {context.judge_adjustment:+d}."
     )
     if context.reasons:
@@ -61,7 +62,7 @@ class TicketEvent:
     """One ticket event decided by the lifecycle: what happened and how urgent it is (NOT-03)."""
 
     event_type: TicketEventType
-    priority: str
+    priority: Priority
     urgency: int | None
     previous: int | None
     assessment_id: uuid.UUID | None
@@ -71,11 +72,13 @@ def ticket_event_payload(
     event_id: uuid.UUID, event: TicketEvent, context: TicketContext, ticket_link: tuple[str, str], now: datetime
 ) -> dict[str, Any]:
     """The event exactly as the contract defines it (NOT-03); `ticket_link` is (itop_id, url), possibly empty."""
+    if now.tzinfo is None:
+        raise ValueError("event dates must be timezone-aware")
     urgency = event.urgency
     score: dict[str, Any] | None = None
     if context.score is not None and urgency is not None:
         score = {
-            "base": context.base if context.base is not None else context.score,
+            "base": context.base if context.base is not None else context.score - context.judge_adjustment,
             "judge_adjustment": context.judge_adjustment,
             "final": context.score,
             "level": level(urgency),
@@ -163,6 +166,7 @@ class EventRecorder:
 def complete_ticket_link(payload: dict[str, Any], itop_id: str, itop_base_url: str | None) -> dict[str, Any]:
     """The payload with the iTop id and URL filled in, once the outbox created the ticket (dispatcher side)."""
     ticket = dict(payload["ticket"])
+    if ticket.get("itop_id") != itop_id or not ticket.get("url"):
+        ticket["url"] = ticket_url(itop_base_url, itop_id)
     ticket["itop_id"] = itop_id
-    ticket["url"] = ticket.get("url") or ticket_url(itop_base_url, itop_id)
     return {**payload, "ticket": ticket}
