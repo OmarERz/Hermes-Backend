@@ -50,6 +50,12 @@ def validate_public_url(url: str, resolver: Resolver = system_resolver) -> str:
         raise UnsafeUrlError("The URL has no host")
     if port not in (None, 443):
         raise UnsafeUrlError("Only the default HTTPS port is allowed")
+    resolve_public_address(host, resolver)
+    return host
+
+
+def resolve_public_address(host: str, resolver: Resolver = system_resolver) -> str:
+    """The address to connect to for `host`; every address the host resolves to must be public."""
     try:
         ipaddress.ip_address(host)
         addresses = [host]
@@ -59,4 +65,4 @@ def validate_public_url(url: str, resolver: Resolver = system_resolver) -> str:
         raise UnsafeUrlError("The host does not resolve")
     if not all(_is_public(address) for address in addresses):
         raise UnsafeUrlError("The host resolves to a non-public address")
-    return host
+    return addresses[0]

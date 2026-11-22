@@ -29,7 +29,6 @@ dev = [
     "pytest",
     "pytest-cov>=7.1.0",
     "pyyaml>=6.0.4",
-    "respx>=0.23.1",
     "ruff",
     "testcontainers>=4.15.0",
     "types-pyyaml>=6.0.12.20261113",

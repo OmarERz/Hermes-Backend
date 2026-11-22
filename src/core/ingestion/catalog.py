@@ -22,6 +22,7 @@ class SourceDefinition:
     trust_tier: str
     is_structural: bool
     mapping: FieldMapping | None = None
+    summary_only: bool = False  # the feed carries only a summary: always download the article (ING-04)
 
 
 # FUE-01 to FUE-05 are structural (no switch off, D-041); FUE-06 to FUE-11 are optional.
@@ -42,7 +43,9 @@ DEFAULT_SOURCES: tuple[SourceDefinition, ...] = (
         "epss", "EPSS", "csv", "https://epss.empiricalsecurity.com/epss_scores-current.csv.gz", "N1", True
     ),
     SourceDefinition("osv", "OSV", "api", "https://api.osv.dev/v1/query", "N1", True),
-    SourceDefinition("thn", "The Hacker News", "rss", "https://feeds.feedburner.com/TheHackersNews", "N3", False),
+    SourceDefinition(
+        "thn", "The Hacker News", "rss", "https://feeds.feedburner.com/TheHackersNews", "N3", False, summary_only=True
+    ),
     SourceDefinition("tenable", "Tenable Blog", "rss", "https://www.tenable.com/blog/feed", "N2", False),
     SourceDefinition(
         "bleepingcomputer", "BleepingComputer", "rss", "https://www.bleepingcomputer.com/feed/", "N3", False
@@ -87,3 +90,7 @@ def mapping_for(code: str) -> FieldMapping | None:
         if definition.code == code:
             return definition.mapping
     return None
+
+
+def is_summary_only(code: str) -> bool:
+    return any(definition.summary_only for definition in DEFAULT_SOURCES if definition.code == code)

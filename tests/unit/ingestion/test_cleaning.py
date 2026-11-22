@@ -98,3 +98,18 @@ def test_visible_markup_drops_hidden_elements_and_attributes() -> None:
     assert "bad" not in markup
     assert "onclick" not in markup
     assert "<p>kept<br>text</p>" in markup
+
+
+def test_text_hidden_by_page_style_rules_is_dropped() -> None:
+    page = (
+        "<html><head><style>.cloak, div > .ghost {display:none} #gone{visibility:hidden} aside{display:none}"
+        "@media print{ .visible{color:#000} }</style></head><body>"
+        '<p class="cloak">alpha</p><p class="ghost">beta</p><span id="gone">gamma</span><aside>delta</aside>'
+        '<p class="visible">epsilon</p><p id="other">zeta</p></body></html>'
+    )
+    text = clean_html(page).text
+    assert "epsilon" in text
+    assert "zeta" in text
+    for hidden in ("alpha", "beta", "gamma", "delta"):
+        assert hidden not in text
+    assert "alpha" not in visible_markup(page)

@@ -10,20 +10,19 @@ import logging
 import uuid
 from collections.abc import Callable
 from dataclasses import dataclass
-from datetime import UTC, datetime, timedelta
+from datetime import UTC, datetime
 
-from sqlalchemy import select, update
+from sqlalchemy import select
 from sqlalchemy.dialects.postgresql import insert
 from sqlalchemy.orm import Session
 
 from core.db import models as m
 from core.db.ids import new_id
 from core.ingestion.article import extract_article
-from core.ingestion.catalog import mapping_for
+from core.ingestion.catalog import is_summary_only, mapping_for, sync_default_sources
 from core.ingestion.cleaning import clean_html, clean_plain
 from core.ingestion.connectors import FeedItem, FormatChangedError, parse_feed
 from core.ingestion.fetcher import ARTICLE_CONTENT_TYPES, Fetcher, FetchError
-from core.ingestion.settings import get_int
 from core.ingestion.urls import InvalidUrlError, canonicalize_url
 
 log = logging.getLogger("ingestion")
@@ -59,24 +58,32 @@ def news_sources(session: Session) -> list[m.Source]:
     return list(session.scalars(stmt))
 
 
-def _build_text(item: FeedItem, fetcher: Fetcher) -> tuple[str, bool]:
-    """Cleaned text of an entry and its suspicious mark; downloads the article when the feed only has a summary."""
+def _build_text(item: FeedItem, fetcher: Fetcher, summary_only: bool) -> tuple[str, bool]:
+    """Cleaned text of an entry and its suspicious mark.
+
+    The full article is downloaded for sources that only publish summaries (THN) and, for any source, when the
+    entry text is too short to be the article (ING-04).
+    """
     summary = clean_html(item.summary)
     text, suspicious = summary.text, summary.is_suspicious
-    if len(text) < FULL_ARTICLE_MIN_CHARS:
+    if summary_only or len(text) < FULL_ARTICLE_MIN_CHARS:
         try:
             page = fetcher.get(item.url, ARTICLE_CONTENT_TYPES)
             article = extract_article(page.body.decode("utf-8", errors="replace"))
         except FetchError as exc:
             log.info("Full article not downloaded: %s", exc)
             article = None
-        if article is not None and len(article.text) > len(text):
-            text = article.text
-            suspicious = suspicious or article.is_suspicious
+        if article is not None:
+            suspicious = suspicious or article.is_suspicious  # the mark never depends on which text is kept
+            if len(article.text) > len(text):
+                text = article.text
     return text, suspicious
 
 
-def _store_item(session: Session, item: FeedItem, fetch_id: uuid.UUID, fetcher: Fetcher, now: datetime) -> bool:
+TextBuilder = Callable[[FeedItem], tuple[str, bool]]
+
+
+def _store_item(session: Session, item: FeedItem, fetch_id: uuid.UUID, now: datetime, build_text: TextBuilder) -> bool:
     try:
         canonical = canonicalize_url(item.url)
     except InvalidUrlError:
@@ -84,7 +91,7 @@ def _store_item(session: Session, item: FeedItem, fetch_id: uuid.UUID, fetcher: 
     if session.scalar(select(m.RawArticle.id).where(m.RawArticle.canonical_url == canonical)) is not None:
         return False
     title = clean_plain(item.title)
-    text, suspicious = _build_text(item, fetcher)
+    text, suspicious = build_text(item)
     published = item.published_at if item.published_at and item.published_at <= now else now
     stmt = (
         insert(m.RawArticle)
@@ -117,11 +124,16 @@ def ingest_source(
         document = fetcher.get(source.url)
         items = parse_feed(source.kind, document.body, mapping_for(source.code))
         seen: set[str] = set()
+        summary_only = is_summary_only(source.code)
+
+        def build_text(item: FeedItem) -> tuple[str, bool]:
+            return _build_text(item, fetcher, summary_only)
+
         for item in items:
             if item.url in seen:
                 continue
             seen.add(item.url)
-            created += _store_item(session, item, fetch.id, fetcher, now)
+            created += _store_item(session, item, fetch.id, now, build_text)
     except FetchError as exc:
         status, error = "error", str(exc)[:MAX_ERROR_CHARS]
     except FormatChangedError as exc:
@@ -133,9 +145,16 @@ def ingest_source(
 
 
 def run_news_ingestion(
-    session: Session, fetcher: Fetcher, trigger_reason: str = "schedule", clock: Clock = utc_now
+    session: Session,
+    fetcher: Fetcher,
+    trigger_reason: str = "schedule",
+    clock: Clock = utc_now,
+    *,
+    load_defaults: bool = True,
 ) -> list[IngestResult]:
     """One `news` run over every enabled news source (hourly, and after each scan: ING-02)."""
+    if load_defaults:  # idempotent: a fresh install reads the default feeds on its first run
+        sync_default_sources(session, clock())
     run = m.Run(
         id=new_id(), kind="news", status="running", progress=0, trigger_reason=trigger_reason, started_at=clock()
     )
@@ -146,16 +165,3 @@ def run_news_ingestion(
     run.progress, run.finished_at = 100, clock()
     session.commit()
     return results
-
-
-def purge_clean_text(session: Session, clock: Clock = utc_now) -> int:
-    """Retention (docs/datos/modelo-v1 §16): clear `clean_text` older than `retention.clean_text_days`; keep rows."""
-    cutoff = clock() - timedelta(days=get_int(session, "retention.clean_text_days"))
-    cleared = session.execute(
-        update(m.RawArticle)
-        .where(m.RawArticle.clean_text.is_not(None), m.RawArticle.captured_at < cutoff)
-        .values(clean_text=None)
-        .returning(m.RawArticle.id)
-    ).all()
-    session.commit()
-    return len(cleared)

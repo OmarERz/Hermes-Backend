@@ -64,7 +64,7 @@ def parse_datetime(value: Any) -> datetime | None:
 
 def parse_rss_atom(body: bytes) -> list[FeedItem]:
     """RSS (`pubDate`) and Atom (`published`, then `updated`) entries."""
-    feed = feedparser.parse(body)
+    feed = feedparser.parse(io.BytesIO(body))  # a stream: bytes could be read as a local path
     if not feed.get("version"):
         raise FormatChangedError("The document is not a valid RSS or Atom feed")
     items: list[FeedItem] = []
@@ -112,16 +112,22 @@ def parse_csv_feed(body: bytes, mapping: FieldMapping) -> list[FeedItem]:
     except UnicodeDecodeError as exc:
         raise FormatChangedError("The CSV is not UTF-8") from exc
     reader = csv.DictReader(io.StringIO(text))
-    required = {mapping.title, mapping.url}
-    if not reader.fieldnames or not required <= set(reader.fieldnames):
+    try:
+        fieldnames = reader.fieldnames
+    except csv.Error as exc:
+        raise FormatChangedError("The CSV cannot be read") from exc
+    if not fieldnames or not {mapping.title, mapping.url} <= set(fieldnames):
         raise FormatChangedError("The CSV header no longer has the mapped columns")
     items: list[FeedItem] = []
-    for index, row in enumerate(reader):
-        if index >= MAX_ITEMS:
-            break
-        item = _record_to_item({k: v for k, v in row.items() if isinstance(k, str)}, mapping)
-        if item is not None:
-            items.append(item)
+    try:
+        for index, row in enumerate(reader):
+            if index >= MAX_ITEMS:
+                break
+            item = _record_to_item({k: v for k, v in row.items() if isinstance(k, str)}, mapping)
+            if item is not None:
+                items.append(item)
+    except csv.Error as exc:
+        raise FormatChangedError("The CSV cannot be read") from exc
     return items
 
 

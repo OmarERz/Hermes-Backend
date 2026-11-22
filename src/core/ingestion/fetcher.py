@@ -7,7 +7,7 @@ from urllib.parse import urljoin
 
 import httpx
 
-from core.ingestion.ssrf import Resolver, UnsafeUrlError, system_resolver, validate_public_url
+from core.ingestion.ssrf import Resolver, UnsafeUrlError, resolve_public_address, system_resolver, validate_public_url
 
 FEED_CONTENT_TYPES = frozenset(
     {
@@ -23,6 +23,29 @@ FEED_CONTENT_TYPES = frozenset(
 ARTICLE_CONTENT_TYPES = frozenset({"text/html", "application/xhtml+xml"})
 USER_AGENT = "hermes-ingestion/0.1"
 REDIRECT_STATUSES = frozenset({301, 302, 303, 307, 308})
+
+
+class PinnedTransport(httpx.BaseTransport):
+    """Connects to the address the SSRF guard approved, not to one the OS resolves again (no DNS rebinding).
+
+    The request goes to the approved IP with the original `Host` header and TLS server name, so the
+    certificate is still verified against the real hostname.
+    """
+
+    def __init__(self, inner: httpx.BaseTransport, resolver: Resolver) -> None:
+        self._inner = inner
+        self._resolver = resolver
+
+    def handle_request(self, request: httpx.Request) -> httpx.Response:
+        host = request.url.host
+        address = resolve_public_address(host, self._resolver)
+        if address != host:
+            request.extensions = {**request.extensions, "sni_hostname": host}
+            request.url = request.url.copy_with(host=address)
+        return self._inner.handle_request(request)
+
+    def close(self) -> None:
+        self._inner.close()
 
 
 class FetchError(Exception):
@@ -56,7 +79,7 @@ class Fetcher:
         self._limits = limits or FetchLimits()
         self._resolver = resolver
         self._client = httpx.Client(
-            transport=transport,
+            transport=PinnedTransport(transport or httpx.HTTPTransport(), resolver),
             timeout=self._limits.timeout_seconds,
             follow_redirects=False,
             trust_env=False,
@@ -82,6 +105,8 @@ class Fetcher:
                         current = urljoin(current, location)
                         continue
                     return self._read(current, response, accepted_types)
+            except UnsafeUrlError as exc:
+                raise FetchError(f"Refused target: {exc}") from exc
             except httpx.HTTPError as exc:
                 raise FetchError(f"Request failed: {type(exc).__name__}") from exc
         raise FetchError("Too many redirects")

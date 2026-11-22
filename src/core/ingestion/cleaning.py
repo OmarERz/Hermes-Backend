@@ -49,6 +49,10 @@ _HIDING_STYLE = re.compile(
     re.IGNORECASE,
 )
 
+_STYLE_BLOCK = re.compile(r"<style\b[^>]*>(.*?)</style\s*>", re.IGNORECASE | re.DOTALL)
+_CSS_RULE = re.compile(r"([^{}@]+)\{([^{}]*)\}")
+_SIMPLE_SELECTOR = re.compile(r"^([a-z][a-z0-9]*)?(?:([.#])([\w-]+))?$", re.IGNORECASE)
+
 _INVISIBLE_CHARS = dict.fromkeys(
     [*range(0x200B, 0x2010), *range(0x202A, 0x202F), *range(0x2060, 0x2065), 0xFEFF, 0x00AD, 0x180E, 0x061C]
 )
@@ -82,22 +86,58 @@ class CleanedText:
     is_suspicious: bool
 
 
+@dataclass(frozen=True)
+class _HiddenSelectors:
+    """Simple selectors (tag, .class, #id) that page style sheets hide; the last compound of a selector counts."""
+
+    tags: frozenset[str] = frozenset()
+    classes: frozenset[str] = frozenset()
+    ids: frozenset[str] = frozenset()
+
+
+def _hidden_selectors(html: str) -> _HiddenSelectors:
+    tags: set[str] = set()
+    classes: set[str] = set()
+    ids: set[str] = set()
+    for block in _STYLE_BLOCK.findall(html):
+        for selectors, declarations in _CSS_RULE.findall(block):
+            if not _HIDING_STYLE.search(declarations):
+                continue
+            for selector in selectors.split(","):
+                parts = selector.replace(">", " ").replace("+", " ").replace("~", " ").split()
+                match = _SIMPLE_SELECTOR.match(parts[-1]) if parts else None
+                if match is None:
+                    continue
+                tag, kind, name = match.groups()
+                if kind == "." and not tag:
+                    classes.add(name.lower())
+                elif kind == "#" and not tag:
+                    ids.add(name.lower())
+                elif tag and not kind:
+                    tags.add(tag.lower())
+    return _HiddenSelectors(frozenset(tags), frozenset(classes), frozenset(ids))
+
+
 class _VisibleTextParser(HTMLParser):
     """Collects visible and hidden text apart; hidden covers dropped tags and hiding attributes or CSS."""
 
-    def __init__(self) -> None:
+    def __init__(self, css_hidden: _HiddenSelectors | None = None) -> None:
         super().__init__(convert_charrefs=True)
+        self._css = css_hidden or _HiddenSelectors()
         self.visible: list[str] = []
         self.hidden: list[str] = []
         self.markup: list[str] = []  # visible content as attribute-free HTML, for the article extractor
         self._stack: list[tuple[str, bool]] = []
         self._hidden_depth = 0
 
-    @staticmethod
-    def _hides(tag: str, attrs: list[tuple[str, str | None]]) -> bool:
-        if tag in _DROPPED_TAGS:
+    def _hides(self, tag: str, attrs: list[tuple[str, str | None]]) -> bool:
+        if tag in _DROPPED_TAGS or tag in self._css.tags:
             return True
         for name, value in attrs:
+            if name == "class" and value and self._css.classes.intersection(value.lower().split()):
+                return True
+            if name == "id" and value and value.lower() in self._css.ids:
+                return True
             if name == "hidden" or (name == "aria-hidden" and (value or "").lower() == "true"):
                 return True
             if name == "style" and value and _HIDING_STYLE.search(value):
@@ -160,7 +200,7 @@ def has_injection_markers(text: str) -> bool:
 
 def clean_html(html: str, max_chars: int = MAX_CLEAN_CHARS) -> CleanedText:
     """Plain visible text of an HTML fragment or page, with the hidden text kept only for detection."""
-    parser = _VisibleTextParser()
+    parser = _VisibleTextParser(_hidden_selectors(html))
     parser.feed(html)
     parser.close()
     visible = _normalize("".join(parser.visible))
@@ -171,7 +211,7 @@ def clean_html(html: str, max_chars: int = MAX_CLEAN_CHARS) -> CleanedText:
 
 def visible_markup(html: str) -> str:
     """The page without scripts, hidden elements and attributes: input for the main-content extractor."""
-    parser = _VisibleTextParser()
+    parser = _VisibleTextParser(_hidden_selectors(html))
     parser.feed(html)
     parser.close()
     return "".join(parser.markup)
