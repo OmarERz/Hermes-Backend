@@ -7,7 +7,6 @@ output (does the CVE exist, what is the article text) take it as arguments, so t
 from __future__ import annotations
 
 import re
-import unicodedata
 from collections.abc import Callable, Iterable
 from typing import Any
 
@@ -15,7 +14,16 @@ from core.validation.violations import Violation
 
 CVE_FORMAT = re.compile(r"^CVE-\d{4}-\d{4,7}$")
 CPE_PAIR = re.compile(r"^[a-z0-9._\-~%]+:[a-z0-9._\-~%]+$")
-CVSS_31 = re.compile(r"^CVSS:3\.1/AV:[NALP]/AC:[LH]/PR:[NLH]/UI:[NR]/S:[UC]/C:[NLH]/I:[NLH]/A:[NLH]$")
+CVSS_31_METRICS = {
+    "AV": "NALP",
+    "AC": "LH",
+    "PR": "NLH",
+    "UI": "NR",
+    "S": "UC",
+    "C": "NLH",
+    "I": "NLH",
+    "A": "NLH",
+}
 CVSS_40 = re.compile(
     r"^CVSS:4\.0/AV:[NALP]/AC:[LH]/AT:[NP]/PR:[NLH]/UI:[NPA]/VC:[HLN]/VI:[HLN]/VA:[HLN]/SC:[HLN]/SI:[HLN]/SA:[HLN]$"
 )
@@ -25,8 +33,11 @@ CveExists = Callable[[str], bool]
 
 
 def normalize_text(value: str) -> str:
-    """Unicode NFKC, runs of whitespace collapsed to one space, trimmed (the normalization of VAL-03)."""
-    return _SPACES.sub(" ", unicodedata.normalize("NFKC", value)).strip()
+    """Runs of whitespace collapsed to one space and trimmed: the only normalization VAL-03 allows.
+
+    Nothing else is folded (no NFKC), so a quote that changes any other character does not match.
+    """
+    return _SPACES.sub(" ", value).strip()
 
 
 def quote_in_text(quote: str, text: str) -> bool:
@@ -51,12 +62,26 @@ def check_cve(value: object, path: str, cve_exists: CveExists) -> list[Violation
     return []
 
 
+def _valid_cvss_31(vector: str) -> bool:
+    """CVSS 3.1 base vector: the eight base metrics in any order (FIRST allows it), each once, valid values."""
+    parts = vector.split("/")
+    if parts[0] != "CVSS:3.1":
+        return False
+    seen: dict[str, str] = {}
+    for part in parts[1:]:
+        key, _, value = part.partition(":")
+        if key in seen or key not in CVSS_31_METRICS or len(value) != 1 or value not in CVSS_31_METRICS[key]:
+            return False
+        seen[key] = value
+    return len(seen) == len(CVSS_31_METRICS)
+
+
 def check_cvss_vector(vector: object, path: str) -> list[Violation]:
     """An empty vector means "not inferred". Otherwise it must be a CVSS 3.1 or 4.0 base vector (the score is
     computable from base metrics alone; optional metrics are not accepted)."""
     if vector == "":
         return []
-    if isinstance(vector, str) and (CVSS_31.fullmatch(vector) or CVSS_40.fullmatch(vector)):
+    if isinstance(vector, str) and (_valid_cvss_31(vector) or CVSS_40.fullmatch(vector)):
         return []
     return [Violation("VAL-03.cvss_syntax", path, "Not a valid CVSS 3.1 or 4.0 vector")]
 
@@ -72,7 +97,7 @@ _DASHES = {ord(c): "-" for c in "\u2010\u2011\u2012\u2013\u2014\u2212"}
 
 
 def _mentions_cve(text: str, cve: str) -> bool:
-    """The identifier appears in the text as a whole (CVE-2026-1111 is not inside CVE-2026-11112)."""
+    """The identifier appears in the text (a quote) as a whole (CVE-2026-1111 is not inside CVE-2026-11112)."""
     plain = normalize_text(text).translate(_DASHES).upper()
     return re.search(rf"(?<![0-9]){re.escape(cve.upper())}(?![0-9])", plain) is not None
 
@@ -87,8 +112,10 @@ def check_news_analysis(
     for path, item in _each(output.get("cves"), "cves"):
         found = check_cve(item.get("cve"), f"{path}.cve", cve_exists)
         violations += found
-        if not found and not _mentions_cve(article_text, str(item["cve"])):
-            violations.append(Violation("VAL-03.cve_in_text", f"{path}.cve", "The CVE does not appear in the article"))
+        if not found and not _mentions_cve(str(item.get("quote", "")), str(item["cve"])):
+            violations.append(
+                Violation("VAL-03.cve_in_quote", f"{path}.quote", "The quote must name the CVE it supports")
+            )
         violations += check_quote(item.get("quote"), article_text, f"{path}.quote")
     for path, item in _each(output.get("products"), "products"):
         cpe = item.get("candidate_cpe")

@@ -117,5 +117,6 @@ def test_spent_today_sums_the_reviews_of_the_utc_day(session: Session) -> None:
     review(session, "0.100000", NOW + timedelta(hours=1), agent="judge")
     review(session, "9.000000", NOW - timedelta(days=1))
     assert spent_on(session, date(2026, 11, 22)) == Decimal("0.35")
+    assert spent_on(session, date(2026, 11, 21)) == Decimal(9)
     assert spent_on(session, date(2026, 11, 20)) == Decimal(0)
     assert NOW.tzinfo is UTC

@@ -28,6 +28,10 @@ class TransportError(Exception):
         self.retry_after = retry_after
 
 
+class FormatError(Exception):
+    """The reply cannot be read as the tool call (no call, arguments that are not JSON): a format failure (VAL-01)."""
+
+
 @dataclass(frozen=True)
 class RetryPolicy:
     format_retries: int = 2
@@ -36,6 +40,7 @@ class RetryPolicy:
     max_delay: float = 30.0
     breaker_failures: int = 5
     breaker_pause: float = 600.0
+    max_retry_after: float = 600.0  # a longer Retry-After is not slept on: the item goes back to the queue
 
 
 class CircuitBreaker:
@@ -69,7 +74,7 @@ def transport_delay(attempt: int, retry_after: float | None, policy: RetryPolicy
     """Wait before transport attempt `attempt + 1`: full jitter over an exponential cap, never below Retry-After."""
     cap = min(policy.max_delay, policy.base_delay * 2 ** (attempt - 1))
     asked = retry_after if retry_after is not None and math.isfinite(retry_after) else 0.0
-    return float(max(rng() * cap, min(asked, policy.breaker_pause)))
+    return float(max(rng() * cap, asked))
 
 
 @dataclass(frozen=True)
@@ -100,7 +105,19 @@ class _Run:
         self.call, self.breaker, self.timing, self.policy = call, breaker, timing, policy
         self.attempts = 0
 
-    def call_with_transport_retries(self, feedback: str | None) -> dict[str, Any] | Outcome:
+    def _after_transport_error(self, exc: TransportError, transport_attempt: int) -> Outcome | None:
+        """The outcome that ends the call after a transport error, or None to wait and try again."""
+        self.breaker.record_failure()
+        if not self.breaker.allow():
+            return Outcome("provider_down", None, self.attempts, reason="circuit open: provider unavailable")
+        if exc.retry_after is not None and exc.retry_after > self.policy.max_retry_after:
+            return Outcome("transport_failed", None, self.attempts, reason="transport: Retry-After too long")
+        if transport_attempt == self.policy.transport_attempts:
+            return Outcome("transport_failed", None, self.attempts, reason=f"transport: {exc}")
+        self.timing.sleep(transport_delay(transport_attempt, exc.retry_after, self.policy, self.timing.rng))
+        return None
+
+    def call_with_transport_retries(self, feedback: str | None) -> dict[str, Any] | Outcome | Violation:
         for transport_attempt in range(1, self.policy.transport_attempts + 1):
             if not self.breaker.allow():
                 return Outcome("provider_down", None, self.attempts, reason="circuit open: provider unavailable")
@@ -108,13 +125,13 @@ class _Run:
             try:
                 output = self.call(feedback)
             except TransportError as exc:
-                self.breaker.record_failure()
-                if not self.breaker.allow():
-                    return Outcome("provider_down", None, self.attempts, reason="circuit open: provider unavailable")
-                if transport_attempt == self.policy.transport_attempts:
-                    return Outcome("transport_failed", None, self.attempts, reason=f"transport: {exc}")
-                self.timing.sleep(transport_delay(transport_attempt, exc.retry_after, self.policy, self.timing.rng))
+                ended = self._after_transport_error(exc, transport_attempt)
+                if ended is not None:
+                    return ended
                 continue
+            except FormatError as exc:
+                self.breaker.record_success()  # the provider answered
+                return Violation("VAL-01.format", "", str(exc)[:200], "format")
             self.breaker.record_success()
             return output
         return Outcome("transport_failed", None, self.attempts, reason="transport: no attempts allowed")
@@ -137,9 +154,10 @@ def run_validated(
         result = run.call_with_transport_retries(feedback)
         if isinstance(result, Outcome):
             return result
-        violations = validate(result)
-        if not violations:
-            return Outcome("ok", result, run.attempts)
+        output = None if isinstance(result, Violation) else result
+        violations = [result] if isinstance(result, Violation) else validate(result)
+        if not violations and output is not None:
+            return Outcome("ok", output, run.attempts)
         failures += 1
         current = signature(violations)
         if (previous is not None and previous & current) or failures > policy.format_retries:

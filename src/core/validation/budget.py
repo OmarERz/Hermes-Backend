@@ -38,8 +38,8 @@ DEFAULT_TOKEN_CAPS = {
 
 @dataclass(frozen=True)
 class BudgetConfig:
-    daily_usd: Decimal = Decimal(5)
-    critical_reserve: Decimal = Decimal("0.20")
+    daily_usd: Decimal = Decimal(5)  # TODO(P-015): default pending confirmation (docs/11)
+    critical_reserve: Decimal = Decimal("0.20")  # TODO(P-015)
     critical_multiplier: int = 2
     warning_ratio: Decimal = Decimal("0.80")
     token_caps: dict[tuple[str, str], int] = field(default_factory=lambda: dict(DEFAULT_TOKEN_CAPS))

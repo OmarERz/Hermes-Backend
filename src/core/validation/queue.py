@@ -11,7 +11,7 @@ import uuid
 from dataclasses import dataclass
 from datetime import datetime
 
-from sqlalchemy import select
+from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
 from core.db import models as m
@@ -52,6 +52,9 @@ def _find(session: Session, ref: QueueRef) -> m.ErrorQueue | None:
 def enqueue_failure(session: Session, ref: QueueRef, reason: str, now: datetime) -> m.ErrorQueue:
     """Record a failure: a new pending row, or one more attempt on the pending row of the same item."""
     ref.validate()
+    # Serialize the check and the insert per item: two runs failing on the same item share one pending row (PRE-02).
+    key = f"{ref.component}:{ref.story_id}:{ref.cve_id}:{ref.review_package_id}"
+    session.execute(select(func.pg_advisory_xact_lock(func.hashtextextended(key, 0))))
     row = _find(session, ref)
     if row is None:
         row = m.ErrorQueue(

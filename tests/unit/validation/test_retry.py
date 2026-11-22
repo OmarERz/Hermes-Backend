@@ -6,6 +6,7 @@ from typing import Any
 
 from core.validation.retry import (
     CircuitBreaker,
+    FormatError,
     RetryPolicy,
     Timing,
     TransportError,
@@ -177,9 +178,9 @@ def test_any_repeated_error_stops_the_retries_even_with_a_new_one_beside_it() ->
     assert (outcome.status, outcome.attempts) == ("rejected", 2)
 
 
-def test_retry_after_is_capped_and_non_finite_values_are_ignored() -> None:
+def test_retry_after_is_honored_and_non_finite_values_are_ignored() -> None:
     policy = RetryPolicy(breaker_pause=60.0)
-    assert transport_delay(1, 3600.0, policy, lambda: 0.0) == 60.0
+    assert transport_delay(1, 500.0, policy, lambda: 0.0) == 500.0
     assert transport_delay(1, float("inf"), policy, lambda: 0.0) == 0.0
     assert transport_delay(1, float("nan"), policy, lambda: 0.0) == 0.0
 
@@ -191,3 +192,27 @@ def test_no_sleep_after_the_failure_that_opens_the_circuit() -> None:
     outcome = h.run()
     assert (outcome.status, outcome.attempts) == ("provider_down", 1)
     assert h.sleeps == []
+
+
+def test_a_retry_after_longer_than_a_worker_may_wait_sends_the_item_back_to_the_queue() -> None:
+    h = Harness([TransportError("429", retry_after=900.0), {"never": 1}])
+    outcome = h.run()
+    assert (outcome.status, outcome.attempts, outcome.reason) == (
+        "transport_failed",
+        1,
+        "transport: Retry-After too long",
+    )
+    assert h.sleeps == []
+
+
+def test_a_reply_that_cannot_be_read_is_a_format_failure_with_retries() -> None:
+    h = Harness([FormatError("arguments are not JSON"), {"ok": 1}])
+    outcome = h.run()
+    assert (outcome.status, outcome.attempts) == ("ok", 2)
+    assert h.feedbacks == [None, "VAL-01.format at <root>: arguments are not JSON"]
+
+
+def test_an_unreadable_reply_twice_is_rejected_and_queued_with_its_rule() -> None:
+    h = Harness([FormatError("no tool call"), FormatError("no tool call")])
+    outcome = h.run()
+    assert (outcome.status, outcome.attempts, outcome.reason) == ("rejected", 2, "VAL-01.format")
