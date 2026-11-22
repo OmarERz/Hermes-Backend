@@ -1,8 +1,10 @@
 """Persistence of judge reviews (L13): `llm_review`, `judge_reason`, `mitigation_draft_step` and `error_queue`.
 
-Append-only (A-2): a review is assembled in memory and written once, complete, when it closes. A review that fell
-back to the base (L11) also leaves a pending `error_queue` entry for its package (PRE-01) unless it was skipped on
-purpose (degradation ladder). Package CIs are iTop CI IDs (`asset.itop_ci_id`); an asset UUID is accepted too.
+Append-only (A-2): a review is assembled in memory and written once, complete, when it closes. A package whose
+review fell back to the base (L11) gets one `error_queue` entry (PRE-01), retried in the next runs and given up
+(shown as pending in the front) after `QUEUE_RETRIES`; a later successful review resolves it. A review skipped on
+purpose (degradation ladder) is not queued. Package CIs are iTop CI IDs (`asset.itop_ci_id`); an asset UUID is
+accepted too.
 """
 
 from __future__ import annotations
@@ -27,6 +29,7 @@ logger = logging.getLogger(__name__)
 AGENT = "judge"
 MODE_SCORING = "scoring"
 QUEUED_FAILURES = frozenset({Failure.TRANSPORT, Failure.REQUEST, Failure.FORMAT, Failure.BUDGET})
+QUEUE_RETRIES = 2  # PRE-01: retried in the next 2 runs, then pending in the front
 _SETTING_KEYS = (
     "judge_model",
     "judge.max_calls",
@@ -49,12 +52,6 @@ class ReviewTarget:
     review_package_id: uuid.UUID | None
     input_ref: str
     now: datetime
-
-
-@dataclass(frozen=True)
-class StoredReview:
-    review_id: uuid.UUID
-    queued: bool
 
 
 def load_judge_settings(session: Session) -> tuple[JudgeSettings, SensitivityProfile]:
@@ -106,8 +103,8 @@ def save_review(
     *,
     status: ReviewStatus | None = None,
     second_review_of: uuid.UUID | None = None,
-) -> StoredReview:
-    """Insert the review with its reasons and accepted mitigation; queue the package when the judge failed."""
+) -> uuid.UUID:
+    """Insert the review with its reasons and accepted mitigation; returns the `llm_review.id`."""
     cited = {r.ci_id for r in outcome.reasons if r.ci_id} | {s.ci_id for s in outcome.mitigation.steps if s.ci_id}
     assets = resolve_assets(session, (ci for ci in cited if ci is not None))
     review = LlmReview(id=new_id(), **_review_columns(outcome, target, status))
@@ -116,27 +113,45 @@ def save_review(
     session.flush()
     session.add_all(_reason_rows(review.id, outcome, assets))
     session.add_all(_mitigation_rows(review.id, outcome, assets))
-    queued = (
-        outcome.status is ReviewStatus.NO_JUDGE_REVIEW
-        and outcome.failure in QUEUED_FAILURES
-        and target.review_package_id is not None
-        and second_review_of is None
-    )
-    if queued:
-        session.add(
-            ErrorQueue(
-                id=new_id(),
-                component=AGENT,
-                review_package_id=target.review_package_id,
-                reason=f"judge {outcome.failure}",
-                attempts=0,
-                next_attempt_at=target.now,
-                status="pending",
-                created_at=target.now,
-            )
-        )
     session.flush()
-    return StoredReview(review_id=review.id, queued=queued)
+    return review.id
+
+
+def sync_error_queue(
+    session: Session, review_package_id: uuid.UUID | None, failure: Failure | None, now: datetime
+) -> bool:
+    """PRE-01 for one package: queue (or count a new attempt on) a failed review, resolve it after a good one.
+    Returns True when the package is (still) queued."""
+    if review_package_id is None:
+        return False
+    entry = session.scalars(
+        select(ErrorQueue)
+        .where(ErrorQueue.review_package_id == review_package_id, ErrorQueue.status == "pending")
+        .order_by(ErrorQueue.created_at)
+        .limit(1)
+    ).one_or_none()
+    if failure not in QUEUED_FAILURES:
+        if entry is not None and failure is not Failure.LADDER:  # the judge answered (fully or partially)
+            entry.status = "resolved"
+        return False
+    if entry is None:
+        entry = ErrorQueue(
+            id=new_id(),
+            component=AGENT,
+            review_package_id=review_package_id,
+            attempts=0,
+            status="pending",
+            created_at=now,
+        )
+        session.add(entry)
+    else:
+        entry.attempts += 1
+    entry.reason = f"judge {failure}"
+    entry.next_attempt_at = now
+    if entry.attempts >= QUEUE_RETRIES:
+        entry.status = "gave_up"
+    session.flush()
+    return entry.status == "pending"
 
 
 def _review_columns(outcome: ReviewOutcome, target: ReviewTarget, status: ReviewStatus | None) -> Mapping[str, Any]:
