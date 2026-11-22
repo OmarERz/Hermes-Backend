@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from collections.abc import Iterator
+from datetime import UTC, datetime
 
 import pytest
 from fastapi.testclient import TestClient
@@ -11,7 +12,9 @@ from pydantic import SecretStr
 from api.app import create_app
 from api.auth import CurrentUser, Role, get_current_user
 from api.routes._auth import ROUTE_ROLES
+from api.routes._state import get_dashboard_source
 from core.config import Settings
+from core.metrics.dashboard import Dashboard, DashboardMetric
 
 pytestmark = pytest.mark.unit
 
@@ -103,7 +106,6 @@ GET_SAMPLES = [
     "/api/alerts",
     "/api/runs",
     "/api/calibration/proposals",
-    "/api/metrics",
     "/api/notifications/events",
     "/api/connections/status",
     "/api/setup/status",
@@ -415,3 +417,16 @@ def test_cursor_and_sse_are_documented() -> None:
     assert operation["responses"]["400"]["description"].startswith("Cursor inválido")
     sse = APP.openapi()["paths"]["/api/runs/{id}/events"]["get"]["responses"]["200"]["content"]["text/event-stream"]
     assert sse["schema"]["required"] == ["event", "data"]
+
+
+def test_metrics_come_from_the_dashboard_service(client: TestClient) -> None:
+    as_role(Role.READER)
+    now = datetime(2026, 11, 22, 12, tzinfo=UTC)
+    dashboard = Dashboard(now, [DashboardMetric("precision", "Precisión", "87.5", "%")])
+    APP.dependency_overrides[get_dashboard_source] = lambda: lambda _now: dashboard
+    response = client.get("/api/metrics")
+    assert response.status_code == 200
+    assert response.json() == {
+        "generated_at": "2026-11-22T12:00:00Z",
+        "metrics": [{"key": "precision", "label": "Precisión", "value": "87.5", "unit": "%"}],
+    }

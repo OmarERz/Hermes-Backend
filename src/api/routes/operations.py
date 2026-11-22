@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from collections.abc import Iterator
+from datetime import UTC, datetime
 from typing import Literal
 
 from fastapi import APIRouter, Query
@@ -12,12 +13,13 @@ from api.errors import ApiError, ErrorDetail
 from api.pagination import PAGINATED_RESPONSES, Page, PageQuery, Signer, paginate
 from api.routes import samples
 from api.routes._auth import guard
-from api.routes._state import RunStore
+from api.routes._state import MetricsSource, RunStore
 from api.routes.models import (
     AuditEntry,
     CalibrationProposal,
     ConnectionStatus,
     ConnectionTestRequest,
+    Metric,
     MetricsDashboard,
     NotificationEventRow,
     Run,
@@ -131,8 +133,13 @@ def reject_proposal(id: str) -> CalibrationProposal:  # noqa: A002
 
 
 @router.get("/api/metrics", dependencies=[guard("GET", "/api/metrics")])
-def metrics() -> MetricsDashboard:
-    return MetricsDashboard(generated_at=samples.NOW, metrics=samples.METRICS)
+def metrics(source: MetricsSource) -> MetricsDashboard:
+    """Dashboards of docs/10 (FRO-21): the latest nightly value of each metric and the judge ladder level."""
+    dashboard = source(datetime.now(UTC))
+    return MetricsDashboard(
+        generated_at=dashboard.generated_at.isoformat().replace("+00:00", "Z"),
+        metrics=[Metric(key=m.key, label=m.label, value=m.value, unit=m.unit) for m in dashboard.metrics],
+    )
 
 
 @router.get(

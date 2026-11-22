@@ -20,7 +20,6 @@ from api.routes.models import (
     FeedbackEntry,
     InventoryItem,
     InventoryPending,
-    Metric,
     NotificationEventRow,
     PeerCompany,
     Recommendation,
@@ -454,10 +453,6 @@ PROPOSALS = [
         summary="Subir 'Medio de seguridad de ejemplo' de N3 a N2: 24 afirmaciones confirmadas",
         status="pending",
     ),
-]
-METRICS = [
-    Metric(key="findings_open", label="Hallazgos abiertos", value="42", unit=None),
-    Metric(key="judge_cost", label="Costo del juez (mes)", value="3.20", unit="USD"),
 ]
 NOTIFICATION_EVENTS = [
     NotificationEventRow(

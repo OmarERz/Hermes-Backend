@@ -6298,6 +6298,7 @@
     },
     "/api/metrics": {
       "get": {
+        "description": "Dashboards of docs/10 (FRO-21): the latest nightly value of each metric and the judge ladder level.",
         "operationId": "metrics_api_metrics_get",
         "responses": {
           "200": {
