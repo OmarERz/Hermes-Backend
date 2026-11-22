@@ -47,8 +47,8 @@ class IngestResult:
 
 
 def news_sources(session: Session) -> list[m.Source]:
-    """Enabled sources read as news: RSS and Atom feeds, and custom JSON or CSV feeds (D-041)."""
-    custom_data_feed = m.Source.is_custom.is_(True) & m.Source.kind.in_(("json", "csv"))
+    """Enabled sources read as news: RSS and Atom feeds, and custom JSON, CSV or API feeds (D-041)."""
+    custom_data_feed = m.Source.is_custom.is_(True) & m.Source.kind.in_(("json", "csv", "api"))
     stmt = (
         select(m.Source)
         .where(m.Source.enabled.is_(True))
