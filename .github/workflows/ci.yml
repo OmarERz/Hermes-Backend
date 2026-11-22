@@ -1,0 +1,230 @@
+name: CI
+
+on:
+  push:
+    branches: [develop, main]
+  pull_request:
+    branches: [develop, main]
+
+# Read-only by default; a job asks for more only when it needs it.
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  static:
+    name: static
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+      - uses: astral-sh/setup-uv@1db35dd8eee11c5894872e0b383ae6c406cf738d # v10.4.0
+        with:
+          enable-cache: true
+          python-version-file: .python-version
+      - name: Install dependencies
+        run: uv sync --locked
+      - name: Lint, types and package boundaries
+        run: make lint typecheck boundaries
+      - name: Semgrep
+        run: make semgrep
+      - name: Pick the Gitleaks base ref
+        env:
+          EVENT_NAME: ${{ github.event_name }}
+          BASE_REF: ${{ github.base_ref }}
+          PUSH_BEFORE: ${{ github.event.before }}
+        run: |
+          # Pull requests: the PR base. Pushes: the previous tip of the branch. A ref that does not
+          # exist (new branch, all-zero SHA) makes the Makefile scan the whole of HEAD.
+          if [ "$EVENT_NAME" = "pull_request" ]; then
+            echo "GITLEAKS_BASE=origin/${BASE_REF}" >> "$GITHUB_ENV"
+          else
+            echo "GITLEAKS_BASE=${PUSH_BEFORE}" >> "$GITHUB_ENV"
+          fi
+      - name: Gitleaks (working tree and history)
+        run: make secrets
+      - name: pip-audit
+        run: make audit
+
+  tests:
+    name: tests
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: astral-sh/setup-uv@1db35dd8eee11c5894872e0b383ae6c406cf738d # v10.4.0
+        with:
+          enable-cache: true
+          python-version-file: .python-version
+      - name: Install dependencies
+        run: uv sync --locked
+      # Docker is preinstalled on ubuntu runners (testcontainers, compose tests).
+      - name: Unit and integration tests with coverage gate
+        run: make coverage
+      - name: Upload coverage.xml
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: coverage-xml
+          path: coverage.xml
+          if-no-files-found: error
+          retention-days: 7
+
+  schemathesis:
+    name: schemathesis
+    needs: [static, tests]
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: astral-sh/setup-uv@1db35dd8eee11c5894872e0b383ae6c406cf738d # v10.4.0
+        with:
+          enable-cache: true
+          python-version-file: .python-version
+      - name: Install dependencies
+        run: uv sync --locked
+      - name: Check Schemathesis prerequisites
+        id: gate
+        run: |
+          if [ ! -f openapi/openapi.json ]; then
+            echo "SKIPPED: Schemathesis, openapi/openapi.json does not exist yet (arrives in F0.5)"
+          elif ! grep -q '^emulator-token:' Makefile; then
+            echo "SKIPPED: Schemathesis, no Makefile target emulator-token yet (F0.7 provides the test token)"
+          else
+            echo "enabled=true" >> "$GITHUB_OUTPUT"
+          fi
+      - name: Start the stack with throwaway passwords
+        if: steps.gate.outputs.enabled == 'true'
+        run: |
+          for var in POSTGRES_PASSWORD MIGRATOR_DB_PASSWORD APP_DB_PASSWORD RETENTION_DB_PASSWORD; do
+            value=$(openssl rand -hex 24)
+            echo "::add-mask::$value"
+            echo "$var=$value" >> "$GITHUB_ENV"
+          done
+          echo "API_DOCS_ENABLED=true" >> "$GITHUB_ENV"
+      - name: Wait for the stack to be healthy
+        if: steps.gate.outputs.enabled == 'true'
+        run: docker compose up --build --wait -d
+      - name: Dynamic checks (Schemathesis and adversarial suite)
+        if: steps.gate.outputs.enabled == 'true'
+        run: |
+          # The token comes from the Firebase Auth emulator running in this job: no repository secret.
+          TEST_TOKEN=$(make --no-print-directory emulator-token)
+          echo "::add-mask::$TEST_TOKEN"
+          export TEST_TOKEN
+          API_URL=http://127.0.0.1:8000 make dynamic
+      - name: Stop the stack
+        if: always() && steps.gate.outputs.enabled == 'true'
+        run: docker compose down -v
+      - name: Adversarial suite only (Schemathesis prerequisites missing)
+        if: steps.gate.outputs.enabled != 'true'
+        run: make adversarial
+
+  commit-messages:
+    name: commit-messages
+    if: github.event_name == 'pull_request'
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+      - name: Validate every commit of the pull request
+        env:
+          BASE_SHA: ${{ github.event.pull_request.base.sha }}
+          HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+        run: |
+          # D-045: Conventional Commits, title only, <= 72 chars, no AI-agent marks. The attribution
+          # pattern below mirrors the local commit-msg hook (human co-authors are allowed).
+          re='^(feat|fix|test|refactor|docs|build|ci|chore|perf|revert)(\([a-z0-9._/-]+\))?!?: .{1,}'
+          marks='(co-authored-by:.*(claude|anthropic|codex|openai|chatgpt|copilot))|(generated (with|by) .*(claude|codex|chatgpt|openai))|(noreply@anthropic\.com)|(noreply@openai\.com)|(claude\.ai/code)|(🤖 generated)'
+          dependabot_email='49699333+dependabot[bot]@users.noreply.github.com'
+
+          for sha in "$BASE_SHA" "$HEAD_SHA"; do
+            git cat-file -e "${sha}^{commit}" 2>/dev/null || git fetch --no-tags origin "$sha" \
+              || { echo "::error::cannot fetch commit $sha"; exit 1; }
+          done
+          commits=$(git rev-list --reverse "${BASE_SHA}..${HEAD_SHA}") \
+            || { echo "::error::cannot list the commits of the pull request"; exit 1; }
+          [ -n "$commits" ] || { echo "::error::the pull request has no commits to validate"; exit 1; }
+
+          failed=0
+          for sha in $commits; do
+            title=$(git log -1 --format=%s "$sha")
+            body=$(git log -1 --format=%b "$sha" | sed '/^[[:space:]]*$/d')
+            full=$(git log -1 --format=%B "$sha")
+            author=$(git log -1 --format=%ae "$sha")
+            # Merge commits are identified by their parent count (the output lists the commit and its
+            # parents), never by their title.
+            words=$(git rev-list --parents -n 1 "$sha" | wc -w)
+            problems=()
+            # Title and body rules: not for merges, not for Dependabot (its titles are set in dependabot.yml).
+            if [ "$words" -le 2 ] && [ "$author" != "$dependabot_email" ]; then
+              [[ "$title" =~ $re ]] || problems+=("title is not a Conventional Commit")
+              [ "${#title}" -le 72 ] || problems+=("title is longer than 72 characters (${#title})")
+              [ -z "$body" ] || problems+=("commit has a body (title only)")
+            fi
+            # The attribution check applies to every commit.
+            if grep -Eiq "$marks" <<<"$full"; then
+              problems+=("commit carries an AI-agent mark")
+            fi
+            if [ "${#problems[@]}" -gt 0 ]; then
+              failed=1
+              for p in "${problems[@]}"; do
+                echo "::error title=Commit ${sha:0:9}::${p}: ${title}"
+              done
+            else
+              echo "ok ${sha:0:9} $title"
+            fi
+          done
+          exit "$failed"
+
+  sonarqube:
+    name: sonarqube
+    needs: [static, tests]
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    # The repository variable SONAR_ENABLED=true switches the analysis on once SonarQube Cloud is configured.
+    # From then on a missing SONAR_TOKEN (e.g. a Dependabot PR without the secret) fails the job: no green skip.
+    env:
+      SONAR_TOKEN: ${{ secrets.SONAR_TOKEN }}
+      SONAR_ENABLED: ${{ vars.SONAR_ENABLED }}
+    steps:
+      - name: Check the SonarQube Cloud switch and token
+        id: gate
+        run: |
+          if [ "$SONAR_ENABLED" != "true" ]; then
+            echo "SKIPPED: SonarQube Cloud analysis, the repository variable SONAR_ENABLED is not 'true'"
+          elif [ -z "$SONAR_TOKEN" ]; then
+            echo "::error::SONAR_ENABLED is true but SONAR_TOKEN is empty (also add it as a Dependabot secret)"
+            exit 1
+          else
+            echo "enabled=true" >> "$GITHUB_OUTPUT"
+          fi
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        if: steps.gate.outputs.enabled == 'true'
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        if: steps.gate.outputs.enabled == 'true'
+        with:
+          name: coverage-xml
+      - uses: SonarSource/sonarqube-scan-action@59202af334b4ba7b5db01b701b8e79f8b3bef0f4 # v8.5.0
+        if: steps.gate.outputs.enabled == 'true'
+        timeout-minutes: 10
+        with:
+          # Wait for the quality gate and fail the job when it is red.
+          args: >
+            -Dsonar.qualitygate.wait=true
+            -Dsonar.qualitygate.timeout=300
