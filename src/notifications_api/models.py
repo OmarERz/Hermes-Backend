@@ -46,6 +46,19 @@ def _whole_number(value: Any) -> Any:
 Integer = Annotated[int, BeforeValidator(_whole_number)]
 
 
+_UUID_PATTERN = "^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$"
+
+
+def _check_uuid(value: str) -> str:
+    """Same rule as the schema `pattern`: canonical 8-4-4-4-12 hex, upper or lower case, no braces or urn prefix."""
+    if re.fullmatch(_UUID_PATTERN, value) is None:
+        raise ValueError("must be a UUID string")
+    return value
+
+
+UuidString = Annotated[
+    str, Field(pattern=_UUID_PATTERN, max_length=36, json_schema_extra={"format": "uuid"}), AfterValidator(_check_uuid)
+]
 DateTimeString = Annotated[str, AfterValidator(_check_date_time), Field(json_schema_extra={"format": "date-time"})]
 
 
@@ -170,7 +183,9 @@ class FeedbackInput(_Contract):
 
 
 class FeedbackResult(_Contract):
-    """Outcome of FeedbackService.record. Not defined by a JSON Schema; minimal on purpose (see docs/08 NOT-06)."""
+    """Outcome of FeedbackService.record (schemas/feedback_result.schema.json)."""
 
-    feedback_id: str
-    replaced_previous: bool = Field(description="true if an earlier active feedback of the user was archived")
+    feedback_id: UuidString
+    replaced_previous: bool = Field(
+        description="true if an earlier active feedback of the same user and assessment was archived (NOT-06)"
+    )

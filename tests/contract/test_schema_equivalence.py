@@ -15,7 +15,7 @@ from typing import Any
 import pytest
 from pydantic import BaseModel, Field
 
-from notifications_api import FeedbackInput, NotificationEvent
+from notifications_api import FeedbackInput, FeedbackResult, NotificationEvent
 
 pytestmark = pytest.mark.contract
 
@@ -25,9 +25,10 @@ SCHEMAS_DIR = Path(__file__).resolve().parents[2] / "schemas"
 MODELS: dict[str, type[BaseModel]] = {
     "notification_event.schema.json": NotificationEvent,
     "feedback.schema.json": FeedbackInput,
+    "feedback_result.schema.json": FeedbackResult,
 }
 
-_SCALAR_KEYS = ("const", "format", "minimum", "maximum", "minLength", "maxLength", "minItems", "maxItems")
+_SCALAR_KEYS = ("const", "format", "pattern", "minimum", "maximum", "minLength", "maxLength", "minItems", "maxItems")
 
 
 def _resolve(node: dict[str, Any], defs: dict[str, Any]) -> dict[str, Any]:

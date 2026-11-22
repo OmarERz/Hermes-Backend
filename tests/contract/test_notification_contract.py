@@ -11,7 +11,7 @@ import pytest
 from jsonschema import Draft202012Validator, FormatChecker
 from pydantic import ValidationError
 
-from notifications_api import FeedbackInput, LogConsumer, NotificationEvent
+from notifications_api import FeedbackInput, FeedbackResult, LogConsumer, NotificationEvent
 
 pytestmark = pytest.mark.contract
 
@@ -192,3 +192,49 @@ def test_fixtures_follow_the_default_bands() -> None:
         active = [a["score"] for a in data["assets"] if a["status"] != "fixed"]
         if active:
             assert final == max(active)
+
+
+GOOD_ID = "0b1f3c5e-7a2d-4e8f-9a6b-1c2d3e4f5a6b"
+
+
+@pytest.mark.parametrize("feedback_id", [GOOD_ID, GOOD_ID.upper()])
+def test_feedback_result_accepts_canonical_uuids_in_both_cases(feedback_id: str) -> None:
+    data = {"feedback_id": feedback_id, "replaced_previous": False}
+    validator("feedback_result.schema.json").validate(data)  # schema, with FormatChecker
+    assert FeedbackResult.model_validate(data).feedback_id == feedback_id
+
+
+@pytest.mark.parametrize(
+    "feedback_id",
+    [
+        "not-a-uuid",
+        GOOD_ID.replace("-", ""),  # missing hyphens
+        GOOD_ID + "-",  # trailing hyphen
+        "-" + GOOD_ID,
+        GOOD_ID[:-1],
+        GOOD_ID + "0",
+        "{" + GOOD_ID + "}",
+        "urn:uuid:" + GOOD_ID,
+        GOOD_ID.replace("0", "g", 1),
+        " " + GOOD_ID,
+        GOOD_ID + "\n",  # `$` alone would let a trailing newline through; maxLength closes it
+    ],
+)
+def test_feedback_result_rejects_malformed_uuids_on_both_sides(feedback_id: str) -> None:
+    data = {"feedback_id": feedback_id, "replaced_previous": False}
+    assert not validator("feedback_result.schema.json").is_valid(data)
+    # Also without FormatChecker: `format` is only an annotation then, so pattern and maxLength must do the work.
+    assert not Draft202012Validator(load(ROOT / "schemas" / "feedback_result.schema.json")).is_valid(data)
+    with pytest.raises(ValidationError):
+        FeedbackResult.model_validate(data)
+
+
+def test_feedback_result_rejects_other_shape_errors() -> None:
+    for bad in (
+        {"feedback_id": GOOD_ID, "replaced_previous": "false"},
+        {"feedback_id": GOOD_ID, "replaced_previous": False, "extra": 1},
+        {"feedback_id": GOOD_ID},
+    ):
+        assert not validator("feedback_result.schema.json").is_valid(bad)
+        with pytest.raises(ValidationError):
+            FeedbackResult.model_validate(bad)
