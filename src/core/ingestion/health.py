@@ -12,7 +12,7 @@ import uuid
 from dataclasses import dataclass
 from datetime import datetime, timedelta
 
-from sqlalchemy import select, text
+from sqlalchemy import func, select, text
 from sqlalchemy.orm import Session
 
 from core.db import models as m
@@ -22,6 +22,7 @@ from core.ingestion.settings import get_int
 
 log = logging.getLogger("ingestion")
 
+HEALTH_LOCK_KEY = 20_260_223  # transaction-level advisory lock held while a check writes its alerts
 ALERT_DOWN = "source.down"
 ALERT_RECOVERED = "source.recovered"
 
@@ -86,6 +87,8 @@ def _record(session: Session, source: m.Source, action: str, now: datetime, deta
 
 def check_source_health(session: Session, clock: Clock = utc_now, hours: int | None = None) -> list[HealthAlert]:
     """New alerts of this check (an outage already alerted is not repeated); commits."""
+    # One check at a time: two runs could both see "no open alert" and record the same outage twice.
+    session.execute(select(func.pg_advisory_xact_lock(HEALTH_LOCK_KEY)))
     now = clock()
     window = hours if hours is not None else get_int(session, "source_health_hours")
     alerts: list[HealthAlert] = []

@@ -22,7 +22,7 @@ from core.ingestion.entities import extract_cves
 
 log = logging.getLogger("ingestion")
 
-MIN_TERM_CHARS = 3
+MIN_TERM_CHARS = 2  # keeps exact short names such as "Go" or "3M"
 _TRAILING_VERSION = re.compile(r"[\s_-]+v?\d[\w.\-]*$")
 _SEPARATORS = re.compile(r"[\s_]+")
 

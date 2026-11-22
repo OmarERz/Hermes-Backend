@@ -10,7 +10,9 @@ from core.ingestion.keywords import KeywordSet, name_variants
 def test_name_variants_strip_trailing_versions() -> None:
     assert name_variants("OpenSSL 3.0.7") == {"openssl 3.0.7", "openssl"}
     assert name_variants("Apache_HTTP_Server v2.4") == {"apache http server v2.4", "apache http server"}
-    assert name_variants("Go") == set()  # too short to be a useful term
+    assert name_variants("Go") == {"go"}  # short exact names are kept
+    assert name_variants("3M") == {"3m"}
+    assert name_variants("x") == set()
     assert name_variants("nginx") == {"nginx"}
 
 

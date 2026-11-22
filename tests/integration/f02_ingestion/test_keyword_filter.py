@@ -18,6 +18,7 @@ from core.db.ids import new_id
 from core.db.seeds import seed
 from core.db.session import make_engine
 from core.ingestion.keywords import build_keywords, filter_pending_stories
+from core.ingestion.stories import join_story
 
 pytestmark = pytest.mark.integration
 ROOT = Path(__file__).resolve().parents[3]
@@ -105,3 +106,20 @@ def test_any_article_of_a_story_can_make_it_relevant(session: Session) -> None:
     second.story_id = story.id
     session.flush()
     assert filter_pending_stories(session).relevant == 1
+
+
+def test_a_republication_can_rescue_a_filtered_story(session: Session) -> None:
+    feed = Feed(session)
+    story = story_for(feed, "a", "Unrelated headline", "Nothing here.")
+    assert filter_pending_stories(session).filtered == 1
+    assert story.relevance_status == "filtered"
+    # A later run groups a republication that names OpenSSL into the same story: it is decided again.
+    second = feed.article("b", "Republished", "This one mentions OpenSSL.")
+    join_story(session, second, story)
+    assert story.relevance_status == "pending"
+    assert filter_pending_stories(session).relevant == 1
+    assert story.relevance_status == "relevant"
+    # A relevant story that gets one more article stays relevant.
+    third = feed.article("c", "Another copy", "Nothing.")
+    join_story(session, third, story)
+    assert story.relevance_status == "relevant"
