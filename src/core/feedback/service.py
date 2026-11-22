@@ -102,7 +102,8 @@ class SqlFeedbackService:
                 verdict=feedback.verdict,
                 proposed_level=feedback.proposed_level,
                 proposed_score=feedback.proposed_score,
-                comment=feedback.comment,
+                # PostgreSQL text cannot hold NUL; the rest of the untrusted comment is kept as data.
+                comment=feedback.comment.replace("\x00", "") if feedback.comment is not None else None,
                 created_at=now,
             )
             session.add(row)

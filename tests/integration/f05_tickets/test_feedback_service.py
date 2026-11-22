@@ -244,3 +244,11 @@ def test_a_false_positive_on_an_old_version_keeps_the_current_suppression(
             select(m.Suppression.suppressed_version).where(m.Suppression.finding_id == finding_id)
         )
         assert list(versions) == []  # the rated version is no longer the current one: stored as feedback only
+
+
+def test_a_comment_with_a_nul_character_is_stored_without_it(
+    factory: sessionmaker[Session], scenario: dict[str, Any]
+) -> None:
+    result = service(factory).record(feedback(scenario, "relevant", comment="antes\x00después"))
+    with factory() as session:
+        assert session.get_one(m.Feedback, result.feedback_id).comment == "antesdespués"
