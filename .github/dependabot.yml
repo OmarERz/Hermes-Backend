@@ -18,6 +18,13 @@ updates:
       prefix: "build(deps)"
     schedule:
       interval: "weekly"
+    # Runtimes are pinned by decision (Python 3.12.16, Node 22 LTS for the emulator): only patch updates here;
+    # a runtime upgrade is a planned change, not a weekly bump.
+    ignore:
+      - dependency-name: "python"
+        update-types: ["version-update:semver-major", "version-update:semver-minor"]
+      - dependency-name: "node"
+        update-types: ["version-update:semver-major"]
     groups:
       docker-minor-patch:
         update-types: ["minor", "patch"]
@@ -40,6 +47,10 @@ updates:
       prefix: "build(deps)"
     schedule:
       interval: "weekly"
+    # PostgreSQL 18 is pinned by decision: a major upgrade needs a dump and restore.
+    ignore:
+      - dependency-name: "pgvector/pgvector"
+        update-types: ["version-update:semver-major"]
     groups:
       compose-minor-patch:
         update-types: ["minor", "patch"]
