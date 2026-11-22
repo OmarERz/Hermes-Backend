@@ -269,6 +269,11 @@ def test_a_refuted_relationship_is_not_proposed_again() -> None:
     for phrasing in ("Nginx → usa → OpenSSL", "Nginx → usa → la OpenSSL 3.x", "Nginx → depende de → OpenSSL"):
         _none, rule, _reason = check_alert(alert_args(relationship=phrasing), package(), ctx(refuted=refuted))
         assert rule == "L15.refuted"
+    ubuntu_rows = {("component", "nginx", "openssl sistema operativo ubuntu")}
+    mid_version = alert_args(relationship="Nginx → usa → OpenSSL 3.x del sistema operativo Ubuntu")
+    assert check_alert(mid_version, package(), ctx(refuted=lambda k, a, b: (k, a, b) in ubuntu_rows))[1] == (
+        "L15.refuted"
+    )
     windows = alert_args(relationship="Nginx → usa → OpenSSL del sistema operativo Windows")
     assert check_alert(windows, package(), ctx(refuted=refuted))[1] is None  # another component
     decision, rule, _reason = check_alert(
@@ -285,6 +290,9 @@ def test_relation_identity() -> None:
     assert relation_identity("la OpenSSL del sistema operativo Ubuntu") == "openssl sistema operativo ubuntu"
     assert relation_identity("OpenSSL del sistema operativo Windows") == "openssl sistema operativo windows"
     assert relation_identity("  Señal   Ágil 2.0 ") == "senal agil"
+    assert relation_identity("Windows 10 Enterprise") != relation_identity("Windows 11 Enterprise")
+    assert relation_identity("OpenSSL 3.0.13 del sistema") == "openssl sistema"
+    assert relation_identity("OpenSSL 1.1.1k") == "openssl"
     assert relation_identity("Nginx Proxy Manager") == "nginx proxy manager"
 
 
@@ -483,3 +491,37 @@ def test_a_partial_blind_review_leaves_the_candidate_undecided() -> None:
     double.use("case")
     result = review_candidate(double_llm_client(double), package(content), env(), ctx())
     assert (result.status, result.alert) == (ReviewStatus.PARTIAL_REVIEW, None)
+
+
+def test_the_blind_review_must_corroborate_the_predicate() -> None:
+    content = dismissal_package()
+    content["news"][0]["suspicious"] = True
+    negated = {**INFERRED, "relationship": "Nginx → no usa → OpenSSL del sistema operativo Ubuntu"}
+    double = LlmDouble()
+    double.add_case("case", [propose(INFERRED), propose(negated, "b")])
+    double.use("case")
+    result = review_candidate(double_llm_client(double), package(content), env(), ctx())
+    assert result.status is ReviewStatus.JUDGE_DISAGREEMENT
+    decision, _rule, _reason = check_alert(INFERRED, package(), ctx())
+    assert decision is not None
+    assert decision.predicate == "usa"
+    with_preposition, _rule, _reason = check_alert(
+        {**INFERRED, "relationship": "Nginx → depende de → la OpenSSL 3.x"}, package(), ctx()
+    )
+    assert with_preposition is not None
+    assert with_preposition.predicate == "depende de"  # connectors stay in the predicate (runs on is not runs with)
+
+
+def test_refutations_ignore_a_trailing_major_version_and_blind_reviews_keep_versions() -> None:
+    rows = {("component", "nginx", "apache tomcat")}
+    tomcat = alert_args(relationship="Nginx → usa → Apache Tomcat 9", cited_product="")
+    assert check_alert(tomcat, package(), ctx(refuted=lambda k, a, b: (k, a, b) in rows))[1] == "L15.refuted"
+    content = dismissal_package()
+    content["news"][0]["suspicious"] = True
+    first = {**INFERRED, "relationship": "Nginx → usa → OpenSSL del sistema Ubuntu 22.04"}
+    second = {**INFERRED, "relationship": "Nginx → usa → OpenSSL del sistema Ubuntu 24.04"}
+    double = LlmDouble()
+    double.add_case("case", [propose(first), propose(second, "b")])
+    double.use("case")
+    result = review_candidate(double_llm_client(double), package(content), env(), ctx())
+    assert result.status is ReviewStatus.JUDGE_DISAGREEMENT

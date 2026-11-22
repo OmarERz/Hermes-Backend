@@ -334,3 +334,14 @@ def test_two_concurrent_failures_create_one_queue_entry(engine: Engine) -> None:
     with Session(engine) as session:
         entries = session.scalars(select(m.ErrorQueue).where(m.ErrorQueue.review_package_id == package_id)).all()
         assert [(e.status, e.attempts) for e in entries] == [("pending", 0)]  # same run: one attempt
+
+
+def test_runs_finishing_out_of_order_each_count_once(engine: Engine) -> None:
+    with Session(engine) as session, session.begin():
+        package_id = package_row(session, finding_package())
+        sync_error_queue(session, package_id, Failure.TRANSPORT, NOW)
+        assert sync_error_queue(session, package_id, Failure.TRANSPORT, later(2))  # run at +2h: attempt 1
+        assert sync_error_queue(session, package_id, Failure.TRANSPORT, later(2))  # the same run again: no attempt
+        assert not sync_error_queue(session, package_id, Failure.TRANSPORT, later(1))  # late +1h run: attempt 2
+        entry = session.scalars(select(m.ErrorQueue).where(m.ErrorQueue.review_package_id == package_id)).one()
+        assert (entry.attempts, entry.status) == (2, "gave_up")

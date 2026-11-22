@@ -108,10 +108,14 @@ def candidate(story_id: uuid.UUID) -> dict[str, Any]:
 
 
 def package_row(session: Session, content: dict[str, Any]) -> uuid.UUID:
+    return package_row_for(session, content, uuid.UUID(content["news"][0]["story_id"]))
+
+
+def package_row_for(session: Session, content: dict[str, Any], story_id: uuid.UUID) -> uuid.UUID:
     row = m.ReviewPackage(
         id=new_id(),
         kind="dismissal",
-        story_id=uuid.UUID(content["package_id"]),
+        story_id=story_id,
         fingerprint=content["fingerprint"],
         content=content,
         built_at=NOW,
@@ -335,3 +339,44 @@ def test_a_story_that_already_has_an_alert_gets_no_second_one(engine: Engine) ->
             session, ReviewPackage.from_content(content), ReviewTarget(package_row(session, content), "r", NOW)
         )
     assert stored.alert_id == existing_id
+
+
+def test_the_candidate_must_be_its_stored_story(engine: Engine) -> None:
+    with Session(engine) as session, session.begin():
+        story_id = make_story(session)
+        other_story = make_story(session)
+        content = candidate(story_id)
+        package_id = package_row(session, content)
+        judge = service([])  # never called
+        bad_story = candidate(story_id)
+        bad_story["news"][0]["story_id"] = "not-a-uuid"
+        with pytest.raises(ValueError, match="story UUID"):
+            judge.review(session, ReviewPackage.from_content(bad_story), ReviewTarget(None, "r", NOW))
+        two = candidate(story_id)
+        two["news"].append({**two["news"][0], "element_id": "N2"})
+        with pytest.raises(ValueError, match="exactly one news item"):
+            judge.review(session, ReviewPackage.from_content(two), ReviewTarget(None, "r", NOW))
+        with pytest.raises(ValueError, match="stored package"):
+            judge.review(
+                session, ReviewPackage.from_content(candidate(other_story)), ReviewTarget(package_id, "r", NOW)
+            )
+        changed = candidate(story_id)  # same story and fingerprint, different evidence
+        changed["news"][0]["summary"] += " Updated."
+        with pytest.raises(ValueError, match="stored package"):
+            judge.review(session, ReviewPackage.from_content(changed), ReviewTarget(package_id, "r", NOW))
+        independent = candidate(story_id)
+        independent["package_id"] = "pkg-independent-id"  # the package ID need not be the story ID
+        independent_row = package_row_for(session, independent, story_id)
+        stored = service([tool_call_completion("dismiss_news", {"news_id": "N1", "reason": "No aplica."})]).review(
+            session, ReviewPackage.from_content(independent), ReviewTarget(independent_row, "r", NOW)
+        )
+        assert stored.status is ReviewStatus.APPLIED
+
+
+def test_a_candidate_without_a_stored_package_can_be_reviewed(engine: Engine) -> None:
+    with Session(engine) as session, session.begin():
+        content = candidate(make_story(session))
+        stored = service([tool_call_completion("dismiss_news", {"news_id": "N1", "reason": "No aplica."})]).review(
+            session, ReviewPackage.from_content(content), ReviewTarget(None, "inline", NOW)
+        )
+    assert (stored.status, stored.queued) == (ReviewStatus.APPLIED, False)

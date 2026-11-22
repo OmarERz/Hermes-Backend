@@ -167,8 +167,8 @@ def sync_error_queue(
             created_at=now,
         )
         session.add(entry)
-    elif entry.status == "pending" and (entry.next_attempt_at is None or now > entry.next_attempt_at):
-        entry.attempts += 1  # one attempt per run: failures of the same run (same `now`) count once
+    elif entry.status == "pending" and now != entry.next_attempt_at:
+        entry.attempts += 1  # one attempt per run: repeated failures of the same run (same `now`) count once
     entry.reason = f"judge {failure}"
     entry.next_attempt_at = now
     if entry.attempts >= QUEUE_RETRIES:

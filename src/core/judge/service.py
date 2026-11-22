@@ -14,6 +14,7 @@ from dataclasses import dataclass, replace
 
 from sqlalchemy.orm import Session
 
+from core.db.models import ReviewPackage as ReviewPackageRow
 from core.judge.double_review import combine_outcomes, needs_double_review
 from core.judge.mitigation import MitigationResult
 from core.judge.mode2 import Mode2Context, mode2_min_confidence, review_candidate
@@ -125,6 +126,7 @@ class DismissalService:
         self._tools = tools
 
     def review(self, session: Session, package: ReviewPackage, target: ReviewTarget) -> StoredDismissalReview:
+        _check_candidate(session, package, target)
         context = Mode2Context(mode2_min_confidence(self._env), DbInventory(session), refuted_relationships(session))
         result = review_candidate(self._caller, package, self._env, context, self._tools)
         first = result.first
@@ -141,3 +143,21 @@ class DismissalService:
         # no decision (provider failure, budget or limits): the candidate is retried later (PRE-01)
         queued = sync_error_queue(session, target.review_package_id, failure, target.now)
         return StoredDismissalReview(result.status, review_id, second_id, alert_id, queued)
+
+
+def _check_candidate(session: Session, package: ReviewPackage, target: ReviewTarget) -> None:
+    """Before asking the judge (F-10): the candidate has exactly one news item, its story is a UUID, and the stored
+    package row (when given) is that story's dismissal package with this very content (L13: the audit points at
+    exactly what the judge read)."""
+    news = [element.news for element in package.news_elements if element.news is not None]
+    if len(news) != 1:
+        raise ValueError("a dismissal candidate carries exactly one news item")
+    try:
+        story_id = uuid.UUID(news[0].story_id)
+    except ValueError:
+        raise ValueError("the news item of a dismissal candidate needs its story UUID") from None
+    if target.review_package_id is not None:
+        stored = session.get(ReviewPackageRow, target.review_package_id)
+        same = stored is not None and stored.kind == "dismissal" and stored.story_id == story_id
+        if not same or stored is None or ReviewPackage.from_content(stored.content).content != package.content:
+            raise ValueError("the stored package is not this dismissal candidate")

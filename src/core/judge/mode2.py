@@ -105,6 +105,7 @@ class AlertDecision:
     quote: str
     subject: str  # normalized parts of the relationship (verified_relationship)
     object: str
+    predicate: str = ""  # what the relationship states between its ends ('usa', 'no depende de'), normalized
     suspicious: bool = False  # SEG-03: the news is flagged, so a blind second review must agree
 
 
@@ -197,7 +198,11 @@ def _decide(args: Mapping[str, Any], package: ReviewPackage, ctx: Mode2Context) 
         "noticia.",
     )
     _require(
-        not ctx.refuted(mapped or kind, relation_identity(subject), relation_identity(obj)),
+        not any(
+            ctx.refuted(mapped or kind, sub_id, obj_id)
+            for sub_id in _identities(subject)
+            for obj_id in _identities(obj)
+        ),
         "L15.refuted",
         "Una persona ya refutó esta relación; no se vuelve a proponer.",
     )
@@ -219,10 +224,14 @@ def _decide(args: Mapping[str, Any], package: ReviewPackage, ctx: Mode2Context) 
         quote=quote,
         subject=subject,
         object=obj,
+        predicate=_predicate(relationship),
         suspicious=news.suspicious,
     )
 
 
+_VERSION_TOKEN = re.compile(
+    r"v?\d+(?:\.[\dx*]+)+[a-z]?(?:[-+][\w.]+)?|v\d+"
+)  # 3.x, 1.24.0, 1.1.1k, v2; not "10" in "Windows 10"
 _TRAILING_VERSION = re.compile(r"\s+v?\d[\w.+-]*$")
 
 
@@ -256,13 +265,39 @@ def _head(end: str) -> str:
     return " ".join(kept)
 
 
+def _predicate(relationship: str) -> str:
+    """What the relationship states between its ends, keeping every word that carries meaning ('runs on' is not
+    'runs with', 'no usa' is not 'usa'): only accents, case, spaces and articles are normalized."""
+    middle = " ".join([p for p in _ARROW.split(relationship) if p][1:-1])
+    plain = "".join(c for c in unicodedata.normalize("NFKD", middle) if not unicodedata.combining(c))
+    return " ".join(w for w in plain.casefold().split() if w not in _ARTICLES)
+
+
+def _identities(end: str) -> set[str]:
+    """The identity of an end, also without a trailing bare major version ('Apache Tomcat 9' is refuted as 'Apache
+    Tomcat'); when in doubt a refutation wins."""
+    identity = relation_identity(end)
+    return {identity, re.sub(r"\s+\d+$", "", identity)}
+
+
+def _claim(end: str) -> str:
+    """An end as the blind review must corroborate it: versions and qualifiers kept (Ubuntu 22.04 is not 24.04)."""
+    plain = "".join(c for c in unicodedata.normalize("NFKD", end) if not unicodedata.combining(c))
+    return " ".join(w for w in plain.casefold().split() if w not in _ARTICLES)
+
+
 def relation_identity(end: str) -> str:
     """Identity of one end of a relationship, the same on both sides (stored refutations and new proposals): no
-    accents, casefolded, without articles and connectors and without a trailing version. Qualifiers stay:
+    accents, casefolded, without articles, connectors and dotted version tokens (anywhere; a bare number such as the
+    10 of 'Windows 10' is part of the name). Qualifiers stay:
     'la OpenSSL del sistema operativo Ubuntu' is 'openssl sistema operativo ubuntu', not the Windows one."""
     plain = "".join(c for c in unicodedata.normalize("NFKD", end) if not unicodedata.combining(c))
-    words = [w for w in product_name(plain).split() if w not in _ARTICLES and w not in _CONNECTORS]
-    return product_name(" ".join(words))
+    words = [
+        w
+        for w in normalize_text(plain).casefold().split()
+        if w not in _ARTICLES and w not in _CONNECTORS and not _VERSION_TOKEN.fullmatch(w)
+    ]
+    return " ".join(words)
 
 
 def _word_in(needle: str, text: str) -> bool:
@@ -390,8 +425,8 @@ class Mode2Result:
 
 
 def _same_alert(first: AlertDecision, second: AlertDecision) -> bool:
-    """The blind review corroborates the alert: same story, relevance, type, CI, cited product, both ends of the
-    relationship and ticketing installation."""
+    """The blind review corroborates the alert: same story, relevance, type, CI, cited product, both ends and the
+    predicate of the relationship (its polarity included) and ticketing installation."""
 
     def key(alert: AlertDecision) -> tuple[object, ...]:
         return (
@@ -400,8 +435,9 @@ def _same_alert(first: AlertDecision, second: AlertDecision) -> bool:
             alert.relationship_type,
             alert.asset_id,
             relation_identity(alert.cited_product or ""),
-            relation_identity(alert.subject),
-            relation_identity(alert.object),
+            _claim(alert.subject),
+            alert.predicate,
+            _claim(alert.object),
             alert.installed_software_id,
         )
 
