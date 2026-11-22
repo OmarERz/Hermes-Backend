@@ -79,6 +79,7 @@ jobs:
 
   schemathesis:
     name: schemathesis
+    needs: [static, tests]
     runs-on: ubuntu-latest
     timeout-minutes: 20
     steps:
@@ -113,17 +114,20 @@ jobs:
       - name: Wait for the stack to be healthy
         if: steps.gate.outputs.enabled == 'true'
         run: docker compose up --build --wait -d
-      - name: Full gate with Schemathesis
+      - name: Dynamic checks (Schemathesis and adversarial suite)
         if: steps.gate.outputs.enabled == 'true'
         run: |
           # The token comes from the Firebase Auth emulator running in this job: no repository secret.
           TEST_TOKEN=$(make --no-print-directory emulator-token)
           echo "::add-mask::$TEST_TOKEN"
           export TEST_TOKEN
-          API_URL=http://127.0.0.1:8000 make verify-full
+          API_URL=http://127.0.0.1:8000 make dynamic
       - name: Stop the stack
         if: always() && steps.gate.outputs.enabled == 'true'
         run: docker compose down -v
+      - name: Adversarial suite only (Schemathesis prerequisites missing)
+        if: steps.gate.outputs.enabled != 'true'
+        run: make adversarial
 
   commit-messages:
     name: commit-messages
@@ -187,7 +191,7 @@ jobs:
 
   sonarqube:
     name: sonarqube
-    needs: tests
+    needs: [static, tests]
     runs-on: ubuntu-latest
     timeout-minutes: 15
     # The repository variable SONAR_ENABLED=true switches the analysis on once SonarQube Cloud is configured.

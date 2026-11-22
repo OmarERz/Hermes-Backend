@@ -4,7 +4,7 @@
 SHELL := /bin/bash
 .SHELLFLAGS := -eu -o pipefail -c
 
-.PHONY: help verify lint typecheck boundaries test coverage semgrep secrets audit verify-full zap bruno ci-lint review
+.PHONY: help verify lint typecheck boundaries test coverage semgrep secrets audit verify-full schemathesis adversarial dynamic zap bruno ci-lint review
 
 help: ## List the available targets
 	@grep -E '^[a-z-]+:.*## ' $(MAKEFILE_LIST) | awk 'BEGIN {FS = ":.*## "}; {printf "  %-12s %s\n", $$1, $$2}'
@@ -78,7 +78,11 @@ SCHEMATHESIS_EXCLUDES ?= --exclude-path /api/scans --exclude-path /api/stix/expo
 
 # Not part of plain `make verify`. A step is skipped only while the phase that creates its prerequisite
 # has not landed, and says so with an explicit SKIPPED line; once the prerequisite exists it must pass.
-verify-full: verify ## Full gate before closing a feature: verify + Schemathesis + adversarial suite
+verify-full: verify dynamic ## Full gate before closing a feature: verify + dynamic checks
+
+dynamic: schemathesis adversarial ## Dynamic checks only: Schemathesis + adversarial suite (CI runs them after verify's steps)
+
+schemathesis: ## Schemathesis against the running API (API_URL and TEST_TOKEN) once openapi/openapi.json exists
 	@if [ -f "$(OPENAPI_SNAPSHOT)" ]; then \
 	  test -n "$${API_URL:-}" || { echo "API_URL is not set: Schemathesis needs the running API (e.g. API_URL=http://localhost:8000)" >&2; exit 2; }; \
 	  test -n "$${TEST_TOKEN:-}" || { echo "TEST_TOKEN is not set: Schemathesis needs a Firebase emulator bearer token (docs/14 §4.3)" >&2; exit 2; }; \
@@ -87,6 +91,8 @@ verify-full: verify ## Full gate before closing a feature: verify + Schemathesis
 	else \
 	  echo "SKIPPED: Schemathesis, $(OPENAPI_SNAPSHOT) does not exist yet (arrives in F0.5)"; \
 	fi
+
+adversarial: ## Adversarial judge suite (pytest -m adversarial)
 	@rc=0; uv run --locked pytest -m adversarial -q --no-cov || rc=$$?; \
 	if [ $$rc -eq 5 ]; then echo "SKIPPED: adversarial suite, no test carries the adversarial marker yet (arrives in F6)"; \
 	else exit $$rc; fi
