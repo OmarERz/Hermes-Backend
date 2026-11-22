@@ -91,23 +91,39 @@ jobs:
           python-version-file: .python-version
       - name: Install dependencies
         run: uv sync --locked
-      - name: Schemathesis against the running API
-        env:
-          API_URL: ${{ vars.CI_API_URL }}
-          TEST_TOKEN: ${{ secrets.CI_TEST_TOKEN }}
+      - name: Check Schemathesis prerequisites
+        id: gate
         run: |
-          # Skipped (with a notice) while openapi/openapi.json does not exist (arrives in F0.5).
-          # Once it exists the API must be started with a test token (F0.7); until then the job fails
-          # loudly instead of reporting a false green.
           if [ ! -f openapi/openapi.json ]; then
             echo "SKIPPED: Schemathesis, openapi/openapi.json does not exist yet (arrives in F0.5)"
-            exit 0
+          elif ! grep -q '^emulator-token:' Makefile; then
+            echo "SKIPPED: Schemathesis, no Makefile target emulator-token yet (F0.7 provides the test token)"
+          else
+            echo "enabled=true" >> "$GITHUB_OUTPUT"
           fi
-          if [ -z "${API_URL:-}" ] || [ -z "${TEST_TOKEN:-}" ]; then
-            echo "::error::openapi/openapi.json exists but this job cannot start the API with a test token yet (F0.7)"
-            exit 1
-          fi
-          make verify-full
+      - name: Start the stack with throwaway passwords
+        if: steps.gate.outputs.enabled == 'true'
+        run: |
+          for var in POSTGRES_PASSWORD MIGRATOR_DB_PASSWORD APP_DB_PASSWORD RETENTION_DB_PASSWORD; do
+            value=$(openssl rand -hex 24)
+            echo "::add-mask::$value"
+            echo "$var=$value" >> "$GITHUB_ENV"
+          done
+          echo "API_DOCS_ENABLED=true" >> "$GITHUB_ENV"
+      - name: Wait for the stack to be healthy
+        if: steps.gate.outputs.enabled == 'true'
+        run: docker compose up --build --wait -d
+      - name: Full gate with Schemathesis
+        if: steps.gate.outputs.enabled == 'true'
+        run: |
+          # The token comes from the Firebase Auth emulator running in this job: no repository secret.
+          TEST_TOKEN=$(make --no-print-directory emulator-token)
+          echo "::add-mask::$TEST_TOKEN"
+          export TEST_TOKEN
+          API_URL=http://127.0.0.1:8000 make verify-full
+      - name: Stop the stack
+        if: always() && steps.gate.outputs.enabled == 'true'
+        run: docker compose down -v
 
   commit-messages:
     name: commit-messages
