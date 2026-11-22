@@ -6415,6 +6415,7 @@
     },
     "/api/notifications/events": {
       "get": {
+        "description": "Notification events of the outbox (NOT-02); `error` lists those that exhausted their retries.",
         "operationId": "notification_events_api_notifications_events_get",
         "parameters": [
           {
@@ -6582,6 +6583,7 @@
     },
     "/api/notifications/events/{id}/retry": {
       "post": {
+        "description": "Put an event in error back in the queue with a fresh attempt budget.",
         "operationId": "retry_event_api_notifications_events__id__retry_post",
         "parameters": [
           {

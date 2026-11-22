@@ -12,7 +12,9 @@ from pydantic import SecretStr
 from api.app import create_app
 from api.auth import CurrentUser, Role, get_current_user
 from api.routes._auth import ROUTE_ROLES
+from api.routes._events import get_event_queue
 from api.routes._state import get_dashboard_source
+from api.routes.models import NotificationEventRow
 from core.config import Settings
 from core.metrics.dashboard import Dashboard, DashboardMetric
 
@@ -106,7 +108,6 @@ GET_SAMPLES = [
     "/api/alerts",
     "/api/runs",
     "/api/calibration/proposals",
-    "/api/notifications/events",
     "/api/connections/status",
     "/api/setup/status",
     "/api/audit",
@@ -342,8 +343,6 @@ def test_runs_stix_calibration_and_notifications(client: TestClient) -> None:
     assert client.post("/api/calibration/proposals/cal-1/approve").json()["status"] == "approved"
     assert client.post("/api/calibration/proposals/cal-1/reject").json()["status"] == "rejected"
     assert client.post("/api/calibration/proposals/zzz/approve").status_code == 404
-    assert client.post("/api/notifications/events/evt-1/retry").json()["status"] == "pending"
-    assert client.post("/api/notifications/events/zzz/retry").status_code == 404
     assert client.post("/api/connections/test", json={"names": ["itop"]}).json()[0]["name"] == "itop"
     assert client.put("/api/setup/steps/3", json={"done": True}).json()["done"] is True
     assert client.put("/api/setup/steps/99", json={}).status_code == 404
@@ -351,22 +350,18 @@ def test_runs_stix_calibration_and_notifications(client: TestClient) -> None:
     assert client.get("/api/recommendations/asm-0002/feedback").json() == []
 
 
-def test_decided_proposal_and_non_error_event_conflict() -> None:
+def test_a_decided_proposal_conflicts() -> None:
     from api.routes import operations, samples  # noqa: PLC0415 - patched sample data
 
     decided = samples.PROPOSALS[0].model_copy(update={"status": "approved"})
-    delivered = samples.NOTIFICATION_EVENTS[0].model_copy(update={"status": "delivered"})
-    original = (list(samples.PROPOSALS), list(samples.NOTIFICATION_EVENTS))
+    original = list(samples.PROPOSALS)
     try:
         samples.PROPOSALS[:] = [decided]
-        samples.NOTIFICATION_EVENTS[:] = [delivered]
         as_role(Role.ADMIN)
         with TestClient(APP) as test_client:
             assert test_client.post("/api/calibration/proposals/cal-1/approve").status_code == 409
-            assert test_client.post("/api/notifications/events/evt-1/retry").status_code == 409
     finally:
-        samples.PROPOSALS[:] = original[0]
-        samples.NOTIFICATION_EVENTS[:] = original[1]
+        samples.PROPOSALS[:] = original
         APP.dependency_overrides.clear()
     assert operations.router
 
@@ -430,3 +425,30 @@ def test_metrics_come_from_the_dashboard_service(client: TestClient) -> None:
         "generated_at": "2026-11-22T12:00:00Z",
         "metrics": [{"key": "precision", "label": "Precisión", "value": "87.5", "unit": "%"}],
     }
+
+
+class FakeEvents:
+    def __init__(self) -> None:
+        self.row = NotificationEventRow(
+            id="e1",
+            type="new_ticket",
+            priority="immediate",
+            status="error",
+            attempts=10,
+            last_error="x",
+            created_at="t",
+        )
+
+    def list(self, status: str) -> list[NotificationEventRow]:
+        return [self.row] if status == self.row.status else []
+
+    def retry(self, event_id: str) -> NotificationEventRow:
+        return self.row.model_copy(update={"status": "pending", "attempts": 0, "last_error": None})
+
+
+def test_notification_events_come_from_the_event_queue(client: TestClient) -> None:
+    as_role(Role.ADMIN)
+    APP.dependency_overrides[get_event_queue] = FakeEvents
+    assert [e["id"] for e in client.get("/api/notifications/events").json()["items"]] == ["e1"]
+    assert client.get("/api/notifications/events", params={"status": "pending"}).json()["items"] == []
+    assert client.post("/api/notifications/events/e1/retry").json()["status"] == "pending"

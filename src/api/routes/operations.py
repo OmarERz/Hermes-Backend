@@ -13,6 +13,7 @@ from api.errors import ApiError, ErrorDetail
 from api.pagination import PAGINATED_RESPONSES, Page, PageQuery, Signer, paginate
 from api.routes import samples
 from api.routes._auth import guard
+from api.routes._events import Events
 from api.routes._state import MetricsSource, RunStore
 from api.routes.models import (
     AuditEntry,
@@ -146,9 +147,10 @@ def metrics(source: MetricsSource) -> MetricsDashboard:
     "/api/notifications/events", dependencies=[guard("GET", "/api/notifications/events")], responses=PAGINATED_RESPONSES
 )
 def notification_events(
-    params: PageQuery, signer: Signer, status: Literal["pending", "delivered", "error"] = "error"
+    params: PageQuery, signer: Signer, events: Events, status: Literal["pending", "delivered", "error"] = "error"
 ) -> Page[NotificationEventRow]:
-    return paginate([e for e in samples.NOTIFICATION_EVENTS if e.status == status], params, signer)
+    """Notification events of the outbox (NOT-02); `error` lists those that exhausted their retries."""
+    return paginate(events.list(status), params, signer)
 
 
 @router.post(
@@ -156,13 +158,9 @@ def notification_events(
     status_code=202,
     dependencies=[guard("POST", "/api/notifications/events/{id}/retry")],
 )
-def retry_event(id: str) -> NotificationEventRow:  # noqa: A002
-    event = next((e for e in samples.NOTIFICATION_EVENTS if e.id == id), None)
-    if event is None:
-        raise ApiError(404, "not_found", "El evento no existe.")
-    if event.status != "error":
-        raise ApiError(409, "not_in_error", "Solo se pueden reintentar eventos en error.")
-    return event.model_copy(update={"status": "pending", "attempts": 0, "last_error": None})
+def retry_event(id: str, events: Events) -> NotificationEventRow:  # noqa: A002
+    """Put an event in error back in the queue with a fresh attempt budget."""
+    return events.retry(id)
 
 
 @router.get("/api/connections/status", dependencies=[guard("GET", "/api/connections/status")])
