@@ -8,7 +8,7 @@ from __future__ import annotations
 
 import logging
 from http import HTTPStatus
-from typing import Any
+from typing import Any, cast
 
 from fastapi import FastAPI, Request
 from fastapi.encoders import jsonable_encoder
@@ -81,12 +81,12 @@ def error_response(
 
 
 def _api_error_handler(_request: Request, exc: Exception) -> JSONResponse:
-    assert isinstance(exc, ApiError)  # noqa: S101 - registered for ApiError only
+    exc = cast(ApiError, exc)
     return error_response(exc.status_code, exc.code, exc.message, exc.details)
 
 
 def _http_exception_handler(_request: Request, exc: Exception) -> JSONResponse:
-    assert isinstance(exc, StarletteHTTPException)  # noqa: S101 - registered for HTTPException only
+    exc = cast(StarletteHTTPException, exc)
     status = exc.status_code
     default = _GENERIC_SERVER if status >= HTTPStatus.INTERNAL_SERVER_ERROR else _GENERIC_CLIENT
     code, message = _STATUS_CODES.get(status, default)
@@ -95,7 +95,7 @@ def _http_exception_handler(_request: Request, exc: Exception) -> JSONResponse:
 
 
 def _validation_handler(_request: Request, exc: Exception) -> JSONResponse:
-    assert isinstance(exc, RequestValidationError)  # noqa: S101 - registered for RequestValidationError only
+    exc = cast(RequestValidationError, exc)
     details = [
         ErrorDetail(field=".".join(str(part) for part in error["loc"]), issue=str(error["type"]))
         for error in exc.errors()
