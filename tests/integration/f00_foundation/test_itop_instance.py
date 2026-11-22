@@ -10,9 +10,12 @@ import os
 import secrets
 import shutil
 import subprocess
+import threading
+import time
 from collections.abc import Iterator
+from http.server import BaseHTTPRequestHandler, HTTPServer
 from pathlib import Path
-from typing import Any
+from typing import Any, ClassVar
 
 import httpx
 import pytest
@@ -59,10 +62,40 @@ def rest(token: str, operation: dict[str, Any]) -> dict[str, Any]:
     return body
 
 
+class Receiver(BaseHTTPRequestHandler):
+    """Stands in for the backend webhook route: records what iTop POSTs."""
+
+    received: ClassVar[list[tuple[str, str, bytes]]] = []
+
+    def do_POST(self) -> None:
+        body = self.rfile.read(int(self.headers.get("Content-Length", 0)))
+        Receiver.received.append((self.path, self.headers.get("Authorization", ""), body))
+        self.send_response(200)
+        self.end_headers()
+
+    def log_message(self, format: str, *args: Any) -> None:  # noqa: A002
+        """Keep the test output quiet."""
+
+
 @pytest.fixture(scope="module")
-def instance() -> Iterator[dict[str, str]]:
+def webhook_receiver() -> Iterator[str]:
+    # Reachable from the container through host.docker.internal, so it cannot be bound to loopback only;
+    # it lives for the duration of the test module and only records what it receives.
+    server = HTTPServer(("", 0), Receiver)
+    threading.Thread(target=server.serve_forever, daemon=True).start()
+    try:
+        yield f"http://host.docker.internal:{server.server_port}/api/itop/webhook"
+    finally:
+        server.shutdown()
+        server.server_close()
+
+
+@pytest.fixture(scope="module")
+def instance(webhook_receiver: str) -> Iterator[dict[str, str]]:
     env = {
         **os.environ,
+        "ITOP_WEBHOOK_URL": webhook_receiver,
+        "ITOP_WEBHOOK_TOKEN": "webhook-test-secret",
         "ITOP_PORT": PORT,
         "ITOP_DB_ROOT_PASSWORD": secrets.token_urlsafe(16),
         "ITOP_DB_PASSWORD": secrets.token_urlsafe(16),
@@ -146,3 +179,30 @@ def test_sample_ticket_can_be_assigned_and_resolved(instance: dict[str, str]) ->
         },
     )
     assert resolved["code"] == 0, resolved
+
+
+def test_updating_a_ticket_rings_the_webhook(instance: dict[str, str]) -> None:
+    token = read_token(instance, "hermes-rest-token")
+    ticket = rest(
+        token, {"operation": "core/get", "class": "UserRequest", "key": "SELECT UserRequest", "output_fields": "ref"}
+    )
+    ((key, found),) = [(o["key"], o["fields"]) for o in ticket["objects"].values()]
+    updated = rest(
+        token,
+        {
+            "operation": "core/update",
+            "class": "UserRequest",
+            "key": int(key),
+            "fields": {"title": "changed"},
+            "comment": "t",
+        },
+    )
+    assert updated["code"] == 0, updated
+    deadline = time.monotonic() + 15
+    while not Receiver.received and time.monotonic() < deadline:
+        time.sleep(0.5)
+    assert Receiver.received, "iTop did not call the webhook"
+    path, authorization, body = Receiver.received[-1]
+    assert path == "/api/itop/webhook"
+    assert authorization == "Bearer webhook-test-secret"
+    assert json.loads(body) == {"class": "UserRequest", "id": key, "ref": found["ref"]}

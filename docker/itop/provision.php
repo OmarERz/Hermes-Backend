@@ -83,3 +83,55 @@ CreateTokenUser('hermes-rest', ['REST Services User', 'Hermes Backend'], $oPerso
 	APPROOT.'data/hermes-rest-token');
 CreateTokenUser('hermes-seed', ['REST Services User', 'Administrator'], $oPerson->GetKey(),
 	APPROOT.'data/hermes-seed-token');
+
+// Webhook for ARQ-02 / C12: when a UserRequest is updated, iTop POSTs the minimal strict-JSON payload
+// {"class","id","ref"} to the backend, which re-reads the real state (the webhook is only a doorbell).
+// Webhooks are synchronous with a 5 s timeout and are not retried, so the backend also reconciles periodically.
+// ITOP_WEBHOOK_URL is configurable; ITOP_WEBHOOK_TOKEN, when set, is sent as `Authorization: Bearer`.
+function ConfigureWebhook(): void
+{
+	$sUrl = getenv('ITOP_WEBHOOK_URL') ?: 'http://host.docker.internal:8000/api/itop/webhook';
+	$sBearer = getenv('ITOP_WEBHOOK_TOKEN') ?: '';
+
+	$oType = FindOne('RemoteApplicationType', ['name' => 'Other / Generic']);
+	if ($oType === null) {
+		fwrite(STDERR, "remote application type 'Other / Generic' not found\n");
+		exit(1);
+	}
+	$oConnection = FindOrCreate('RemoteApplicationConnection', ['name' => 'Hermes backend'], [
+		'remoteapplicationtype_id' => $oType->GetKey(),
+		'environment' => '3-production', // iTop's code for production
+		'url' => $sUrl,
+	]);
+	$sHeaders = 'Content-Type: application/json';
+	if ($sBearer !== '') {
+		$sHeaders .= "\nAuthorization: Bearer ".$sBearer;
+	}
+	// Only class, id and ref: titles and descriptions would break the JSON with their quotes (analysis §5.8)
+	$sPayload = '{"class":"$this->finalclass$","id":"$this->id$","ref":"$this->ref$"}';
+	$oAction = FindOrCreate('ActionWebhook', ['name' => 'Hermes ticket updated'], [
+		'description' => 'Doorbell for the Hermes backend (ARQ-02)',
+		'status' => 'enabled', // "In production"
+		'remoteapplicationconnection_id' => $oConnection->GetKey(),
+		'method' => 'post',
+		'path' => '',
+		'headers' => $sHeaders,
+		'payload' => $sPayload,
+	]);
+	if (FindOne('TriggerOnObjectUpdate', ['description' => 'Hermes: UserRequest updated']) !== null) {
+		return;
+	}
+	$oTrigger = MetaModel::NewObject('TriggerOnObjectUpdate');
+	$oTrigger->Set('description', 'Hermes: UserRequest updated');
+	$oTrigger->Set('target_class', 'UserRequest');
+	$oLinks = new ormLinkSet('TriggerOnObjectUpdate', 'action_list', DBObjectSet::FromScratch('lnkTriggerAction'));
+	$oLink = MetaModel::NewObject('lnkTriggerAction');
+	$oLink->Set('action_id', $oAction->GetKey());
+	$oLink->Set('order', 1);
+	$oLinks->AddItem($oLink);
+	$oTrigger->Set('action_list', $oLinks);
+	$oTrigger->DBInsert();
+	echo "created trigger on UserRequest update\n";
+}
+
+ConfigureWebhook();
