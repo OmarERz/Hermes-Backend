@@ -89,6 +89,8 @@ def test_schema_lists_the_formula_and_the_settings_catalog(client: TestClient) -
     assert schema["sensitivity_profile"]["type"] == "enum"
     assert schema["complex_reasoning_mode"]["type"] == "boolean"
     assert "decay.1.multiplier" in schema and "bands.1" in schema
+    assert schema["sensitivity_profile"]["options"] == ["broad", "minimal", "normal"]
+    assert schema["dead_zone"]["options"] == [] and schema["weights.S"]["options"] == []
 
 
 def test_get_config_starts_at_the_factory_version(client: TestClient) -> None:
@@ -468,12 +470,16 @@ def test_a_new_feed_enters_as_n4_and_is_audited(client: TestClient, engine: Engi
     created = client.post("/api/sources", json={"name": "Feed de Prueba", "url": "https://feed.example.test/rss"})
     assert created.status_code == 201, created.text
     body = created.json()
-    assert (body["level"], body["structural"], body["type"]) == ("N4", False, "feed")
+    assert (body["level"], body["structural"], body["type"], body["active"]) == ("N4", False, "feed", False)
     assert rows(engine, "SELECT code, trust_tier, is_custom FROM source WHERE name = 'Feed de Prueba'") == [
         ("feed_de_prueba", "N4", True)
     ]
+    assert rows(engine, "SELECT kind, enabled FROM source WHERE code = 'feed_de_prueba'") == [("rss", False)]
+    json_feed = client.post("/api/sources", json={"name": "Json", "url": "https://feed.example.test/j", "kind": "json"})
+    assert json_feed.status_code == 201
+    assert rows(engine, "SELECT kind FROM source WHERE code = 'json'") == [("json",)]
     again = client.post("/api/sources", json={"name": "Feed de Prueba", "url": "https://feed.example.test/rss"})
-    assert again.status_code == 201 and rows(engine, "SELECT count(*) FROM source WHERE is_custom") == [(2,)]
+    assert again.status_code == 201 and rows(engine, "SELECT count(*) FROM source WHERE is_custom") == [(3,)]
     assert rows(engine, "SELECT action FROM audit_log WHERE entity_type = 'source' ORDER BY created_at")[0] == (
         "source.create",
     )
@@ -510,6 +516,8 @@ def test_switching_sources_and_levels(client: TestClient, engine: Engine) -> Non
     blocked = client.patch(f"/api/sources/{structural['id']}", json={"active": False})
     assert blocked.status_code == 409 and blocked.json()["error"]["code"] == "structural_source"
     as_role(client, Role.ADMIN)
+    assert client.patch(f"/api/sources/{own['id']}", json={"active": True}).json()["active"] is True
+    assert client.patch(f"/api/sources/{own['id']}", json={"active": False}).json()["active"] is False
     raised = client.patch(f"/api/sources/{own['id']}", json={"level": "N2"})
     assert raised.status_code == 200 and (raised.json()["level"], raised.json()["type"]) == ("N2", "research")
     assert (
@@ -520,7 +528,7 @@ def test_switching_sources_and_levels(client: TestClient, engine: Engine) -> Non
     actions = [
         r[0] for r in rows(engine, "SELECT action FROM audit_log WHERE entity_type = 'source' ORDER BY created_at")
     ]
-    assert actions == ["source.create", "source.disable", "source.trust_tier"]
+    assert actions == ["source.create", "source.enable", "source.disable", "source.trust_tier"]
 
 
 def test_source_health_comes_from_the_fetch_history(client: TestClient, engine: Engine) -> None:
@@ -559,3 +567,31 @@ def test_control_characters_and_broken_text_are_refused_everywhere(
     assert client.put("/api/profile", json=profile).status_code == 422
     assert client.post("/api/sources", json={"name": bad, "url": "https://feed.example.test/rss"}).status_code == 422
     assert client.get("/api/config").json()["version"] == 1
+
+
+def test_a_rejected_patch_changes_nothing(client: TestClient, engine: Engine) -> None:
+    add_user(engine, "u1", "admin")
+    as_role(client, Role.ADMIN)
+    structural = next(s for s in client.get("/api/sources").json()["items"] if s["structural"])
+    refused = client.patch(f"/api/sources/{structural['id']}", json={"level": "N2", "active": False})
+    assert refused.status_code == 409
+    assert next(s for s in client.get("/api/sources").json()["items"] if s["id"] == structural["id"])["level"] == "N1"
+
+
+def test_a_fresh_install_without_factory_values_answers_a_clear_conflict(client: TestClient, engine: Engine) -> None:
+    run(engine, "UPDATE formula_version SET status = 'superseded'")
+    as_role(client, Role.ADMIN)
+    for url in ("/api/config", "/api/config/schema"):
+        response = client.get(url)
+        assert response.status_code == 409 and response.json()["error"]["code"] == "conflict"
+    assert (
+        client.post("/api/formula/simulate", json={"changes": {"formula.kev_exposed_floor": "95"}}).status_code == 409
+    )
+    assert put(client, 1, dead_zone="5").status_code == 409
+
+
+def test_formula_values_with_more_places_than_the_database_keeps_are_refused(client: TestClient) -> None:
+    as_role(client, Role.ADMIN)
+    response = put(client, 1, **{"weights.S": "0.25004", "weights.P": "0.30004", "weights.T": "0.19992"})
+    assert response.status_code == 422
+    assert "too_many_decimals" in {d["issue"] for d in response.json()["error"]["details"]}

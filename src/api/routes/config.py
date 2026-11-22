@@ -30,7 +30,6 @@ from api.routes.models import (
 )
 from core.configuration import formula_store, profile, service
 from core.configuration.errors import ConfigError, Problem, ValidationFailedError
-from core.scoring.formula_repo import load_active_formula
 
 router = APIRouter(tags=["configuration"])
 PeerId = Annotated[str, Path(alias="id")]
@@ -53,6 +52,7 @@ def _parameter(p: service.Parameter) -> ConfigParameter:
             "min_role": p.min_role,
             "description": p.description,
             "validations": list(p.validations),
+            "options": list(p.options),
         }
     )
 
@@ -60,12 +60,18 @@ def _parameter(p: service.Parameter) -> ConfigParameter:
 @router.get("/api/config/schema", dependencies=[guard("GET", "/api/config/schema")])
 def config_schema(session: SessionDep) -> list[ConfigParameter]:
     """Parameter schema the frontend builds its forms from (API-05): the formula and the settings catalog."""
-    return [_parameter(p) for p in service.catalog(session)]
+    try:
+        return [_parameter(p) for p in service.catalog(session)]
+    except ConfigError as error:
+        raise to_api_error(error) from None
 
 
 @router.get("/api/config", dependencies=[guard("GET", "/api/config")])
 def get_config(session: SessionDep) -> ConfigDocument:
-    return ConfigDocument(version=service.current_version(session), values=service.current_values(session))
+    try:
+        return ConfigDocument(version=service.current_version(session), values=service.current_values(session))
+    except ConfigError as error:
+        raise to_api_error(error) from None
 
 
 @router.put("/api/config", dependencies=[guard("PUT", "/api/config")])
@@ -121,7 +127,7 @@ def simulate(request: SimulationRequest, session: SessionDep) -> SimulationResul
                 "Solo los parámetros de la fórmula se pueden simular.",
                 tuple(Problem(f"body.changes.{key}", "unknown_parameter") for key in foreign),
             )
-        _, formula = load_active_formula(session)
+        _, formula = service.load_active_formula(session)
         formula_store.apply_changes(formula, request.changes)
     except ConfigError as error:
         raise to_api_error(error) from None

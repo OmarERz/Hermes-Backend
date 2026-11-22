@@ -692,6 +692,14 @@
             "title": "Min Role",
             "type": "string"
           },
+          "options": {
+            "description": "Allowed values of an enum parameter",
+            "items": {
+              "type": "string"
+            },
+            "title": "Options",
+            "type": "array"
+          },
           "type": {
             "enum": [
               "decimal",
@@ -2384,6 +2392,19 @@
       "SourceCreate": {
         "additionalProperties": false,
         "properties": {
+          "kind": {
+            "default": "rss",
+            "description": "How the feed is read",
+            "enum": [
+              "rss",
+              "atom",
+              "json",
+              "csv",
+              "api"
+            ],
+            "title": "Kind",
+            "type": "string"
+          },
           "name": {
             "minLength": 1,
             "title": "Name",
@@ -8835,7 +8856,7 @@
         ]
       },
       "post": {
-        "description": "Own feeds enter as N4 (D-041): HTTPS, public host, no secrets in the URL; the change is audited.",
+        "description": "Own feeds enter as N4 and inactive until an analyst switches them on (D-041); the change is audited.",
         "operationId": "create_source_api_sources_post",
         "requestBody": {
           "content": {

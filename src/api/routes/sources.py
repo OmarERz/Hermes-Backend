@@ -98,13 +98,13 @@ def list_sources(params: PageQuery, signer: Signer, session: SessionDep) -> Page
 
 @router.post("/api/sources", status_code=201, dependencies=[guard("POST", "/api/sources")])
 def create_source(source: SourceCreate, request: Request, session: SessionDep, user: CurrentUserDep) -> Source:
-    """Own feeds enter as N4 (D-041): HTTPS, public host, no secrets in the URL; the change is audited."""
+    """Own feeds enter as N4 and inactive until an analyst switches them on (D-041); the change is audited."""
     try:
         check_text("body", source.name, source.url)
     except ConfigError as error:
         raise to_api_error(error) from None
     taken = set(session.scalars(select(m.Source.code))) | RESERVED_CODES
-    new = NewSource(_slug(source.name, taken), source.name, "rss", source.url)
+    new = NewSource(_slug(source.name, taken), source.name, source.kind, source.url, enabled=False)
     resolver = getattr(request.app.state, "source_resolver", system_resolver)
     try:
         created = add_custom_source(session, new, app_user_id(session, user), datetime.now(UTC), resolver)
@@ -122,6 +122,11 @@ def patch_source(source_id: SourceId, patch: SourcePatch, session: SessionDep, u
     except ValueError:
         raise ApiError(404, "not_found", "La fuente no existe.") from None
     actor, now = app_user_id(session, user), datetime.now(UTC)
+    current = session.get(m.Source, identifier)
+    if current is None:
+        raise ApiError(404, "not_found", "La fuente no existe.")
+    if patch.active is False and current.is_structural:  # refused before any other field of the same request is applied
+        raise _source_error(SourceConflictError("Las fuentes estructurales no se pueden apagar"))
     try:
         if patch.level is not None:
             set_trust_tier(session, identifier, patch.level, actor, now)

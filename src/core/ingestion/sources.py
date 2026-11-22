@@ -127,6 +127,7 @@ class NewSource:
     name: str
     kind: str
     url: str
+    enabled: bool = True  # the front adds feeds inactive until an analyst switches them on (docs/13 FRO-16)
 
 
 def add_custom_source(
@@ -160,7 +161,7 @@ def add_custom_source(
         trust_tier=CUSTOM_TIER,
         is_structural=False,
         is_custom=True,
-        enabled=True,
+        enabled=new.enabled,
         created_by=actor,
         created_at=now,
     )

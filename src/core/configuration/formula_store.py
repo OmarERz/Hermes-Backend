@@ -22,6 +22,7 @@ from core.db import models as m
 from core.scoring.engine import LEVEL_ORDER, Formula, FormulaError
 from core.scoring.formula_repo import load_formula
 
+STORED_DECIMALS: Final = 4  # formula values are stored as numeric(5,4)
 BONUS: Final = "personal_data_bonus"
 LEVEL_PARTS: Final = 2  # factor and level code after the `levels.` prefix
 DECAY_PARTS: Final = 2  # step number and field after the `decay.` prefix
@@ -69,6 +70,9 @@ def _number(key: str, raw: str) -> Decimal:
         raise _bad(key, "invalid_decimal") from None
     if not value.is_finite():
         raise _bad(key, "invalid_decimal")
+    exponent = value.as_tuple().exponent
+    if isinstance(exponent, int) and exponent < -STORED_DECIMALS:  # numeric(5,4): more places would be rounded away
+        raise _bad(key, "too_many_decimals")
     return value
 
 

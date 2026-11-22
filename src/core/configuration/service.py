@@ -20,6 +20,7 @@ from sqlalchemy.orm import Session
 
 from core.configuration import formula_store as fs
 from core.configuration.errors import (
+    ConflictError,
     ForbiddenParameterError,
     NotFoundError,
     Problem,
@@ -29,7 +30,19 @@ from core.configuration.errors import (
 )
 from core.db import models as m
 from core.scoring.engine import Formula
-from core.scoring.formula_repo import load_active_formula, load_formula
+from core.scoring.formula_repo import NoActiveFormulaError, load_formula
+from core.scoring.formula_repo import load_active_formula as _load_active
+
+
+def load_active_formula(session: Session) -> tuple[uuid.UUID, Formula]:
+    """The active formula; a fresh install without the factory values answers a clear conflict, not a 500."""
+    try:
+        return _load_active(session)
+    except NoActiveFormulaError:
+        raise ConflictError(
+            "La instalación todavía no tiene cargados los valores de fábrica de la configuración."
+        ) from None
+
 
 LOCK_KEY: Final = 7_001_010
 SUMMARY_KEYS: Final = 5
@@ -58,6 +71,7 @@ class Parameter:
     min: str | None = None
     max: str | None = None
     validations: tuple[str, ...] = ()
+    options: tuple[str, ...] = ()
 
 
 @dataclass(frozen=True)
@@ -141,6 +155,11 @@ def catalog(session: Session) -> list[Parameter]:
     """Every editable parameter: the formula (defaults are the active version's) and the settings catalog."""
     _, formula = load_active_formula(session)
     parameters = [_formula_parameter(key, formula) for key in fs.formula_values(formula)]
+    options: dict[str, list[str]] = {}
+    for key, option in session.execute(
+        select(m.SettingOption.setting_key, m.SettingOption.option_value).order_by(m.SettingOption.option_value)
+    ):
+        options.setdefault(key, []).append(option)
     for definition in session.scalars(select(m.SettingDefinition).order_by(m.SettingDefinition.key)):
         parameters.append(
             Parameter(
@@ -153,6 +172,7 @@ def catalog(session: Session) -> list[Parameter]:
                 description=definition.description,
                 min=_bound(definition.min_value),
                 max=_bound(definition.max_value),
+                options=tuple(options.get(definition.key, ())),
             )
         )
     return sorted(parameters, key=lambda p: (p.group != "formula", p.group, p.key))
