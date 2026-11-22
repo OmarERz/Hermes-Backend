@@ -1,13 +1,24 @@
 # Local stack: docker compose up --build
-# Requires POSTGRES_PASSWORD (see the example env file). Ports bind to 127.0.0.1 only.
+# Requires POSTGRES_PASSWORD, MIGRATOR_DB_PASSWORD, APP_DB_PASSWORD and RETENTION_DB_PASSWORD (see the example
+# env file). Ports bind to 127.0.0.1 only. On every start the provision service (re)applies the idempotent
+# provisioning (extensions, roles, schema owner, role passwords as SCRAM verifiers); the migrate service then runs
+# Alembic as migrator (DAT-05) and the API and workers connect as app, the least-privilege role.
 name: hermes
 
+x-hardening: &hardening
+  read_only: true
+  tmpfs:
+    - /tmp
+  cap_drop: [ALL]
+  security_opt: ["no-new-privileges:true"]
+
 x-backend: &backend
+  <<: *hardening
   build: .
   environment:
     # The password travels in PGPASSWORD (read by libpq/psycopg), so it never needs URL encoding.
-    DATABASE_URL: postgresql://hermes@db:5432/hermes
-    PGPASSWORD: ${POSTGRES_PASSWORD:?set POSTGRES_PASSWORD}
+    DATABASE_URL: postgresql://app@db:5432/hermes
+    PGPASSWORD: ${APP_DB_PASSWORD:?set APP_DB_PASSWORD}
     FIREBASE_PROJECT_ID: ${FIREBASE_PROJECT_ID:-demo-hermes}
     FIREBASE_AUTH_EMULATOR_HOST: auth-emulator:9099
     FIREBASE_CREDENTIALS_FILE: ${FIREBASE_CREDENTIALS_FILE:-}
@@ -23,15 +34,10 @@ x-backend: &backend
     ABUSECH_AUTH_KEY: ${ABUSECH_AUTH_KEY:-}
     RANSOMWARELIVE_API_KEY: ${RANSOMWARELIVE_API_KEY:-}
   depends_on:
-    db:
-      condition: service_healthy
+    migrate:
+      condition: service_completed_successfully
     auth-emulator:
       condition: service_healthy
-  read_only: true
-  tmpfs:
-    - /tmp
-  cap_drop: [ALL]
-  security_opt: ["no-new-privileges:true"]
   restart: unless-stopped
 
 services:
@@ -46,7 +52,7 @@ services:
     ports:
       - "127.0.0.1:${DB_PORT:-5432}:5432"
     healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U hermes -d hermes"]
+      test: ["CMD-SHELL", "pg_isready -h 127.0.0.1 -U hermes -d hermes"]
       interval: 5s
       timeout: 3s
       retries: 20
@@ -57,6 +63,39 @@ services:
     ports:
       - "127.0.0.1:${AUTH_EMULATOR_PORT:-9099}:9099"
     restart: unless-stopped
+
+  provision:
+    # Repeatable (every start, idempotent): also provisions a volume created before F0.6. Runs as superuser;
+    # role passwords become client-side SCRAM verifiers (core/db/provision.py).
+    <<: *hardening
+    build: .
+    command: ["python", "-m", "core.db.provision"]
+    environment:
+      PROVISION_DATABASE_URL: postgresql://hermes@db:5432/hermes
+      PGPASSWORD: ${POSTGRES_PASSWORD:?set POSTGRES_PASSWORD}
+      MIGRATOR_DB_PASSWORD: ${MIGRATOR_DB_PASSWORD:?set MIGRATOR_DB_PASSWORD}
+      APP_DB_PASSWORD: ${APP_DB_PASSWORD:?set APP_DB_PASSWORD}
+      RETENTION_DB_PASSWORD: ${RETENTION_DB_PASSWORD:?set RETENTION_DB_PASSWORD}
+    depends_on:
+      db:
+        condition: service_healthy
+    healthcheck:
+      disable: true
+    restart: "no"
+
+  migrate:
+    <<: *hardening
+    build: .
+    command: ["alembic", "upgrade", "head"]
+    environment:
+      MIGRATION_DATABASE_URL: postgresql://migrator@db:5432/hermes
+      PGPASSWORD: ${MIGRATOR_DB_PASSWORD:?set MIGRATOR_DB_PASSWORD}
+    depends_on:
+      provision:
+        condition: service_completed_successfully
+    healthcheck:
+      disable: true
+    restart: "no"
 
   api:
     <<: *backend

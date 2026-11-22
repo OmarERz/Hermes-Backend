@@ -64,15 +64,3 @@ def test_generated_revision_upgrades_and_downgrades(postgres_url: str, tmp_path:
         assert "alembic_probe" not in inspect(engine).get_table_names()
     finally:
         engine.dispose()
-
-
-def test_autogenerate_refused_without_models(postgres_url: str, tmp_path: Path) -> None:
-    """Until the models are wired in, autogenerate must fail rather than propose dropping tables."""
-    shutil.copy(ROOT / "migrations" / "env.py", tmp_path / "env.py")
-    shutil.copy(ROOT / "migrations" / "script.py.mako", tmp_path / "script.py.mako")
-    (tmp_path / "versions").mkdir()
-    cfg = alembic_config()
-    cfg.set_main_option("script_location", str(tmp_path))
-    cfg.attributes["url"] = postgres_url
-    with pytest.raises(Exception, match="MetaData"):
-        command.revision(cfg, message="auto", autogenerate=True)

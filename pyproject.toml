@@ -61,6 +61,8 @@ ignore = ["TRY003"]
 "tests/**" = ["S101", "PLR2004"]
 # Integration tests drive docker compose with a fixed argument list (no shell, no external input).
 "tests/integration/**" = ["S101", "PLR2004", "S603"]
+# The row builder of the constraint suite is one big dispatch over 75 tables (validated in capa 2).
+"tests/integration/f00_database/constraints/dbsupport.py" = ["S101", "PLR2004", "PLR0911", "PLR0912"]
 
 [tool.mypy]
 python_version = "3.12"
