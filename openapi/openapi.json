@@ -3377,6 +3377,7 @@
     },
     "/api/assets/{ci_id}": {
       "get": {
+        "description": "A live CI and its vulnerabilities; each one carries this CI's final, level and status (D-035).",
         "operationId": "asset_detail_api_assets__ci_id__get",
         "parameters": [
           {
@@ -9396,7 +9397,7 @@
     },
     "/api/vulnerabilities": {
       "get": {
-        "description": "Grouped views resolved by the backend (FRO-09). The FRO-10 filters and cursor/limit apply to every view.\n\nIn the `criticality` view the page is cut over the groups ordered by their final; each band reports the\nnumber of groups of the whole filtered result and only the groups that fall in the page.",
+        "description": "Grouped views resolved by the backend (FRO-09). The FRO-10 filters and cursor/limit apply to every view.\n\nGroups are ordered by their final (the highest among their current CIs) and CIs by their risk (the highest\nfinal of their findings, never a sum, FRO-11). In the `criticality` view the page is cut over the groups\nordered by their final; each band reports the number of groups of the whole filtered result and only the\ngroups that fall in the page. Only scored findings on live CIs are listed.",
         "operationId": "list_vulnerabilities_api_vulnerabilities_get",
         "parameters": [
           {
@@ -9735,6 +9736,7 @@
     },
     "/api/vulnerabilities/{group_id}": {
       "get": {
+        "description": "A vulnerability group with each scored CI and that CI's own score (D-035).",
         "operationId": "vulnerability_detail_api_vulnerabilities__group_id__get",
         "parameters": [
           {

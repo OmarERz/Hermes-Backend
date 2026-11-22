@@ -3,23 +3,36 @@
 from __future__ import annotations
 
 from datetime import datetime
-from typing import Annotated, Literal
+from typing import Annotated, Literal, cast
 
-from fastapi import APIRouter, Query
+from fastapi import APIRouter, Depends, Query, Request
 
 from api.errors import ApiError
-from api.pagination import PAGINATED_RESPONSES, Page, PageQuery, Signer, paginate
+from api.pagination import (
+    PAGINATED_RESPONSES,
+    Page,
+    PageParams,
+    PageQuery,
+    Signer,
+    decode_key,
+    encode_key,
+    paginate,
+)
 from api.routes import samples
 from api.routes._auth import guard
+from api.routes._db import SessionDep
 from api.routes.models import (
+    AffectedAsset,
     Alert,
     AssetDetail,
     AssetRisk,
     Breakdown,
+    Classification,
     ComparisonRow,
     ComparisonSummary,
     FeedbackEntry,
     FeedbackRequest,
+    FindingStatus,
     Level,
     Recommendation,
     ScoreHistoryPoint,
@@ -30,6 +43,8 @@ from api.routes.models import (
     VulnerabilityGroup,
     VulnerabilityList,
 )
+from core.views import groups as views
+from core.views.common import iso, parse_uuid
 from notifications_api import FeedbackResult
 
 router = APIRouter(tags=["findings"])
@@ -40,101 +55,150 @@ def _not_found(what: str) -> ApiError:
 
 
 BANDS: tuple[Level, ...] = ("critical", "high", "medium", "low")
+VIEW_KINDS = {"vulnerability": "vulnerabilities", "criticality": "vulnerabilities", "asset": "assets"}
 
 
-def _level_of(risk: int) -> Level:
-    """Default urgency bands (TIC-03): the asset risk is its highest final."""
-    return "critical" if risk >= 90 else "high" if risk >= 75 else "medium" if risk >= 50 else "low"  # noqa: PLR2004
+def get_itop_url(request: Request) -> str | None:
+    url: str | None = request.app.state.itop_url
+    return url
 
 
-def _in_range(last_seen: str, filters: VulnerabilityFilters) -> bool:
-    seen = datetime.fromisoformat(last_seen)
-    after = filters.date_from is None or seen >= datetime.fromisoformat(filters.date_from.upper())
-    before = filters.date_to is None or seen <= datetime.fromisoformat(filters.date_to.upper())
-    return after and before
+ItopUrl = Annotated[str | None, Depends(get_itop_url)]
 
 
-def _group_matches(group: VulnerabilityGroup, f: VulnerabilityFilters) -> bool:
-    return (
-        (f.band is None or group.level == f.band)
-        and (f.custodian is None or f.custodian in group.custodians)
-        and (f.owner is None or f.owner in group.owners)
-        and (f.classification is None or group.classification == f.classification)
-        and (f.exposed is None or group.exposed == f.exposed)
-        and (f.in_kev is None or group.in_kev == f.in_kev)
-        and (f.status is None or group.status == f.status)
-        and _in_range(group.last_seen, f)
+def _filters(f: VulnerabilityFilters) -> views.Filters:
+    return views.Filters(
+        band=f.band,
+        custodian=f.custodian,
+        owner=f.owner,
+        classification=f.classification,
+        exposed=f.exposed,
+        in_kev=f.in_kev,
+        status=f.status,
+        date_from=datetime.fromisoformat(f.date_from.upper()) if f.date_from else None,
+        date_to=datetime.fromisoformat(f.date_to.upper()) if f.date_to else None,
     )
 
 
-def _asset_matches(asset: AssetRisk, f: VulnerabilityFilters) -> bool:
-    return (
-        (f.band is None or _level_of(asset.risk) == f.band)
-        and (f.custodian is None or asset.custodian == f.custodian)
-        and (f.owner is None or asset.owner == f.owner)
-        and (f.classification is None or asset.classification == f.classification)
-        and (f.exposed is None or asset.exposed == f.exposed)
-        and (f.in_kev is None or (asset.in_kev > 0) == f.in_kev)
-        and (f.status is None or asset.status == f.status)
-        and _in_range(asset.last_seen, f)
+def _group_model(g: views.Group) -> VulnerabilityGroup:
+    return VulnerabilityGroup(
+        group_id=str(g.group_id),
+        cve=g.cve,
+        product=g.product,
+        ci_count=g.ci_count,
+        custodians=g.custodians,
+        tickets=g.tickets,
+        final=g.final,
+        level=cast(Level, g.level),
+        in_kev=g.in_kev,
+        owners=g.owners,
+        classification=cast(Classification, g.classification),
+        exposed=g.exposed,
+        status=cast(FindingStatus, g.status),
+        last_seen=iso(g.last_seen),
     )
+
+
+def _asset_risk_model(a: views.AssetRisk) -> AssetRisk:
+    return AssetRisk(
+        ci_id=a.ci_id,
+        name=a.name,
+        risk=a.risk,
+        findings_by_level=a.findings_by_level,
+        in_kev=a.in_kev,
+        classification=cast(Classification, a.classification),
+        owner=a.owner,
+        custodian=a.custodian,
+        exposed=a.exposed,
+        status=cast(FindingStatus, a.status),
+        last_seen=iso(a.last_seen),
+    )
+
+
+def _score_key(params: PageParams, kind: str) -> views.ScoreKey | None:
+    key = decode_key(params, kind, ("int", "uuid"))
+    return None if key is None else (key[0], key[1])
 
 
 @router.get("/api/vulnerabilities", dependencies=[guard("GET", "/api/vulnerabilities")], responses=PAGINATED_RESPONSES)
 def list_vulnerabilities(
     params: PageQuery,
     signer: Signer,
+    session: SessionDep,
     filters: Annotated[VulnerabilityFilters, Query()],
     view: Literal["vulnerability", "criticality", "asset"] = "vulnerability",
 ) -> VulnerabilityList:
     """Grouped views resolved by the backend (FRO-09). The FRO-10 filters and cursor/limit apply to every view.
 
-    In the `criticality` view the page is cut over the groups ordered by their final; each band reports the
-    number of groups of the whole filtered result and only the groups that fall in the page.
+    Groups are ordered by their final (the highest among their current CIs) and CIs by their risk (the highest
+    final of their findings, never a sum, FRO-11). In the `criticality` view the page is cut over the groups
+    ordered by their final; each band reports the number of groups of the whole filtered result and only the
+    groups that fall in the page. Only scored findings on live CIs are listed.
     """
+    kind = VIEW_KINDS[view]
+    after = _score_key(params, kind)
+    query = _filters(filters)
     if view == "asset":
-        page_assets = paginate([a for a in samples.ASSET_RISKS if _asset_matches(a, filters)], params, signer)
-        return VulnerabilityList(view=view, assets=page_assets.items, next_cursor=page_assets.next_cursor)
-    groups = sorted((g for g in samples.GROUPS if _group_matches(g, filters)), key=lambda g: -g.final)
-    page_groups = paginate(groups, params, signer)
+        assets, next_key = views.list_assets(session, query, after=after, limit=params.limit)
+        return VulnerabilityList(
+            view=view, assets=[_asset_risk_model(a) for a in assets], next_cursor=encode_key(signer, kind, next_key)
+        )
+    groups, next_key, counts = views.list_groups(session, query, after=after, limit=params.limit)
+    page = [_group_model(g) for g in groups]
+    cursor = encode_key(signer, kind, next_key)
     if view == "criticality":
         bands = [
-            VulnerabilityBand(
-                level=level,
-                count=sum(1 for g in groups if g.level == level),
-                groups=[g for g in page_groups.items if g.level == level],
-            )
+            VulnerabilityBand(level=level, count=counts[level], groups=[g for g in page if g.level == level])
             for level in BANDS
         ]
-        return VulnerabilityList(view=view, bands=bands, next_cursor=page_groups.next_cursor)
-    return VulnerabilityList(view=view, groups=page_groups.items, next_cursor=page_groups.next_cursor)
+        return VulnerabilityList(view=view, bands=bands, next_cursor=cursor)
+    return VulnerabilityList(view=view, groups=page, next_cursor=cursor)
 
 
 @router.get("/api/vulnerabilities/{group_id}", dependencies=[guard("GET", "/api/vulnerabilities/{group_id}")])
-def vulnerability_detail(group_id: str) -> VulnerabilityDetail:
-    group = next((g for g in samples.GROUPS if g.group_id == group_id), None)
-    if group is None:
+def vulnerability_detail(group_id: str, session: SessionDep, itop_url: ItopUrl) -> VulnerabilityDetail:
+    """A vulnerability group with each scored CI and that CI's own score (D-035)."""
+    parsed = parse_uuid(group_id)
+    found = views.group_detail(session, parsed, itop_url) if parsed is not None else None
+    if found is None:
         raise _not_found("El grupo de vulnerabilidad")
+    group, assets = found
     return VulnerabilityDetail(
-        **group.model_dump(),
-        description="Ejecución remota de código en un componente expuesto (texto sintético de ejemplo).",
-        assets=samples.AFFECTED,
+        **_group_model(group).model_dump(),
+        description=group.description or "",
+        assets=[
+            AffectedAsset(
+                ci_id=a.ci_id,
+                name=a.name,
+                itop_url=a.itop_url,
+                owner=a.owner,
+                custodian=a.custodian,
+                criticality=a.criticality,
+                exposed=a.exposed,
+                classification=cast(Classification, a.classification),
+                classification_at_evaluation=cast(Classification, a.classification_at_evaluation),
+                finding_status=cast(FindingStatus, a.finding_status),
+                score=a.score,
+            )
+            for a in assets
+        ],
     )
 
 
 @router.get("/api/assets/{ci_id}", dependencies=[guard("GET", "/api/assets/{ci_id}")])
-def asset_detail(ci_id: str) -> AssetDetail:
-    asset = next((a for a in samples.ASSET_RISKS if a.ci_id == ci_id), None)
-    if asset is None:
+def asset_detail(ci_id: str, session: SessionDep) -> AssetDetail:
+    """A live CI and its vulnerabilities; each one carries this CI's final, level and status (D-035)."""
+    found = views.asset_detail(session, ci_id)
+    if found is None:
         raise _not_found("El activo")
     return AssetDetail(
-        ci_id=asset.ci_id,
-        name=asset.name,
-        risk=asset.risk,
-        classification=asset.classification,
-        owner=asset.owner,
-        custodian=asset.custodian,
-        findings=samples.GROUPS[:2],
+        ci_id=found.ci_id,
+        name=found.name,
+        risk=found.risk,
+        classification=cast(Classification, found.classification),
+        owner=found.owner,
+        custodian=found.custodian,
+        findings=[_group_model(g) for g in found.findings],
     )
 
 

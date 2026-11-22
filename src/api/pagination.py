@@ -12,9 +12,11 @@ import binascii
 import hashlib
 import hmac
 import json
+import uuid
 from collections.abc import Sequence
 from dataclasses import dataclass
-from typing import Annotated, Any
+from datetime import datetime
+from typing import Annotated, Any, Literal
 
 from fastapi import Depends, Query, Request
 from pydantic import BaseModel, Field
@@ -146,3 +148,50 @@ def paginate[T](items: Sequence[T], params: PageParams, signer: CursorSigner) ->
     end = offset + params.limit
     next_cursor = signer.encode({"offset": end}) if end < len(items) else None
     return Page[T](items=list(items[offset:end]), next_cursor=next_cursor)
+
+
+KeyPart = Literal["int", "uuid", "time"]
+
+
+def _key_value(raw: object, part: KeyPart) -> object:
+    """The typed value of one cursor field, or None when it does not have the expected type."""
+    if part == "int":
+        return raw if isinstance(raw, int) and not isinstance(raw, bool) else None
+    if not isinstance(raw, str):
+        return None
+    try:
+        return uuid.UUID(raw) if part == "uuid" else datetime.fromisoformat(raw)
+    except ValueError:
+        return None
+
+
+def _key_text(value: int | uuid.UUID | datetime) -> int | str:
+    if isinstance(value, int):
+        return value
+    return value.isoformat() if isinstance(value, datetime) else str(value)
+
+
+def decode_key(params: PageParams, kind: str, parts: Sequence[KeyPart]) -> tuple[Any, ...] | None:
+    """The sort values a keyset cursor carries for list `kind`; 400 `invalid_cursor` if it belongs elsewhere.
+
+    A cursor is only valid for the list that issued it: one from another list, even correctly signed, is refused.
+    """
+    if params.keyset is None:
+        return None
+    keyset = params.keyset
+    if keyset.get("kind") != kind or set(keyset) != {"kind", *(f"k{i}" for i in range(len(parts)))}:
+        raise _invalid_cursor()
+    values = tuple(_key_value(keyset[f"k{i}"], part) for i, part in enumerate(parts))
+    if any(value is None for value in values):
+        raise _invalid_cursor()
+    return values
+
+
+def encode_key(signer: CursorSigner, kind: str, values: Sequence[int | uuid.UUID | datetime] | None) -> str | None:
+    """The signed cursor of the next page of list `kind`, or None when there is no next page."""
+    if values is None:
+        return None
+    keyset: Keyset = {"kind": kind}
+    for i, value in enumerate(values):
+        keyset[f"k{i}"] = _key_text(value)
+    return signer.encode(keyset)
