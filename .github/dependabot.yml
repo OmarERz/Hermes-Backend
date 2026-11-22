@@ -1,0 +1,56 @@
+version: 2
+updates:
+  - package-ecosystem: "uv"
+    directory: "/"
+    target-branch: "develop"
+    commit-message:
+      prefix: "build(deps)"
+    schedule:
+      interval: "weekly"
+    groups:
+      python-minor-patch:
+        update-types: ["minor", "patch"]
+
+  - package-ecosystem: "docker"
+    directories: ["/", "/docker/auth-emulator"]
+    target-branch: "develop"
+    commit-message:
+      prefix: "build(deps)"
+    schedule:
+      interval: "weekly"
+    groups:
+      docker-minor-patch:
+        update-types: ["minor", "patch"]
+
+  - package-ecosystem: "npm"
+    directory: "/docker/auth-emulator"
+    target-branch: "develop"
+    commit-message:
+      prefix: "build(deps)"
+    schedule:
+      interval: "weekly"
+    groups:
+      emulator-minor-patch:
+        update-types: ["minor", "patch"]
+
+  - package-ecosystem: "docker-compose"
+    directory: "/"
+    target-branch: "develop"
+    commit-message:
+      prefix: "build(deps)"
+    schedule:
+      interval: "weekly"
+    groups:
+      compose-minor-patch:
+        update-types: ["minor", "patch"]
+
+  - package-ecosystem: "github-actions"
+    directory: "/"
+    target-branch: "develop"
+    commit-message:
+      prefix: "ci(deps)"
+    schedule:
+      interval: "weekly"
+    groups:
+      actions-minor-patch:
+        update-types: ["minor", "patch"]
