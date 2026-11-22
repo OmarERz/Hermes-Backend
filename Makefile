@@ -33,14 +33,14 @@ coverage: test ## Coverage gate: 80% global, 95% core (runs the tests first)
 SEMGREP_IMAGE ?= semgrep/semgrep:latest
 GITLEAKS_IMAGE ?= ghcr.io/gitleaks/gitleaks:v8.30.1@sha256:c00b6bd0aeb3071cbcb79009cb16a60dd9e0a7c60e2be9ab65d25e6bc8abbb7f
 
-# Only files git would version: local-only material and ignored files stay out of the scan.
-VERSIONED_FILES = $(shell git ls-files --cached --others --exclude-standard)
-
+# Only files git would version (tracked and untracked, minus ignored): local-only material stays out.
+# The NUL-delimited list reaches Semgrep as individual arguments, so odd file names cannot split or inject.
 semgrep: ## Semgrep CE (Docker): registry packs + .semgrep/ project rules, fails on WARNING/ERROR
-	docker run --rm -v "$(CURDIR):/src:ro" -w /src $(SEMGREP_IMAGE) semgrep scan \
+	git ls-files -z --cached --others --exclude-standard | xargs -0 -r \
+	  docker run --rm -v "$(CURDIR):/src:ro" -w /src $(SEMGREP_IMAGE) semgrep scan \
 	  --config p/python --config p/owasp-top-ten --config p/secrets --config p/fastapi \
 	  --config /src/.semgrep/ --metrics=off --no-git-ignore \
-	  --error --severity WARNING --severity ERROR $(VERSIONED_FILES)
+	  --error --severity WARNING --severity ERROR --
 
 # Scans the working tree (tracked and untracked files, minus ignored ones): the file list is streamed
 # as a tar into the container, so caches and virtualenvs are not scanned and no temp dir is needed.
