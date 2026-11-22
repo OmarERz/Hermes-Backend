@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from fastapi import FastAPI
 
-from api.errors import install_error_handlers
+from api.errors import ERROR_RESPONSES, install_error_handlers
 from core.config import Settings
 from core.logging import configure_logging
 
@@ -20,6 +20,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         docs_url="/api/docs" if docs else None,
         redoc_url=None,
         openapi_url="/api/openapi.json" if docs else None,
+        responses=ERROR_RESPONSES,
     )
 
     install_error_handlers(app)

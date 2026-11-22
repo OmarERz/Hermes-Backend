@@ -121,3 +121,10 @@ def install_error_handlers(app: FastAPI) -> None:
     }
     for exc_type, handler in handlers.items():
         app.add_exception_handler(exc_type, handler)
+
+
+# Documented in OpenAPI for every route, so the frontend sees the envelope (and not FastAPI's default 422 body).
+ERROR_RESPONSES: dict[int | str, dict[str, Any]] = {
+    status: {"model": ErrorResponse, "description": message} for status, (_code, message) in _STATUS_CODES.items()
+}
+ERROR_RESPONSES[500] = {"model": ErrorResponse, "description": _GENERIC_SERVER[1]}
