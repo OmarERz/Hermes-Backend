@@ -79,6 +79,7 @@ class RunResult:
     usage: Usage
     latency_ms: int
     failure: str | None  # why there is no output: the rule ids, "transport", "request" or "provider_down"
+    returned_model: str | None = None  # the model id the provider answered with (an alias may change it)
 
 
 def default_seams() -> Seams:
@@ -88,6 +89,7 @@ def default_seams() -> Seams:
 def run_analyst(client: LlmClient, request: Request, seams: Seams) -> RunResult:
     """Call the model until its output validates or the retry policy gives up; the tokens of every call count."""
     usage = Usage()
+    returned: list[str] = []
     started = seams.clock()
 
     def call(feedback: str | None) -> dict[str, Any]:
@@ -109,17 +111,19 @@ def run_analyst(client: LlmClient, request: Request, seams: Seams) -> RunResult:
             usage += exc.usage
             raise FormatError(str(exc)) from exc
         usage += result.usage
+        if result.response_model:
+            returned.append(result.response_model)
         return result.arguments
 
     try:
         outcome = run_validated(call, request.validate, seams.breaker, seams.timing, ANALYST_RETRY)
     except LlmRequestError:
-        return RunResult(None, usage, _ms(seams, started), "request")
+        return RunResult(None, usage, _ms(seams, started), "request", returned[-1] if returned else None)
     except LlmError as exc:  # any other client error is a request-level failure; the tokens still count
         usage += exc.usage
-        return RunResult(None, usage, _ms(seams, started), "request")
+        return RunResult(None, usage, _ms(seams, started), "request", returned[-1] if returned else None)
     failure = None if outcome.status == "ok" else (outcome.reason or outcome.status)
-    return RunResult(outcome, usage, _ms(seams, started), failure)
+    return RunResult(outcome, usage, _ms(seams, started), failure, returned[-1] if returned else None)
 
 
 def _ms(seams: Seams, started: float) -> int:
@@ -144,7 +148,7 @@ def record_review(session: Session, info: ReviewInfo, result: RunResult, now: da
         id=new_id(),
         agent=info.agent,
         model=request.model,
-        response_model={"requested": request.model},
+        response_model={"requested": request.model, "returned": result.returned_model},
         prompt_version=versions.prompt_version,
         prompt_hash=versions.prompt_hash,
         schema_version=versions.schema_version,

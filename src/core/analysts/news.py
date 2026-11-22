@@ -13,12 +13,13 @@ import logging
 import re
 import uuid
 from collections.abc import Callable
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from datetime import UTC, datetime
 from decimal import Decimal
 from typing import Any
 
-from sqlalchemy import select
+from sqlalchemy import func, select
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
 from core.analysts import prompt as prompts
@@ -32,7 +33,7 @@ from core.llm.tools import ToolDefinition, default_schemas_dir, load_tools
 from core.validation.budget import BudgetConfig, can_start
 from core.validation.budget import spent_on as spent_on_day
 from core.validation.content import check_news_analysis
-from core.validation.queue import QueueRef, enqueue_failure
+from core.validation.queue import QueueRef, enqueue_failure, resolve
 from core.validation.schema import ToolSchema, validate_schema
 from core.validation.violations import Violation
 
@@ -129,6 +130,7 @@ def analyze_story(
     """Analyze one story. Flushes (the caller commits). Idempotent: a story with an analysis is not analyzed again."""
     options = options or NewsOptions()
     now = options.now or datetime.now(UTC)
+    session.execute(select(func.pg_advisory_xact_lock(func.hashtextextended(f"news-analyst:{story_id}", 0))))
     story = session.get(m.Story, story_id)
     if story is None or story.relevance_status != "relevant":
         return NewsResult(story_id, "not_relevant")
@@ -164,6 +166,10 @@ def analyze_story(
         enqueue_failure(session, ref, result.failure or "failed", now)
         return NewsResult(story_id, "queued", reason=result.failure)
     analysis = _store(session, _Subject(story, article, review.id, now), result.outcome.output)
+    for row in session.scalars(
+        select(m.ErrorQueue).where(m.ErrorQueue.story_id == story_id, m.ErrorQueue.status == "pending")
+    ):
+        resolve(session, row)  # a retry that works closes its queue item in the same transaction
     return NewsResult(story_id, "analyzed", analysis.id)
 
 
@@ -213,9 +219,17 @@ def _actor(session: Session, name: str, aliases: list[str]) -> uuid.UUID:
         session.flush()
     have = set(session.scalars(select(m.ActorAlias.alias).where(m.ActorAlias.actor_id == actor_id)))
     for alias in aliases:
-        if alias.strip() and alias.strip() not in have:
-            session.add(m.ActorAlias(actor_id=actor_id, alias=alias.strip()))
-            have.add(alias.strip())
+        clean = alias.strip()
+        if not clean or clean in have:
+            continue
+        try:
+            with session.begin_nested():  # the database keeps aliases unique after normalization
+                session.add(m.ActorAlias(actor_id=actor_id, alias=clean))
+                session.flush()
+        except IntegrityError:
+            log.info("alias already belongs to another actor; skipped")
+        else:
+            have.add(clean)
     return actor_id
 
 
@@ -290,7 +304,7 @@ def _claims(session: Session, analysis: m.NewsAnalysis, article: m.RawArticle, o
     ]
     claims += [(f"requires_{c['type']}", single) for c in output["conditions"] if c["type"] in ("authentication",)]
     claims += [("local_access", single) for c in output["conditions"] if c["type"] == "local_access"]
-    if output["signals"]["public_poc"]:
+    if output["signals"]["public_poc"] and single is not None:  # without one CVE the claim cannot be resolved
         claims.append(("public_poc", single))
     if "patch_advisory" in output["event_types"] and single:
         claims.append(("patched", single))
@@ -314,6 +328,16 @@ def pending_stories(session: Session, limit: int = 50) -> list[uuid.UUID]:
         select(m.Story.id)
         .where(m.Story.relevance_status == "relevant")
         .where(~select(m.NewsAnalysis.id).where(m.NewsAnalysis.story_id == m.Story.id).exists())
+        .where(  # a story that used up its automatic retries waits for a person (PRE-01), it does not fill the batch
+            ~select(m.ErrorQueue.id)
+            .where(
+                m.ErrorQueue.story_id == m.Story.id,
+                m.ErrorQueue.component == AGENT,
+                m.ErrorQueue.status == "pending",
+                m.ErrorQueue.next_attempt_at.is_(None),
+            )
+            .exists()
+        )
         .order_by(m.Story.created_at, m.Story.id)
         .limit(limit)
     )
@@ -324,9 +348,11 @@ def analyze_pending(
     session: Session, client: LlmClient, options: NewsOptions | None = None, limit: int = 50
 ) -> list[NewsResult]:
     """Analyze the pending stories one by one; a failing story never stops the next one. Commits per story."""
+    options = options or NewsOptions()
+    shared = replace(options, seams=options.seams or default_seams())  # one circuit breaker for the whole batch
     results = []
     for story_id in pending_stories(session, limit):
-        results.append(analyze_story(session, client, story_id, options))
+        results.append(analyze_story(session, client, story_id, shared))
         session.commit()
     log.info("news analyst: %d stories, %d analyzed", len(results), sum(r.status == "analyzed" for r in results))
     return results

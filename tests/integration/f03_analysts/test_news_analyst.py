@@ -11,10 +11,14 @@ from analyst_support import ARTICLE_TEXT, NOW, add_cves, add_story, news_output
 from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
-from core.analysts.news import NewsOptions, analyze_pending, analyze_story
+from core.analysts.news import NewsOptions, analyze_pending, analyze_story, pending_stories
 from core.db import models as m
 from core.db.ids import new_id
+from core.ingestion.fetcher import Fetcher
+from core.ingestion.pipeline import PipelineOptions, run_news_pipeline
+from doubles.embedding import fake_embed
 from doubles.llm import LlmDouble, tool_call_completion
+from doubles.web import FakeWeb
 from harness.judge import double_llm_client
 
 pytestmark = pytest.mark.integration
@@ -68,7 +72,7 @@ def test_a_valid_answer_is_stored_and_normalized(session: Session) -> None:
     vector = session.scalars(select(m.NewsAttackVector)).one()
     assert vector.vector_code == "exposed_management_service"
     claims = {(c.claim_type, c.cve_id) for c in session.scalars(select(m.Claim))}
-    assert claims == {("exploited", "CVE-2026-1111"), ("not_exploited", "CVE-2026-2222"), ("public_poc", None)}
+    assert claims == {("exploited", "CVE-2026-1111"), ("not_exploited", "CVE-2026-2222")}
 
 
 def test_the_prompt_is_fixed_in_the_system_role_and_the_news_is_delimited_data(session: Session) -> None:
@@ -196,3 +200,71 @@ def test_pending_stories_are_analyzed_one_by_one_and_a_failure_does_not_stop_the
     results = analyze_pending(session, double_llm_client(double), NewsOptions(now=NOW))
     assert sorted(r.status for r in results) == ["analyzed", "queued"]
     double.assert_calls(3)
+
+
+def test_a_retry_that_works_resolves_its_queue_item_and_exhausted_items_do_not_fill_the_batch(
+    session: Session, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    add_cves(session, "CVE-2026-1111", "CVE-2026-2222")
+    story = add_story(session)
+    failing = LlmDouble()
+    failing.add_case("down", [])
+    failing.use("down")
+    analyze(session, failing, story)
+    queued = session.scalars(select(m.ErrorQueue)).one()
+    assert queued.status == "pending"
+    queued.next_attempt_at = None  # its automatic retries are used up: waits for a person
+    session.flush()
+    assert story.id not in pending_stories(session)
+    queued.next_attempt_at = NOW
+    session.flush()
+    assert story.id in pending_stories(session)
+    double = double_with(news_output(story.id))
+    assert analyze(session, double, story).status == "analyzed"
+    assert queued.status == "resolved"
+
+
+def test_one_circuit_breaker_serves_the_whole_batch(session: Session, monkeypatch: pytest.MonkeyPatch) -> None:
+    for _ in range(7):
+        add_story(session)
+    down = LlmDouble()
+    down.add_case("down", [])
+    down.use("down")
+    monkeypatch.setattr(session, "commit", session.flush)
+    results = analyze_pending(session, double_llm_client(down), NewsOptions(now=NOW))
+    assert len(results) == 7
+    assert down.call_count == 5  # five failures open the circuit; the other two stories make no call
+    assert {r.status for r in results} == {"queued"}
+
+
+def test_alias_variants_of_one_actor_do_not_break_the_batch(session: Session) -> None:
+    add_cves(session, "CVE-2026-1111", "CVE-2026-2222")
+    first, second = add_story(session), add_story(session)
+    one = news_output(first.id)
+    two = news_output(second.id)
+    one["actors"][0]["aliases"] = ["Abcd Group"]
+    two["actors"] = [{"name": "Other Crew", "aliases": ["ABCD GROUP"], "quote": "The Lockbit group"}]
+    assert analyze(session, double_with(one), first).status == "analyzed"
+    assert analyze(session, double_with(two), second).status == "analyzed"
+    assert session.scalars(select(m.ActorAlias.alias)).all() == ["Abcd Group"]
+
+
+def test_a_poc_signal_without_one_clear_cve_makes_no_claim(session: Session) -> None:
+    add_cves(session, "CVE-2026-1111", "CVE-2026-2222")
+    story = add_story(session)
+    analyze(session, double_with(news_output(story.id)), story)
+    assert "public_poc" not in {c.claim_type for c in session.scalars(select(m.Claim))}
+
+
+def test_the_pipeline_hands_new_stories_to_the_analyst(session: Session) -> None:
+    calls: list[Session] = []
+
+    def analyze_hook(db: Session) -> list[object]:
+        calls.append(db)
+        return ["done"]
+
+    web = FakeWeb()
+    fetcher = Fetcher(transport=web.transport(), resolver=lambda _h: ["93.184.216.34"])
+    result = run_news_pipeline(session, fetcher, fake_embed, PipelineOptions(clock=lambda: NOW, analyze=analyze_hook))
+    assert calls == [session]
+    assert result.analyses == ["done"]
