@@ -11,6 +11,7 @@ dependencies = [
     "feedparser>=6.0.14",
     "firebase-admin>=7.8.0",
     "httpx>=0.28.1",
+    "jsonschema>=4.26.0",
     "pgvector>=0.5.1",
     "psycopg[binary]>=3.3.9",
     "pydantic>=2.14.4",
@@ -35,6 +36,7 @@ dev = [
     "pyyaml>=6.0.4",
     "ruff",
     "testcontainers>=4.15.0",
+    "types-jsonschema>=4.26.0.20261006",
     "types-pyyaml>=6.0.12.20261113",
 ]
 
