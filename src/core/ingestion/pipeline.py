@@ -1,4 +1,4 @@
-"""The ingestion flow end to end (docs/15 F-04): read the sources, then group the new articles into stories."""
+"""The ingestion flow end to end (docs/15 F-05): read, deduplicate, filter by keywords, check source health."""
 
 from __future__ import annotations
 
@@ -9,6 +9,8 @@ from sqlalchemy.orm import Session
 from core.ingestion.embeddings import EmbedFn
 from core.ingestion.entities import EntityProvider, regex_entities
 from core.ingestion.fetcher import Fetcher
+from core.ingestion.health import HealthAlert, check_source_health
+from core.ingestion.keywords import FilterResult, filter_pending_stories
 from core.ingestion.service import Clock, IngestResult, run_news_ingestion, utc_now
 from core.ingestion.stories import Placement, group_new_articles
 
@@ -17,6 +19,8 @@ from core.ingestion.stories import Placement, group_new_articles
 class PipelineResult:
     ingested: list[IngestResult]
     placements: list[Placement]
+    filtered: FilterResult
+    alerts: list[HealthAlert]
 
 
 @dataclass(frozen=True)
@@ -29,8 +33,10 @@ class PipelineOptions:
 def run_news_pipeline(
     session: Session, fetcher: Fetcher, embed: EmbedFn, options: PipelineOptions | None = None
 ) -> PipelineResult:
-    """Hourly and after each scan (ING-02): ingest, then deduplicate before the keyword filter."""
+    """Hourly and after each scan (ING-02): ingest, deduplicate, keyword filter, then source health."""
     options = options or PipelineOptions()
     ingested = run_news_ingestion(session, fetcher, options.trigger_reason, options.clock)
     placements = group_new_articles(session, embed, options.entities, options.clock)
-    return PipelineResult(ingested=ingested, placements=placements)
+    filtered = filter_pending_stories(session)
+    alerts = check_source_health(session, options.clock)
+    return PipelineResult(ingested=ingested, placements=placements, filtered=filtered, alerts=alerts)
