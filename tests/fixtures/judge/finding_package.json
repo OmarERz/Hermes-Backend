@@ -1,0 +1,105 @@
+{
+  "package_id": "pkg-finding-1",
+  "type": "finding",
+  "fingerprint": "sha256:finding-1",
+  "versions": {"profile": "v1", "weights": "v1", "schema": "1.0"},
+  "group": {
+    "group_id": "grp-1",
+    "cve": "CVE-2026-1111",
+    "product": "Example HTTP Server",
+    "cpe": "cpe:2.3:a:example:http_server:*:*:*:*:*:*:*:*",
+    "cis": [
+      {
+        "element_id": "ci-1",
+        "ci_id": "CI-1",
+        "name": "web-front",
+        "service": "Portal",
+        "criticality": "medium",
+        "exposed": false,
+        "confidentiality": "classified",
+        "personal_data": false,
+        "custodian": "Infraestructura",
+        "status": "new",
+        "description": "Servidor web interno de pruebas para el equipo de portal.",
+        "base": {"A": 0.5, "D": 0.5, "score": 62, "floor_applicable": false}
+      },
+      {
+        "element_id": "ci-2",
+        "ci_id": "CI-2",
+        "name": "api-prod",
+        "service": "Pagos",
+        "criticality": "medium",
+        "exposed": false,
+        "confidentiality": "highly_classified",
+        "personal_data": true,
+        "custodian": "Pagos",
+        "status": "new",
+        "description": "Este servidor procesa los pagos con tarjeta de todos los clientes.",
+        "base": {"A": 0.5, "D": 1.0, "score": 70, "floor_applicable": false}
+      }
+    ]
+  },
+  "cve_data": {
+    "element_id": "cve-1",
+    "description": "A heap overflow in Example HTTP Server before 2.4.60 allows remote attackers to execute code via crafted headers. Successful exploitation requires the mod_proxy module to be enabled.",
+    "cvss": 8.1,
+    "vector": "CVSS:3.1/AV:N/AC:H/PR:N/UI:N/S:U/C:H/I:H/A:H",
+    "cvss_source": "cna",
+    "cwe": "CWE-122",
+    "affected_ranges": ["< 2.4.60"],
+    "fixed_version": null,
+    "references": [
+      {"url": "https://vendor.example.test/advisories/2026-1111", "tags": ["Vendor Advisory"]}
+    ],
+    "conditions": [{"text": "mod_proxy enabled"}],
+    "components": []
+  },
+  "kev": {"listed": false, "date": null, "required_action": null, "known_ransomware": false},
+  "epss": {"score": 0.42, "percentile": 0.91, "date": "2026-11-20"},
+  "base": {
+    "S": 0.81,
+    "P": 0.5,
+    "T": 0.4,
+    "A": 0.5,
+    "D": 1.0,
+    "score": 70,
+    "details": ["synthetic fixture"],
+    "floor_applicable": false,
+    "relevance": ["R2"]
+  },
+  "news": [
+    {
+      "element_id": "news-1",
+      "story_id": "story-1",
+      "title": "Synthetic report: mass scanning for CVE-2026-1111",
+      "source": "Synthetic Media",
+      "source_level": "N3",
+      "date": "2026-11-20",
+      "urls": ["https://media.example.test/report-1"],
+      "summary": "Researchers observed mass exploitation of CVE-2026-1111 across thousands of servers this week. The flaw is only exploitable with local access according to one analyst.",
+      "event_types": ["active_exploitation"],
+      "exploitation_level": "confirmed",
+      "match": {"type": "exact_cve", "strength": 1.0},
+      "suspicious": false
+    },
+    {
+      "element_id": "news-2",
+      "story_id": "story-2",
+      "title": "Synthetic research note on CVE-2026-1111",
+      "source": "Synthetic Research Blog",
+      "source_level": "N2",
+      "date": "2026-11-19",
+      "urls": ["https://research.example.test/notes/2"],
+      "summary": "Our lab confirmed that ransomware operators chain CVE-2026-1111 with CVE-2026-2222 to gain persistence. The public proof of concept does not work against default builds.",
+      "event_types": ["actor_campaign"],
+      "exploitation_level": "confirmed",
+      "match": {"type": "exact_cve", "strength": 1.0},
+      "suspicious": false
+    }
+  ],
+  "iocs": [],
+  "tickets": [
+    {"itop_id": "R-1", "custodian": "Pagos", "current_urgency": 3, "last_change_by_human": false, "suggestions_enabled": true}
+  ],
+  "profile_summary": {"sector": "transportation", "countries": ["MX"], "peer_companies": [], "stack_summary": []}
+}

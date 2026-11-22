@@ -15,7 +15,7 @@ import logging
 import random
 import time
 from collections.abc import Callable, Mapping, Sequence
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from typing import Any, Literal, cast
 
 import httpx2
@@ -24,8 +24,9 @@ from openai.types.chat import ChatCompletionMessageParam, ChatCompletionToolPara
 from pydantic import SecretStr
 
 from core.config import Settings
-from core.llm.errors import LlmRequestError, LlmResponseError, LlmTransportError
+from core.llm.errors import LlmRequestError, LlmResponseError, LlmTransportError, ToolArgumentsError
 from core.llm.tools import ToolDefinition
+from core.llm.usage import Usage
 
 logger = logging.getLogger(__name__)
 
@@ -60,10 +61,13 @@ class Timeouts:
 
 @dataclass(frozen=True)
 class ToolCall:
-    """The tool call chosen by the model, with already validated arguments."""
+    """The tool call chosen by the model, with already validated arguments, plus what the audit needs."""
 
     name: str
     arguments: dict[str, Any]
+    call_id: str = ""
+    usage: Usage = field(default_factory=Usage)
+    response_model: str | None = None
 
 
 class LlmClient:
@@ -122,6 +126,17 @@ class LlmClient:
                 extra_body={"thinking": {"type": "disabled"}},
             )
         )
+        usage = _usage(completion)
+        try:
+            return self._tool_call(completion, by_name, force_tool, usage)
+        except (LlmResponseError, ToolArgumentsError) as exc:
+            exc.usage = usage  # the completion was paid for even if its answer is unusable (L12)
+            raise
+
+    @staticmethod
+    def _tool_call(
+        completion: Any, by_name: Mapping[str, ToolDefinition], force_tool: str | None, usage: Usage
+    ) -> ToolCall:
         calls = completion.choices[0].message.tool_calls if completion.choices else None
         if not calls or len(calls) != 1:
             raise LlmResponseError("expected exactly one tool call")
@@ -134,7 +149,13 @@ class LlmClient:
         except json.JSONDecodeError as exc:
             raise LlmResponseError("tool call arguments are not valid JSON") from exc
         tool.validate_arguments(arguments)
-        return ToolCall(name=tool.name, arguments=arguments)
+        return ToolCall(
+            name=tool.name,
+            arguments=arguments,
+            call_id=str(getattr(calls[0], "id", "") or ""),
+            usage=usage,
+            response_model=getattr(completion, "model", None),
+        )
 
     def _with_retries[T](self, operation: Callable[[], T]) -> T:
         for attempt in range(1, self._retry.max_attempts + 1):
@@ -158,6 +179,29 @@ class LlmClient:
         if retry_after is not None:
             delay = max(delay, min(retry_after, MAX_RETRY_AFTER_SECONDS))
         return delay
+
+
+def _count(value: Any) -> int:
+    return value if isinstance(value, int) and not isinstance(value, bool) and value > 0 else 0
+
+
+def _usage(completion: Any) -> Usage:
+    """Read token counts defensively: OpenAI-style details or DeepSeek's prompt_cache_hit_tokens ⚠️."""
+    usage = getattr(completion, "usage", None)
+    if usage is None:
+        return Usage()
+    prompt_details = getattr(usage, "prompt_tokens_details", None)
+    cached = _count(getattr(prompt_details, "cached_tokens", None)) or _count(
+        getattr(usage, "prompt_cache_hit_tokens", None)
+    )
+    reasoning = _count(getattr(getattr(usage, "completion_tokens_details", None), "reasoning_tokens", None))
+    completion_tokens = _count(getattr(usage, "completion_tokens", None))
+    return Usage(
+        input=_count(getattr(usage, "prompt_tokens", None)),
+        cached_input=cached,
+        output=max(completion_tokens - reasoning, 0),
+        reasoning=reasoning,
+    )
 
 
 def _retry_after(exc: Exception) -> float | None:

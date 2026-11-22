@@ -11,12 +11,15 @@ import threading
 import time
 from collections.abc import Callable, Mapping, Sequence
 from dataclasses import dataclass, field
+from datetime import UTC, datetime, timedelta
 
 from sqlalchemy.orm import Session, sessionmaker
 
 from core.config import Settings
 from core.itop.client import reader_from_settings
 from core.itop.outbox import ItopOutboxWorker, writer_from_settings
+from core.metrics.ladder import evaluate
+from core.metrics.nightly import NightlyMetrics
 from core.notifications.dispatcher import NotificationDispatcher, configured_consumer_name, consumer_for
 from core.tickets.sync import TicketStateSync
 from notifications_api import NotificationConsumer
@@ -26,6 +29,7 @@ log = logging.getLogger("workers.jobs")
 ITOP_OUTBOX_SECONDS = 10.0
 TICKET_SYNC_SECONDS = 15 * 60.0  # ARQ-02
 DISPATCH_SECONDS = 5.0  # NOT-02: an immediate event must not wait
+NIGHTLY_SECONDS = 24 * 3600.0  # docs/10 §1: once a day (and once at worker start; the job is idempotent)
 
 
 @dataclass(frozen=True)
@@ -58,6 +62,21 @@ def run_jobs(
                 log.exception("job %s failed; retrying at its next interval", job.name)
             due[job.name] = now + job.interval
         stop.wait(tick)
+
+
+@dataclass
+class NightlyJob:
+    """Aggregates yesterday's metrics (UTC) and then applies the judge ladder rule (L14) on them."""
+
+    session_factory: sessionmaker[Session]
+    clock: Callable[[], datetime] = field(default=lambda: datetime.now(UTC))
+
+    def __call__(self) -> None:
+        now = self.clock()
+        day = now.astimezone(UTC).date() - timedelta(days=1)
+        NightlyMetrics(self.session_factory, clock=lambda: now).run(day)
+        with self.session_factory() as session, session.begin():
+            evaluate(session, day, now)
 
 
 @dataclass
@@ -98,14 +117,18 @@ def build_jobs(
     session_factory: sessionmaker[Session],
     consumers: Mapping[str, NotificationConsumer] | None = None,
 ) -> list[PeriodicJob]:
-    """The notification dispatcher always (on its own lane); the iTop jobs only when iTop is configured.
+    """The notification dispatcher and the nightly metrics always (each on its own lane); the iTop jobs only when
+    iTop is configured.
 
     `consumers` registers consumers by the name `notifications.consumer` selects (the Slack module plugs in here in
     F11); `log` is always available.
     """
     itop_url = str(settings.itop_url) if settings.itop_url is not None else None
     dispatch = DispatchJob(session_factory, itop_url, dict(consumers or {}))
-    jobs = [PeriodicJob("notification_dispatch", DISPATCH_SECONDS, dispatch, lane="notifications")]
+    jobs = [
+        PeriodicJob("notification_dispatch", DISPATCH_SECONDS, dispatch, lane="notifications"),
+        PeriodicJob("nightly_metrics", NIGHTLY_SECONDS, NightlyJob(session_factory), lane="nightly"),
+    ]
     if settings.itop_url is None or settings.itop_token is None:
         log.info("iTop is not configured: the ticket jobs are off")
         return jobs
