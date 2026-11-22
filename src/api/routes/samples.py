@@ -36,6 +36,42 @@ ITOP = "https://itop.example.test/pages/UI.php?operation=details&class=Server&id
 
 CONFIG_SCHEMA = [
     ConfigParameter(
+        key="weights.P",
+        group="formula",
+        type="decimal",
+        min="0",
+        max="1",
+        default="0.30",
+        level="validated",
+        min_role="admin",
+        description="Peso del factor P (probabilidad de explotación)",
+        validations=["weights_sum_to_one"],
+    ),
+    ConfigParameter(
+        key="weights.T",
+        group="formula",
+        type="decimal",
+        min="0",
+        max="1",
+        default="0.30",
+        level="validated",
+        min_role="admin",
+        description="Peso del factor T (contexto de amenaza)",
+        validations=["weights_sum_to_one"],
+    ),
+    ConfigParameter(
+        key="weights.A",
+        group="formula",
+        type="decimal",
+        min="0",
+        max="1",
+        default="0.30",
+        level="validated",
+        min_role="admin",
+        description="Peso del factor A (exposición del activo)",
+        validations=["weights_sum_to_one"],
+    ),
+    ConfigParameter(
         key="weights.D",
         group="formula",
         type="decimal",
@@ -65,9 +101,38 @@ CONFIG_SCHEMA = [
         min_role="admin",
         description="Consumidor de eventos de notificación: log o slack",
     ),
+    ConfigParameter(
+        key="inventory.cpe_min_score",
+        group="inventory",
+        type="decimal",
+        min="0",
+        max="1",
+        default="0.80",
+        level="free",
+        min_role="analyst",
+        description="Puntuación mínima para proponer un candidato CPE",
+    ),
+    ConfigParameter(
+        key="ui.language",
+        group="interface",
+        type="enum",
+        default="es",
+        level="free",
+        min_role="reader",
+        description="Idioma de la interfaz",
+    ),
 ]
 CONFIG_VERSION = 3
-CONFIG_VALUES = {"weights.D": "0.10", "judge.sensitivity": "normal", "notifications.consumer": "log"}
+CONFIG_VALUES = {
+    "weights.P": "0.30",
+    "weights.T": "0.30",
+    "weights.A": "0.30",
+    "weights.D": "0.10",
+    "judge.sensitivity": "normal",
+    "notifications.consumer": "log",
+    "inventory.cpe_min_score": "0.80",
+    "ui.language": "es",
+}
 CONFIG_VERSIONS = [
     ConfigVersion(version=3, created_at=NOW, author="ana.analista", summary="Perfil del juez a normal"),
     ConfigVersion(version=2, created_at="2026-01-10T09:00:00Z", author="luis.admin", summary="Peso D de 0.15 a 0.10"),
@@ -154,6 +219,11 @@ GROUPS = [
         final=90,
         level="critical",
         in_kev=True,
+        owners=["Alex Ejemplo"],
+        classification="classified",
+        exposed=True,
+        status="persistent",
+        last_seen="2026-01-15T02:00:00Z",
     ),
     VulnerabilityGroup(
         group_id="grp-2",
@@ -165,6 +235,11 @@ GROUPS = [
         final=76,
         level="high",
         in_kev=False,
+        owners=["Sara Muestra"],
+        classification="highly_classified",
+        exposed=False,
+        status="new",
+        last_seen="2026-01-14T02:00:00Z",
     ),
     VulnerabilityGroup(
         group_id="grp-3",
@@ -176,6 +251,11 @@ GROUPS = [
         final=55,
         level="medium",
         in_kev=False,
+        owners=[],
+        classification="public",
+        exposed=True,
+        status="reopened",
+        last_seen="2026-01-10T02:00:00Z",
     ),
 ]
 ASSET_RISKS = [
@@ -188,6 +268,9 @@ ASSET_RISKS = [
         classification="classified",
         owner="Alex Ejemplo",
         custodian="Infraestructura",
+        exposed=True,
+        status="persistent",
+        last_seen="2026-01-15T02:00:00Z",
     ),
     AssetRisk(
         ci_id="CI-0002",
@@ -198,6 +281,9 @@ ASSET_RISKS = [
         classification="public",
         owner=None,
         custodian="Infraestructura",
+        exposed=False,
+        status="new",
+        last_seen="2026-01-12T02:00:00Z",
     ),
 ]
 AFFECTED = [

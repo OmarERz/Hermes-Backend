@@ -2,15 +2,19 @@
 
 from __future__ import annotations
 
-from fastapi import APIRouter, Query
+from typing import Annotated
 
-from api.errors import ApiError
+from fastapi import APIRouter, Depends, Query
+
+from api.auth import CurrentUser, Role, get_current_user
+from api.errors import ApiError, ErrorDetail
 from api.pagination import Page, PageQuery, Signer, paginate
 from api.routes import samples
 from api.routes._auth import guard
 from api.routes.models import CpeCandidate, InventoryPending, Mapping, MappingInput, Source, SourceCreate, SourcePatch
 
 router = APIRouter(tags=["sources and inventory"])
+CurrentUserDep = Annotated[CurrentUser, Depends(get_current_user)]
 
 
 @router.get("/api/sources", dependencies=[guard("GET", "/api/sources")])
@@ -35,13 +39,20 @@ def create_source(source: SourceCreate) -> Source:
 
 
 @router.patch("/api/sources/{id}", dependencies=[guard("PATCH", "/api/sources/{id}")])
-def patch_source(id: str, patch: SourcePatch) -> Source:  # noqa: A002 - path parameter name of API-06
+def patch_source(id: str, patch: SourcePatch, user: CurrentUserDep) -> Source:  # noqa: A002 - path parameter name of API-06
+    if patch.level is not None and not user.role.at_least(Role.ADMIN):
+        # D-041: analysts activate or deactivate a source; only an admin changes its trust level.
+        raise ApiError(
+            403,
+            "forbidden",
+            "Solo un administrador puede cambiar el nivel de una fuente.",
+            [ErrorDetail(field="body.level", issue="requires_admin")],
+        )
     source = next((s for s in samples.SOURCES if s.id == id), None)
     if source is None:
         raise ApiError(404, "not_found", "La fuente no existe.")
     if source.structural and patch.active is False:
         raise ApiError(409, "structural_source", "Las fuentes estructurales no se pueden desactivar.")
-    # A level change is admin-only (D-041); the real role check arrives with F0.2.
     return source.model_copy(update=patch.model_dump(exclude_none=True))
 
 

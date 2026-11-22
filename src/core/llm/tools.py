@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import os
 from collections.abc import Mapping
 from dataclasses import dataclass
 from pathlib import Path
@@ -12,7 +13,16 @@ from jsonschema import Draft202012Validator
 
 from core.llm.errors import ToolArgumentsError, ToolDefinitionError
 
-DEFAULT_SCHEMAS_DIR = Path(__file__).resolve().parents[3] / "schemas"
+SCHEMAS_DIR_ENV = "SCHEMAS_DIR"
+_SOURCE_TREE_SCHEMAS = Path(__file__).resolve().parents[3] / "schemas"
+
+
+def default_schemas_dir() -> Path:
+    """Where the schemas live: `$SCHEMAS_DIR` (the image sets /app/schemas, the installed package has no schemas/
+    next to it) or the repository's `schemas/` when running from the source tree."""
+    configured = os.environ.get(SCHEMAS_DIR_ENV, "").strip()
+    return Path(configured) if configured else _SOURCE_TREE_SCHEMAS
+
 
 # Keywords DeepSeek strict mode does not support (docs/07 JUE-03): length and item-count limits are checked by code.
 _UNSUPPORTED_IN_STRICT = frozenset({"minLength", "maxLength", "minItems", "maxItems"})
@@ -70,8 +80,9 @@ def make_tool(definition: Mapping[str, Any]) -> ToolDefinition:
     return ToolDefinition(name=name, definition=definition)
 
 
-def load_tools(schemas_dir: Path = DEFAULT_SCHEMAS_DIR) -> dict[str, ToolDefinition]:
+def load_tools(schemas_dir: Path | None = None) -> dict[str, ToolDefinition]:
     """Load every tool from schemas/*_tool.json (one definition each) and schemas/judge_tools.json (a list)."""
+    schemas_dir = schemas_dir or default_schemas_dir()
     tools: dict[str, ToolDefinition] = {}
     files = [*sorted(schemas_dir.glob("*_tool.json")), schemas_dir / "judge_tools.json"]
     for path in files:

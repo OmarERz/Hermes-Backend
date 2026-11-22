@@ -3,9 +3,9 @@
 from __future__ import annotations
 
 from collections.abc import Iterator
-from typing import Literal
+from typing import Annotated, Literal
 
-from fastapi import APIRouter, Query
+from fastapi import APIRouter, Depends, Query, Request
 from fastapi.responses import StreamingResponse
 
 from api.errors import ApiError, ErrorDetail
@@ -30,15 +30,28 @@ from api.routes.models import (
 router = APIRouter(tags=["operations"])
 
 
+def get_runs(request: Request) -> list[Run]:
+    """The runs of this app instance (sample store seeded in create_app; the real one is the runs table)."""
+    runs: list[Run] = request.app.state.runs
+    return runs
+
+
+RunStore = Annotated[list[Run], Depends(get_runs)]
+
+
 @router.post("/api/scans", status_code=202, dependencies=[guard("POST", "/api/scans")])
-def launch_scan(_request: ScanRequest) -> Run:
-    """Queues a simulated scan; progress comes from the run events (FRO-19)."""
-    return Run(id="run-3", kind="scan", status="queued", started_at=samples.NOW, finished_at=None, progress=0)
+def launch_scan(_request: ScanRequest, runs: RunStore) -> Run:
+    """Queues a simulated scan; progress comes from the run events (FRO-19). The run shows up in GET /api/runs."""
+    run = Run(
+        id=f"run-{len(runs) + 1}", kind="scan", status="queued", started_at=samples.NOW, finished_at=None, progress=0
+    )
+    runs.insert(0, run)
+    return run
 
 
 @router.get("/api/runs", dependencies=[guard("GET", "/api/runs")])
-def list_runs(params: PageQuery, signer: Signer) -> Page[Run]:
-    return paginate(samples.RUNS, params, signer)
+def list_runs(params: PageQuery, signer: Signer, runs: RunStore) -> Page[Run]:
+    return paginate(runs, params, signer)
 
 
 @router.get(
@@ -49,8 +62,8 @@ def list_runs(params: PageQuery, signer: Signer) -> Page[Run]:
         200: {"content": {"text/event-stream": {"schema": {"type": "string"}}}, "description": "Server-sent events"}
     },
 )
-def run_events(id: str) -> StreamingResponse:  # noqa: A002 - path parameter name of API-06
-    run = next((r for r in samples.RUNS if r.id == id), None)
+def run_events(id: str, runs: RunStore) -> StreamingResponse:  # noqa: A002 - path parameter name of API-06
+    run = next((r for r in runs if r.id == id), None)
     if run is None:
         raise ApiError(404, "not_found", "La corrida no existe.")
 

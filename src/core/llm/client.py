@@ -117,6 +117,9 @@ class LlmClient:
                 messages=cast("list[ChatCompletionMessageParam]", list(messages)),
                 tools=[cast("ChatCompletionToolParam", dict(tool.definition)) for tool in tools],
                 tool_choice=tool_choice,
+                # `required` and named tool choices return 400 while thinking is on; verified against
+                # https://api-docs.deepseek.com/api/create-chat-completion/ (thinking.type = disabled).
+                extra_body={"thinking": {"type": "disabled"}},
             )
         )
         calls = completion.choices[0].message.tool_calls if completion.choices else None

@@ -2,7 +2,8 @@
 
 from __future__ import annotations
 
-from typing import Literal
+from datetime import datetime
+from typing import Annotated, Literal
 
 from fastapi import APIRouter, Query
 
@@ -13,16 +14,20 @@ from api.routes._auth import guard
 from api.routes.models import (
     Alert,
     AssetDetail,
+    AssetRisk,
     Breakdown,
     ComparisonRow,
     ComparisonSummary,
     FeedbackEntry,
     FeedbackRequest,
+    Level,
     Recommendation,
     ScoreHistoryPoint,
     Ticket,
     VulnerabilityBand,
     VulnerabilityDetail,
+    VulnerabilityFilters,
+    VulnerabilityGroup,
     VulnerabilityList,
 )
 from notifications_api import FeedbackResult
@@ -34,27 +39,74 @@ def _not_found(what: str) -> ApiError:
     return ApiError(404, "not_found", f"{what} no existe.")
 
 
+BANDS: tuple[Level, ...] = ("critical", "high", "medium", "low")
+
+
+def _level_of(risk: int) -> Level:
+    """Default urgency bands (TIC-03): the asset risk is its highest final."""
+    return "critical" if risk >= 90 else "high" if risk >= 75 else "medium" if risk >= 50 else "low"  # noqa: PLR2004
+
+
+def _in_range(last_seen: str, filters: VulnerabilityFilters) -> bool:
+    seen = datetime.fromisoformat(last_seen)
+    return (filters.date_from is None or seen >= filters.date_from) and (
+        filters.date_to is None or seen <= filters.date_to
+    )
+
+
+def _group_matches(group: VulnerabilityGroup, f: VulnerabilityFilters) -> bool:
+    return (
+        (f.band is None or group.level == f.band)
+        and (f.custodian is None or f.custodian in group.custodians)
+        and (f.owner is None or f.owner in group.owners)
+        and (f.classification is None or group.classification == f.classification)
+        and (f.exposed is None or group.exposed == f.exposed)
+        and (f.in_kev is None or group.in_kev == f.in_kev)
+        and (f.status is None or group.status == f.status)
+        and _in_range(group.last_seen, f)
+    )
+
+
+def _asset_matches(asset: AssetRisk, f: VulnerabilityFilters) -> bool:
+    return (
+        (f.band is None or _level_of(asset.risk) == f.band)
+        and (f.custodian is None or asset.custodian == f.custodian)
+        and (f.owner is None or asset.owner == f.owner)
+        and (f.classification is None or asset.classification == f.classification)
+        and (f.exposed is None or asset.exposed == f.exposed)
+        and (f.in_kev is None or (asset.in_kev > 0) == f.in_kev)
+        and (f.status is None or asset.status == f.status)
+        and _in_range(asset.last_seen, f)
+    )
+
+
 @router.get("/api/vulnerabilities", dependencies=[guard("GET", "/api/vulnerabilities")])
 def list_vulnerabilities(
     params: PageQuery,
     signer: Signer,
+    filters: Annotated[VulnerabilityFilters, Query()],
     view: Literal["vulnerability", "criticality", "asset"] = "vulnerability",
-    band: Literal["critical", "high", "medium", "low"] | None = None,
-    in_kev: bool | None = None,
 ) -> VulnerabilityList:
-    """Grouped views resolved by the backend (FRO-09); filters of FRO-10."""
-    groups = [g for g in samples.GROUPS if (band is None or g.level == band) and (in_kev is None or g.in_kev == in_kev)]
+    """Grouped views resolved by the backend (FRO-09). The FRO-10 filters and cursor/limit apply to every view.
+
+    In the `criticality` view the page is cut over the groups ordered by their final; each band reports the
+    number of groups of the whole filtered result and only the groups that fall in the page.
+    """
     if view == "asset":
-        page = paginate(samples.ASSET_RISKS, params, signer)
-        return VulnerabilityList(view=view, assets=page.items, next_cursor=page.next_cursor)
+        page_assets = paginate([a for a in samples.ASSET_RISKS if _asset_matches(a, filters)], params, signer)
+        return VulnerabilityList(view=view, assets=page_assets.items, next_cursor=page_assets.next_cursor)
+    groups = sorted((g for g in samples.GROUPS if _group_matches(g, filters)), key=lambda g: -g.final)
+    page_groups = paginate(groups, params, signer)
     if view == "criticality":
         bands = [
-            VulnerabilityBand(level=level, count=len(members), groups=members)
-            for level in ("critical", "high", "medium", "low")
-            if (members := [g for g in groups if g.level == level]) or band is None
+            VulnerabilityBand(
+                level=level,
+                count=sum(1 for g in groups if g.level == level),
+                groups=[g for g in page_groups.items if g.level == level],
+            )
+            for level in BANDS
         ]
-        return VulnerabilityList(view=view, bands=bands)
-    page_groups = paginate(groups, params, signer)
+        return VulnerabilityList(view=view, bands=bands, next_cursor=page_groups.next_cursor)
     return VulnerabilityList(view=view, groups=page_groups.items, next_cursor=page_groups.next_cursor)
 
 

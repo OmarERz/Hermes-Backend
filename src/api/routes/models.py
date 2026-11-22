@@ -2,12 +2,14 @@
 
 from __future__ import annotations
 
+from datetime import datetime
 from typing import Any, Literal
 
 from pydantic import BaseModel, ConfigDict, Field
 
 Level = Literal["critical", "high", "medium", "low"]
 Classification = Literal["public", "classified", "highly_classified", "unclassified"]
+FindingStatus = Literal["new", "persistent", "reopened", "fixed", "no_data"]
 
 
 class _Model(BaseModel):
@@ -36,6 +38,10 @@ class ConfigDocument(_Model):
 class ConfigUpdate(_Model):
     expected_version: int = Field(ge=1, description="Version the client read; 409 if it changed (API-03)")
     changes: dict[str, str] = Field(min_length=1)
+
+
+class RestoreRequest(_Model):
+    expected_version: int = Field(ge=1, description="Current version the client read; 409 if it changed (API-03)")
 
 
 class ConfigVersion(_Model):
@@ -149,6 +155,11 @@ class VulnerabilityGroup(_Model):
     final: int = Field(ge=0, le=100)
     level: Level
     in_kev: bool
+    owners: list[str]
+    classification: Classification = Field(description="The most restrictive among its assets (FRO-13)")
+    exposed: bool
+    status: FindingStatus
+    last_seen: str
 
 
 class VulnerabilityBand(_Model):
@@ -166,6 +177,9 @@ class AssetRisk(_Model):
     classification: Classification
     owner: str | None
     custodian: str | None
+    exposed: bool
+    status: FindingStatus
+    last_seen: str
 
 
 class VulnerabilityList(_Model):
@@ -186,7 +200,7 @@ class AffectedAsset(_Model):
     exposed: bool
     classification: Classification
     classification_at_evaluation: Classification
-    finding_status: Literal["new", "persistent", "reopened", "fixed", "no_data"]
+    finding_status: FindingStatus
     score: int = Field(ge=0, le=100)
 
 
@@ -391,3 +405,20 @@ class AuditEntry(_Model):
     actor: str
     action: str
     target: str
+
+
+class VulnerabilityFilters(_Model):
+    """Common filters of the grouped views (FRO-10). Every one is optional and applies to all views."""
+
+    # The same query string also carries `view`, `cursor` and `limit`, read by other parameters.
+    model_config = ConfigDict(extra="ignore")
+
+    band: Level | None = None
+    custodian: str | None = Field(default=None, max_length=100)
+    owner: str | None = Field(default=None, max_length=100)
+    classification: Classification | None = None
+    exposed: bool | None = None
+    in_kev: bool | None = None
+    status: FindingStatus | None = None
+    date_from: datetime | None = Field(default=None, description="Last seen on or after (ISO 8601)")
+    date_to: datetime | None = Field(default=None, description="Last seen on or before (ISO 8601)")

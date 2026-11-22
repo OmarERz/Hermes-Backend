@@ -159,20 +159,129 @@ def test_not_found_uses_the_envelope(client: TestClient) -> None:
 
 
 def test_config_write_rules(client: TestClient) -> None:
-    as_role(Role.READER)
-    stale = client.put("/api/config", json={"expected_version": 1, "changes": {"weights.D": "0.10"}})
+    as_role(Role.ADMIN)
+    stale = client.put("/api/config", json={"expected_version": 1, "changes": {"ui.language": "en"}})
     assert stale.status_code == 409
     assert stale.json()["error"]["code"] == "version_conflict"
-    bad_sum = client.put("/api/config", json={"expected_version": 3, "changes": {"weights.D": "0.50"}})
-    assert bad_sum.status_code == 422
-    assert bad_sum.json()["error"]["details"][0]["issue"] == "weights_sum_to_one"
     unknown = client.put("/api/config", json={"expected_version": 3, "changes": {"nope": "1"}})
     assert unknown.status_code == 422
-    bad_decimal = client.put("/api/config", json={"expected_version": 3, "changes": {"weights.D": "x"}})
-    assert bad_decimal.json()["error"]["details"][0]["issue"] == "invalid_decimal"
-    ok = client.put("/api/config", json={"expected_version": 3, "changes": {"weights.D": "1"}})
+    ok = client.put("/api/config", json={"expected_version": 3, "changes": {"ui.language": "en"}})
     assert ok.status_code == 200
     assert ok.json()["version"] == 4
+    assert ok.json()["values"]["weights.P"] == "0.30"
+
+
+def test_each_parameter_enforces_its_own_minimum_role(client: TestClient) -> None:
+    body = {"expected_version": 3, "changes": {"weights.D": "0.10"}}
+    as_role(Role.READER)
+    denied = client.put("/api/config", json=body)  # admin parameter
+    assert denied.status_code == 403
+    assert denied.json()["error"]["details"][0] == {"field": "body.changes.weights.D", "issue": "requires_admin"}
+    assert client.put("/api/config", json={**body, "changes": {"inventory.cpe_min_score": "0.9"}}).status_code == 403
+    assert client.put("/api/config", json={**body, "changes": {"ui.language": "en"}}).status_code == 200  # reader
+    as_role(Role.ANALYST)
+    assert client.put("/api/config", json={**body, "changes": {"inventory.cpe_min_score": "0.9"}}).status_code == 200
+    assert client.put("/api/config", json=body).status_code == 403
+    as_role(Role.ADMIN)
+    assert client.put("/api/config", json=body).status_code == 200
+
+
+def test_weights_are_merged_with_the_current_ones_and_must_total_one(client: TestClient) -> None:
+    as_role(Role.ADMIN)
+
+    def put(changes: dict[str, str]) -> dict[str, object]:
+        response = client.put("/api/config", json={"expected_version": 3, "changes": changes})
+        return {
+            "status": response.status_code,
+            "issue": (response.json().get("error", {}).get("details") or [{}])[0].get("issue"),
+        }
+
+    assert put({"weights.D": "0.20"}) == {"status": 422, "issue": "weights_sum_to_one"}  # 0.30+0.30+0.30+0.20
+    assert put({"weights.D": "1"}) == {"status": 422, "issue": "weights_sum_to_one"}
+    assert put({"weights.D": "0.20", "weights.P": "0.20"})["status"] == 200  # 0.20+0.30+0.30+0.20
+    assert put({"weights.D": "-0.1", "weights.P": "0.5"}) == {"status": 422, "issue": "weight_out_of_range"}
+    assert put({"weights.D": "1.5", "weights.P": "-0.5"}) == {"status": 422, "issue": "weight_out_of_range"}
+    assert put({"weights.D": "x"}) == {"status": 422, "issue": "invalid_decimal"}
+    assert put({"ui.language": "en"})["status"] == 200  # no weight touched, current ones stay valid
+    simulate = client.post("/api/formula/simulate", json={"changes": {"weights.D": "0.20"}})
+    assert simulate.status_code == 422
+
+
+def test_restore_needs_the_expected_current_version(client: TestClient) -> None:
+    as_role(Role.ADMIN)
+    assert client.post("/api/config/versions/2/restore", json={"expected_version": 1}).status_code == 409
+    assert client.post("/api/config/versions/99/restore", json={"expected_version": 3}).status_code == 404
+    ok = client.post("/api/config/versions/2/restore", json={"expected_version": 3})
+    assert ok.status_code == 200
+    assert ok.json()["version"] == 4
+    assert client.post("/api/config/versions/2/restore").status_code == 422  # the version is mandatory
+
+
+def test_source_level_is_admin_only_but_activation_is_for_analysts(client: TestClient) -> None:
+    as_role(Role.ANALYST)
+    assert client.patch("/api/sources/src-thn", json={"active": False}).json()["active"] is False
+    denied = client.patch("/api/sources/src-thn", json={"level": "N2"})
+    assert denied.status_code == 403
+    assert denied.json()["error"]["details"][0]["issue"] == "requires_admin"
+    assert client.patch("/api/sources/src-thn", json={"active": True, "level": "N2"}).status_code == 403
+    as_role(Role.ADMIN)
+    assert client.patch("/api/sources/src-thn", json={"level": "N2"}).json()["level"] == "N2"
+
+
+def test_scan_run_is_listed_and_streams_its_progress(client: TestClient) -> None:
+    as_role(Role.ANALYST)
+    run = client.post("/api/scans", json={})
+    assert run.status_code == 202
+    run_id = run.json()["id"]
+    listed = client.get("/api/runs").json()["items"]
+    assert run_id in [r["id"] for r in listed]
+    assert run_id not in {"run-1", "run-2"}
+    events = client.get(f"/api/runs/{run_id}/events")
+    assert events.status_code == 200
+    assert f'"run_id": "{run_id}"' in events.text
+    assert '"progress": 100' in events.text
+    other = client.post("/api/scans", json={}).json()["id"]
+    assert other != run_id
+    assert client.get("/api/runs/run-zzz/events").status_code == 404
+
+
+def test_vulnerability_filters_apply_to_every_view(client: TestClient) -> None:
+    as_role(Role.READER)
+
+    def groups(**params: str) -> list[str]:
+        return [g["group_id"] for g in client.get("/api/vulnerabilities", params={**params}).json()["groups"]]
+
+    assert groups(custodian="Datos") == ["grp-2"]
+    assert groups(owner="Alex Ejemplo") == ["grp-1"]
+    assert groups(classification="public") == ["grp-3"]
+    assert groups(exposed="true") == ["grp-1", "grp-3"]
+    assert groups(in_kev="true") == ["grp-1"]
+    assert groups(status="new") == ["grp-2"]
+    assert groups(band="medium") == ["grp-3"]
+    assert groups(date_from="2026-01-14T00:00:00Z") == ["grp-1", "grp-2"]
+    assert groups(date_to="2026-01-12T00:00:00Z") == ["grp-3"]
+    assert groups(status="new", band="critical") == []
+    assets = client.get("/api/vulnerabilities", params={"view": "asset", "exposed": "false"}).json()["assets"]
+    assert [a["ci_id"] for a in assets] == ["CI-0002"]
+    assert [
+        a["ci_id"]
+        for a in client.get("/api/vulnerabilities", params={"view": "asset", "band": "critical"}).json()["assets"]
+    ] == ["CI-0001"]
+    assert client.get("/api/vulnerabilities", params={"classification": "secret"}).status_code == 422
+
+
+def test_criticality_view_honors_cursor_and_limit(client: TestClient) -> None:
+    as_role(Role.READER)
+    first = client.get("/api/vulnerabilities", params={"view": "criticality", "limit": 2}).json()
+    assert first["next_cursor"]
+    assert [b["level"] for b in first["bands"]] == ["critical", "high", "medium", "low"]
+    assert [b["count"] for b in first["bands"]] == [1, 1, 1, 0]  # counts of the whole filtered result
+    assert sum(len(b["groups"]) for b in first["bands"]) == 2
+    second = client.get(
+        "/api/vulnerabilities", params={"view": "criticality", "limit": 2, "cursor": first["next_cursor"]}
+    ).json()
+    assert [g["group_id"] for b in second["bands"] for g in b["groups"]] == ["grp-3"]
+    assert second["next_cursor"] is None
 
 
 def test_feedback_rules(client: TestClient) -> None:
@@ -203,7 +312,6 @@ def test_other_write_routes(client: TestClient) -> None:
     created = client.post("/api/sources", json={"name": "Feed", "url": "https://feed.example.test/rss"})
     assert (created.status_code, created.json()["level"], created.json()["active"]) == (201, "N4", False)
     assert client.patch("/api/sources/src-nvd", json={"active": False}).status_code == 409
-    assert client.patch("/api/sources/src-thn", json={"active": False}).json()["active"] is False
     assert client.patch("/api/sources/zzz", json={"active": True}).status_code == 404
     assert client.put("/api/mappings/PagoFacil", json={"cpe": "cpe:2.3:a:x:y:1:*:*:*:*:*:*:*"}).status_code == 200
     assert (
@@ -215,15 +323,12 @@ def test_other_write_routes(client: TestClient) -> None:
     )
     profile = {"expected_version": 2, "sector": "S", "subsectors": [], "countries": ["MX"], "language": "es"}
     assert client.put("/api/profile", json=profile).json()["version"] == 3
-    assert client.post("/api/config/versions/2/restore").status_code == 200
-    assert client.post("/api/config/versions/99/restore").status_code == 404
     assert client.post("/api/formula/simulate", json={"changes": {"weights.D": "0.7"}}).status_code == 422
     assert client.post("/api/formula/simulate", json={"changes": {"judge.sensitivity": "wide"}}).status_code == 200
 
 
 def test_runs_stix_calibration_and_notifications(client: TestClient) -> None:
     as_role(Role.ADMIN)
-    assert client.post("/api/scans", json={}).status_code == 202
     events = client.get("/api/runs/run-1/events")
     assert events.headers["content-type"].startswith("text/event-stream")
     assert "event: progress" in events.text

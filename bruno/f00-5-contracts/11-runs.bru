@@ -1,0 +1,23 @@
+meta {
+  name: runs
+  type: http
+  seq: 11
+}
+
+get {
+  url: {{baseUrl}}/api/runs
+  body: none
+  auth: bearer
+}
+
+auth:bearer {
+  token: {{token}}
+}
+
+assert {
+  res.status: eq 200
+}
+
+docs {
+  The launched run is listed here.
+}

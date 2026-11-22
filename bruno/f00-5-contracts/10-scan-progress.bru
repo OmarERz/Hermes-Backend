@@ -1,0 +1,23 @@
+meta {
+  name: scan-progress
+  type: http
+  seq: 10
+}
+
+get {
+  url: {{baseUrl}}/api/runs/{{runId}}/events
+  body: none
+  auth: bearer
+}
+
+auth:bearer {
+  token: {{token}}
+}
+
+assert {
+  res.status: eq 200
+}
+
+docs {
+  Server-sent events of the run launched above (FRO-19).
+}
