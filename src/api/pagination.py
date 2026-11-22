@@ -12,6 +12,7 @@ import binascii
 import hashlib
 import hmac
 import json
+from collections.abc import Sequence
 from dataclasses import dataclass
 from typing import Annotated, Any
 
@@ -121,3 +122,13 @@ def page_params(
 
 
 PageQuery = Annotated[PageParams, Depends(page_params)]
+
+
+def paginate[T](items: Sequence[T], params: PageParams, signer: CursorSigner) -> Page[T]:
+    """Page over an in-memory sequence with an `offset` keyset (sample routes; real routes use keyset queries)."""
+    offset = params.keyset.get("offset") if params.keyset else 0
+    if not isinstance(offset, int) or isinstance(offset, bool) or offset < 0:
+        raise _invalid_cursor()
+    end = offset + params.limit
+    next_cursor = signer.encode({"offset": end}) if end < len(items) else None
+    return Page[T](items=list(items[offset:end]), next_cursor=next_cursor)
