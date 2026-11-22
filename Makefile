@@ -1,10 +1,10 @@
-# Quality gate (docs/14 §2). Minimal version from F0.1 (D-072); F0.3 adds import-linter,
-# Semgrep, Gitleaks, pip-audit, coverage, verify-full, semgrep, zap and bruno.
+# Quality gate (docs/14 §2): F0.1 minimal version (D-072) extended in F0.3 with import-linter, coverage,
+# Semgrep, Gitleaks, pip-audit, verify-full and the zap and bruno placeholders.
 .DEFAULT_GOAL := help
 SHELL := /bin/bash
 .SHELLFLAGS := -eu -o pipefail -c
 
-.PHONY: help verify lint typecheck boundaries test coverage semgrep secrets audit review
+.PHONY: help verify lint typecheck boundaries test coverage semgrep secrets audit verify-full zap bruno review
 
 help: ## List the available targets
 	@grep -E '^[a-z-]+:.*## ' $(MAKEFILE_LIST) | awk 'BEGIN {FS = ":.*## "}; {printf "  %-12s %s\n", $$1, $$2}'
@@ -48,6 +48,16 @@ secrets: ## Gitleaks (Docker, pinned by tag and digest) on the working tree
 
 audit: ## pip-audit on the locked dependencies
 	uv export --locked --no-hashes --no-emit-project --format requirements-txt | uvx pip-audit --no-deps --disable-pip -r /dev/stdin
+
+verify-full: verify ## Full gate before closing a feature: verify + Schemathesis + adversarial suite
+	@echo "Schemathesis: not available until F0.5 (needs the OpenAPI of the API); skipped."
+	@echo "Adversarial suite (E1-E22): not available until F6 (needs the judge); skipped."
+
+zap: ## OWASP ZAP against the API in Docker (placeholder, arrives in F12)
+	@echo "make zap is a placeholder: OWASP ZAP is wired in F12 (security hardening)."
+
+bruno: ## Bruno API collection (placeholder, arrives in F0.7)
+	@echo "make bruno is a placeholder: the Bruno collection is created in F0.7."
 
 # TASK and REVIEWER reach the recipe as environment variables, so quotes in the task title stay intact.
 export TASK REVIEWER
