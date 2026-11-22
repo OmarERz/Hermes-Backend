@@ -5,9 +5,22 @@ name: hermes
 x-backend: &backend
   build: .
   environment:
-    DATABASE_URL: postgresql://hermes:${POSTGRES_PASSWORD:?set POSTGRES_PASSWORD}@db:5432/hermes
+    # The password travels in PGPASSWORD (read by libpq/psycopg), so it never needs URL encoding.
+    DATABASE_URL: postgresql://hermes@db:5432/hermes
+    PGPASSWORD: ${POSTGRES_PASSWORD:?set POSTGRES_PASSWORD}
     FIREBASE_PROJECT_ID: ${FIREBASE_PROJECT_ID:-demo-hermes}
     FIREBASE_AUTH_EMULATOR_HOST: auth-emulator:9099
+    FIREBASE_CREDENTIALS_FILE: ${FIREBASE_CREDENTIALS_FILE:-}
+    # Backend connections of docs/11 §2 (blank means not configured)
+    ITOP_URL: ${ITOP_URL:-}
+    ITOP_TOKEN: ${ITOP_TOKEN:-}
+    ITOP_SYSTEM_USER: ${ITOP_SYSTEM_USER:-}
+    NVD_API_KEY: ${NVD_API_KEY:-}
+    DEEPSEEK_API_KEY: ${DEEPSEEK_API_KEY:-}
+    LLM_BASE_URL_JUDGE: ${LLM_BASE_URL_JUDGE:-}
+    LLM_BASE_URL_ANALYSTS: ${LLM_BASE_URL_ANALYSTS:-}
+    ABUSECH_AUTH_KEY: ${ABUSECH_AUTH_KEY:-}
+    RANSOMWARELIVE_API_KEY: ${RANSOMWARELIVE_API_KEY:-}
   depends_on:
     db:
       condition: service_healthy
