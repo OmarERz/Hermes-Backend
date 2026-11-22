@@ -34,14 +34,17 @@ class OsvVuln:
 
 
 def _has_fix(vuln: dict[str, Any]) -> bool:
-    return any(
-        isinstance(event, dict) and "fixed" in event
-        for affected in vuln.get("affected") or []
-        if isinstance(affected, dict)
-        for rng in affected.get("ranges") or []
-        if isinstance(rng, dict)
-        for event in rng.get("events") or []
-    )
+    """A range that starts at the very beginning (`introduced: "0"`) and names a `fixed` version.
+
+    Only then does "the advisory no longer lists this version" mean "this version carries the fix": with a later
+    `introduced`, an older version is simply outside the advisory.
+    """
+    for affected in vuln.get("affected") or []:
+        for rng in affected.get("ranges") or [] if isinstance(affected, dict) else []:
+            events = [e for e in rng.get("events") or [] if isinstance(e, dict)] if isinstance(rng, dict) else []
+            if any(e.get("introduced") == "0" for e in events) and any("fixed" in e for e in events):
+                return True
+    return False
 
 
 @dataclass
@@ -71,16 +74,25 @@ class OsvClient:
                 return found
         raise SourceUnavailableError("too many OSV pages")
 
-    def backport_status(self, cve_id: str, package: str, ecosystem: str, version: str) -> BackportStatus:
-        """`fixed` when the distribution's advisory covers the CVE, names a fix, and no longer affects this version.
+    def backport_evidence(
+        self, cve_id: str, package: str, ecosystem: str, version: str
+    ) -> tuple[BackportStatus, str | None]:
+        """Status plus the OSV advisory id that proves a `fixed` result (None otherwise).
 
+        `fixed` when the distribution's advisory covers the CVE, names a fix, and no longer affects this version.
         `unknown` when OSV has no advisory for the CVE and package, or the advisory names no fixed version (a
         `last_affected` only, or an older version than the one introduced): no evidence, so no suppression.
         """
         if not CVE_ID.match(cve_id):
             raise ValueError("not a CVE id")
         covering = [v for v in self.query(package, ecosystem) if cve_id in v.cve_ids]
-        if not covering or not any(v.has_fix for v in covering):
-            return "unknown"
+        fixing = [v for v in covering if v.has_fix]
+        if not fixing:
+            return "unknown", None
         affecting = self.query(package, ecosystem, version)
-        return "affected" if any(cve_id in v.cve_ids for v in affecting) else "fixed"
+        if any(cve_id in v.cve_ids for v in affecting):
+            return "affected", None
+        return "fixed", fixing[0].id
+
+    def backport_status(self, cve_id: str, package: str, ecosystem: str, version: str) -> BackportStatus:
+        return self.backport_evidence(cve_id, package, ecosystem, version)[0]

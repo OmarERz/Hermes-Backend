@@ -11,6 +11,7 @@ dependencies = [
     "feedparser>=6.0.14",
     "firebase-admin>=7.8.0",
     "httpx>=0.28.1",
+    "jsonschema>=4.26.0",
     "pgvector>=0.5.1",
     "psycopg[binary]>=3.3.9",
     "pydantic>=2.14.4",
@@ -19,6 +20,10 @@ dependencies = [
     "trafilatura>=2.3.1",
     "uvicorn>=0.54.0",
 ]
+
+[project.optional-dependencies]
+# Local embeddings (ING-07, TODO(P-019)): pulls torch, so CI and tests do not install it; the code imports it lazily.
+embeddings = ["sentence-transformers>=5.1.0"]
 
 [dependency-groups]
 dev = [
@@ -31,6 +36,7 @@ dev = [
     "pyyaml>=6.0.4",
     "ruff",
     "testcontainers>=4.15.0",
+    "types-jsonschema>=4.26.0.20261006",
     "types-pyyaml>=6.0.12.20261113",
 ]
 
