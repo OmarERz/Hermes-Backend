@@ -438,3 +438,31 @@ def test_ci_changes_before_itop_created_the_ticket_are_queued_behind_the_create(
         sc.assets["web-01"].itop_ci_id
     ]
     assert "El CI web-02 pasó al equipo Data." in old_writes[2][1]["text"]
+
+
+def test_a_suppression_of_an_older_version_no_longer_silences(session: Session) -> None:
+    sc = Scenario(session)
+    sc.ci("web-01", sc.team("Ops"))
+    analyst = m.AppUser(
+        firebase_uid=f"v-{sc.product}", email=f"v-{sc.product}@example.test", role="analyst", active=True, created_at=T0
+    )
+    session.add(analyst)
+    session.flush()
+    session.add(
+        m.Suppression(
+            finding_id=sc.findings["web-01"].id,
+            suppressed_version="1.23.0",  # the false positive was about another version
+            reason="Falso positivo",
+            created_by=analyst.id,
+            created_at=T0,
+        )
+    )
+    session.flush()
+
+    report = lifecycle(sc).apply(session, sc.assess({"web-01": 95}, sc.scan({"web-01": "new"})).id)
+
+    assert (report.created, report.events) == (1, 1)
+    suppression = session.scalars(
+        select(m.Suppression).where(m.Suppression.finding_id == sc.findings["web-01"].id)
+    ).one()
+    assert (suppression.lifted_at, suppression.lift_reason) == (sc.clock, "version_changed")
