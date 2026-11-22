@@ -78,7 +78,7 @@ def _moment(raw: str | None, *, end: bool) -> datetime:
             day = datetime.combine(date.fromisoformat(raw), datetime.min.time(), tzinfo=UTC)
             return day + timedelta(days=1) if end else day
         parsed = datetime.fromisoformat(str(raw))
-    except ValueError:
+    except (ValueError, OverflowError):
         raise StixExportError("the date range needs ISO dates") from None
     return parsed if parsed.tzinfo else parsed.replace(tzinfo=UTC)
 

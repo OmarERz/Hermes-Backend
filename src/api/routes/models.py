@@ -367,6 +367,7 @@ class StixExportRequest(_Model):
     run_id: str | None = None
     date_from: str | None = None
     date_to: str | None = None
+    exclude_ultra_classified: bool = False  # leaves highly classified CIs out of the bundle and of its TLP (P-021)
 
 
 class StixBundle(_Model):

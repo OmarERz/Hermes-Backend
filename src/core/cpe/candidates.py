@@ -57,6 +57,15 @@ def similarity(query: str, vendor: str, product: str) -> float:
     return len(wanted & have) / len(wanted | have)
 
 
+def cpe_uri(vendor: str, product: str) -> str:
+    """The CPE 2.3 name of a vendor and product with every version wildcarded, as the front shows it."""
+
+    def escape(part: str) -> str:
+        return re.sub(r"([^A-Za-z0-9_.\-])", r"\\\1", part)
+
+    return f"cpe:2.3:a:{escape(vendor)}:{escape(product)}:*:*:*:*:*:*:*:*"
+
+
 def parse_cpe_name(name: str) -> tuple[str, str] | None:
     parts = CPE_SPLIT.split(name)
     if len(parts) < CPE_FIELDS or parts[:2] != ["cpe", "2.3"] or parts[2] not in {"a", "o"}:
