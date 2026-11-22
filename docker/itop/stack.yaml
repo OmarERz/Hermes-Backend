@@ -122,3 +122,40 @@ objects:
   - class: OtherSoftware
     name: OpenSSL 3.0.2 @ k8s-node-01
     fields: { org_id: "@Organization:Demo-Lab", system_id: "@Server:k8s-node-01", software_id: "@Software:OpenSSL", status: active }
+
+  # Service catalogue: a ticket can only be resolved with a service linked, through a customer contract, to the
+  # ticket's organization (analysis §5.5)
+  - class: ServiceFamily
+    name: Security
+  - class: Service
+    name: Vulnerability management
+    fields: { org_id: "@Organization:Demo-Lab", servicefamily_id: "@ServiceFamily:Security", status: production }
+  - class: CustomerContract
+    name: Demo-Lab security contract
+    fields:
+      org_id: "@Organization:Demo-Lab"
+      provider_id: "@Organization:Demo-Lab"
+      status: production
+      services_list:                     # creates the lnkCustomerContractToService rows
+        - service_id: "@Service:Vulnerability management"
+
+  # One ticket shaped like D-036: team_id = custodian team, contacts_list = owners, caller_id = the system person,
+  # agent_id empty (so it is still `new` and ev_assign can be tested), functionalcis_list with impact_code manual.
+  - class: UserRequest
+    name: "CVE-2026-0001 nginx 1.24.0 / Platform Ops"
+    key: title
+    fields:
+      org_id: "@Organization:Demo-Lab"
+      caller_id: "@Person:Hermes System"
+      description: "Synthetic sample ticket for the iTop test instance."
+      impact: "2"
+      urgency: "2"
+      service_id: "@Service:Vulnerability management"
+      team_id: "@Team:Platform Ops"
+      contacts_list:
+        - contact_id: "@Person:Rivera"
+      functionalcis_list:
+        - functionalci_id: "@Server:web-frontend-01"
+          impact_code: manual
+        - functionalci_id: "@Server:web-frontend-02"
+          impact_code: manual

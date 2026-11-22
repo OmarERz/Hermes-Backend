@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from pathlib import Path
+from typing import Any
 
 import pytest
 
@@ -9,6 +10,13 @@ from harness import itop_seed
 
 ROOT = Path(__file__).resolve().parents[2]
 STACK = ROOT / "docker" / "itop" / "stack.yaml"
+
+
+def provisioned(**kwargs: Any) -> ItopDouble:
+    """A double holding what provision.php creates before the seed runs: the system person."""
+    double = ItopDouble(**kwargs)
+    double.add("Person", 900, name="Hermes System", first_name="Hermes")
+    return double
 
 
 def loader_for(double: ItopDouble) -> itop_seed.ItopRest:
@@ -22,14 +30,14 @@ def write(tmp_path: Path, text: str) -> Path:
 
 
 def test_dry_run_writes_nothing(capsys: pytest.CaptureFixture[str]) -> None:
-    double = ItopDouble()
+    double = provisioned()
     assert itop_seed.run([str(STACK)], itop=loader_for(double)) == 0
     assert double.writes == []
     assert "dry run" in capsys.readouterr().out
 
 
 def test_apply_loads_the_synthetic_stack_with_extension_attributes() -> None:
-    double = ItopDouble()
+    double = provisioned()
     assert itop_seed.run([str(STACK), "--apply"], itop=loader_for(double)) == 0
     servers = {row["name"]: row for row in double.data["Server"].values()}
     web = servers["web-frontend-01"]
@@ -46,7 +54,7 @@ def test_apply_loads_the_synthetic_stack_with_extension_attributes() -> None:
 
 
 def test_second_apply_creates_nothing() -> None:
-    double = ItopDouble()
+    double = provisioned()
     itop_seed.run([str(STACK), "--apply"], itop=loader_for(double))
     writes = len(double.writes)
     assert itop_seed.run([str(STACK), "--apply"], itop=loader_for(double)) == 0
@@ -78,7 +86,7 @@ def test_itop_rejection_is_reported(tmp_path: Path, capsys: pytest.CaptureFixtur
 
 
 def test_unreachable_itop_is_reported(tmp_path: Path, capsys: pytest.CaptureFixture[str]) -> None:
-    double = ItopDouble(down=True)
+    double = provisioned(down=True)
     assert itop_seed.run([str(STACK)], itop=loader_for(double)) == 1
     assert "could not talk to iTop" in capsys.readouterr().err
 
@@ -127,3 +135,20 @@ def test_oql_quoting() -> None:
         itop_seed.quote("a\nb")
     with pytest.raises(ValueError, match="invalid"):
         itop_seed.select_by("Person; DROP", "name", "x")
+
+
+def test_sample_ticket_has_the_d036_shape() -> None:
+    double = provisioned()
+    itop_seed.run([str(STACK), "--apply"], itop=loader_for(double))
+    (ticket,) = double.data["UserRequest"].values()
+    team_id = next(r["id"] for r in double.data["Team"].values() if r["name"] == "Platform Ops")
+    system = next(r["id"] for r in double.data["Person"].values() if r["name"] == "Hermes System")
+    assert ticket["status"] == "new"
+    assert ticket["team_id"] == team_id
+    assert ticket["caller_id"] == system
+    assert ticket["agent_id"] == ""
+    assert ticket["service_id"]
+    assert len(ticket["contacts_list"]) == 1
+    links = [r for r in double.data["lnkFunctionalCIToTicket"].values() if r["ticket_id"] == ticket["id"]]
+    assert len(links) == 2
+    assert {link["impact_code"] for link in links} == {"manual"}

@@ -107,3 +107,42 @@ def test_rest_user_has_least_privilege(instance: dict[str, str]) -> None:
     denied = rest(token, {"operation": "core/create", "class": "Server", "fields": {"name": "x"}, "comment": "t"})
     assert denied["code"] != 0
     assert rest("not-a-token", {"operation": "list_operations"})["code"] == 1
+
+
+def test_sample_ticket_can_be_assigned_and_resolved(instance: dict[str, str]) -> None:
+    # The least-privilege backend user can read, assign and resolve the sample ticket (service_id is already set)
+    token = read_token(instance, "hermes-rest-token")
+    key = "SELECT UserRequest WHERE title LIKE 'CVE-2026-0001%'"
+    ticket = rest(
+        token, {"operation": "core/get", "class": "UserRequest", "key": key, "output_fields": "status,agent_id"}
+    )
+    ((object_key, found),) = [(o["key"], o["fields"]) for o in ticket["objects"].values()]
+    assert found["status"] == "new"
+    key = int(object_key)  # stimuli on a single id: an OQL key counts as a bulk operation, which the profile lacks
+    assigned = rest(
+        token,
+        {
+            "operation": "core/apply_stimulus",
+            "class": "UserRequest",
+            "key": key,
+            "stimulus": "ev_assign",
+            "fields": {
+                "team_id": "SELECT Team WHERE name = 'Platform Ops'",
+                "agent_id": "SELECT Person WHERE name = 'Rivera'",
+            },
+            "comment": "test",
+        },
+    )
+    assert assigned["code"] == 0, assigned
+    resolved = rest(
+        token,
+        {
+            "operation": "core/apply_stimulus",
+            "class": "UserRequest",
+            "key": key,
+            "stimulus": "ev_resolve",
+            "fields": {"resolution_code": "software patch", "solution": "patched"},
+            "comment": "test",
+        },
+    )
+    assert resolved["code"] == 0, resolved
