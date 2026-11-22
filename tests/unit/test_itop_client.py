@@ -83,6 +83,28 @@ def test_refused_operation_raises_itop_error_without_retry() -> None:
     assert sleeps == []
 
 
+@pytest.mark.parametrize("operation", ["core/create", "core/update", "core/apply_stimulus", "core/delete", ""])
+def test_write_operations_are_refused_before_any_request(operation: str) -> None:
+    double = ItopDouble.from_fixture()
+    with pytest.raises(ValueError, match="read operations"):
+        reader_for(double).call({"operation": operation, "class": "Server", "fields": {}})
+    assert double.calls == []
+
+
+def test_itop_message_is_not_kept_in_the_exception() -> None:
+    client, _ = scripted(lambda _r: httpx.Response(200, json={"code": 100, "message": "bad value 'hunter2' for x"}))
+    with pytest.raises(ItopError) as raised:
+        ItopReader(URL, TOKEN, http=client).get("Server", "SELECT Server")
+    assert "hunter2" not in str(raised.value) and "hunter2" not in repr(raised.value.__dict__)
+    assert raised.value.code == 100
+
+
+def test_answer_without_objects_key_is_incomplete_not_empty() -> None:
+    client, _ = scripted(lambda _r: httpx.Response(200, json={"code": 0, "message": "Found: 0"}))
+    with pytest.raises(ItopUnavailableError, match="incomplete"):
+        ItopReader(URL, TOKEN, http=client).get("Server", "SELECT Server")
+
+
 def test_bad_token_is_a_refusal_not_an_outage() -> None:
     double = ItopDouble.from_fixture()
     reader = ItopReader(URL, "wrong", http=double.client())

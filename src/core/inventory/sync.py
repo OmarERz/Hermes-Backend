@@ -67,7 +67,7 @@ def sync_inventory(
 ) -> SyncResult:
     """Apply `snapshot` to the cache. Flushes but does not commit."""
     run = _Run(session, snapshot, now or datetime.now(UTC), SyncResult(warnings=list(snapshot.warnings)))
-    session.execute(text("SELECT pg_advisory_xact_lock(:key)"), {"key": SYNC_LOCK_KEY})
+    _lock(session)
     if not allow_empty and not snapshot.assets and not snapshot.teams:
         live = session.scalar(select(m.Asset.id).where(m.Asset.decommissioned_at.is_(None)).limit(1))
         if live is not None:
@@ -81,8 +81,17 @@ def sync_inventory(
     return run.result
 
 
+def _lock(session: Session) -> None:
+    """Serialize syncs; transaction-scoped and re-entrant, so taking it twice in one transaction is fine."""
+    session.execute(text("SELECT pg_advisory_xact_lock(:key)"), {"key": SYNC_LOCK_KEY})
+
+
 def sync_from_itop(session: Session, reader: ItopReader, *, now: datetime | None = None) -> SyncResult:
-    """Read iTop, then apply it. An iTop failure raises before anything is written."""
+    """Read iTop, then apply it. The lock is taken before reading, so an older read cannot overwrite a newer one.
+
+    An iTop failure raises before anything is written.
+    """
+    _lock(session)
     return sync_inventory(session, read_inventory(reader), now=now)
 
 
@@ -163,17 +172,20 @@ def _sync_instances(run: _Run, asset_ids: dict[str, uuid.UUID]) -> None:
     for item in snapshot.instances:
         software = catalogue.get(item.software_itop_id or "")
         asset_id = asset_ids.get(item.system_itop_id or "")
-        version = normalize_version(software.version or "") if software else None
-        if software is None or asset_id is None or version is None:
-            run.result.warnings.append(f"Software instance {item.itop_id}: no host, product or version, skipped")
+        if software is None or asset_id is None:
+            run.result.warnings.append(f"Software instance {item.itop_id}: no host or product, skipped")
             continue
         product = products.get(software.name)
-        if product is None:
+        if product is None:  # known even without a version, so it shows up as unmapped (ESC-07)
             product = m.SoftwareProduct(itop_name=software.name, first_seen_at=run.now)
             session.add(product)
             products[software.name] = product
             run.result.products.created += 1
             session.flush()
+        version = normalize_version(software.version or "")
+        if version is None:
+            run.result.warnings.append(f"Software instance {item.itop_id}: no version, skipped (ESC-12)")
+            continue
         row = rows.get(item.itop_id)
         if row is None:
             row = m.InstalledSoftware(itop_instance_id=item.itop_id)
@@ -182,8 +194,18 @@ def _sync_instances(run: _Run, asset_ids: dict[str, uuid.UUID]) -> None:
             run.result.instances.created += 1
         else:
             run.result.instances.updated += 1
-        row.asset_id, row.software_product_id = asset_id, product.id
+        row.asset_id = asset_id
+        if row.software_product_id != product.id:
+            if row.software_product_id is None or not _has_findings(session, row):
+                row.software_product_id = product.id
+            else:  # the product is locked once findings exist (trigger check_product_locked)
+                run.result.warnings.append(f"Software instance {item.itop_id}: product changed in iTop, kept")
         row.version, row.package_version = version.version, version.package_version
         row.synced_at, row.removed_at = run.now, None
         seen.add(item.itop_id)
     _soft_delete(rows, seen, "removed_at", run, run.result.instances)
+
+
+def _has_findings(session: Session, instance: m.InstalledSoftware) -> bool:
+    found = session.scalar(select(m.Finding.id).where(m.Finding.installed_software_id == instance.id).limit(1))
+    return found is not None

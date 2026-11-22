@@ -17,8 +17,9 @@ from core.inventory.version import NormalizedVersion, normalize_version
         ("1:2.3.4", ("2.3.4", "1:2.3.4")),
         ("3.0.2-0ubuntu1.12", ("3.0.2", "3.0.2-0ubuntu1.12")),
         ("2.4.57-2.el9", ("2.4.57", "2.4.57-2.el9")),
+        ("1.2.3-1", ("1.2.3-1", None)),  # ambiguous without distribution evidence: kept whole
         ("2.0.0-rc1", ("2.0.0-rc1", None)),  # a pre-release is not a distribution revision
-        ("1.2.3+dfsg-1", ("1.2.3+dfsg", "1.2.3+dfsg-1")),
+        ("1.2.3+dfsg-1", ("1.2.3+dfsg-1", None)),
         ("v1.2", ("v1.2", None)),
     ],
 )

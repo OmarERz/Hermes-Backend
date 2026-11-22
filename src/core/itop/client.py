@@ -24,16 +24,17 @@ API_VERSION: Final = "1.3"
 LOCAL_HOSTS: Final = frozenset({"host.docker.internal", "itop"})
 RETRYABLE_STATUS: Final = frozenset({429, 500, 502, 503, 504})
 HTTP_OK: Final = 200
+READ_OPERATIONS: Final = frozenset({"core/get", "list_operations"})
 MAX_BACKOFF_SECONDS: Final = 30.0
 
 
 class ItopError(Exception):
     """iTop answered but refused the operation (`code != 0`). Not retried."""
 
-    def __init__(self, code: int, message: str) -> None:
-        super().__init__(f"iTop error {code}: {message}")
+    def __init__(self, code: int) -> None:
+        # iTop's own message is never kept: it may echo request data (SEG-21). The code tells what happened.
+        super().__init__(f"iTop refused the operation (code {code})")
         self.code = code
-        self.message = message
 
 
 class ItopUnavailableError(Exception):
@@ -99,7 +100,9 @@ class ItopReader:
 
     # --- transport -----------------------------------------------------------------------------------------
     def call(self, operation: dict[str, Any]) -> dict[str, Any]:
-        """One REST operation. Network failures, timeouts, 429 and 5xx are retried with backoff."""
+        """One read-only REST operation. Network failures, timeouts, 429 and 5xx are retried with backoff."""
+        if operation.get("operation") not in READ_OPERATIONS:
+            raise ValueError("this client only sends read operations; writes belong to the outbox (ARQ-01)")
         data = {"json_data": json.dumps(operation, ensure_ascii=False)}
         client = self.http or httpx.Client(timeout=httpx.Timeout(self.timeout))
         try:
@@ -142,7 +145,7 @@ class ItopReader:
         if not isinstance(body, dict) or "code" not in body:
             raise ItopUnavailableError("unexpected answer shape from iTop")
         if body["code"] != 0:
-            raise ItopError(int(body["code"]), str(body.get("message", "")))
+            raise ItopError(int(body["code"]))
         return body
 
     # --- operations (read only) -------------------------------------------------------------------------
@@ -156,7 +159,9 @@ class ItopReader:
                 "output_fields": ",".join(fields) if fields else "*",
             }
         )
-        raw_objects = body.get("objects") or {}
+        if "objects" not in body:  # iTop sends `"objects": null` for no match; a missing key is a broken answer
+            raise ItopUnavailableError("incomplete core/get answer")
+        raw_objects = body["objects"] or {}
         return [
             ItopObject(
                 class_name=str(raw.get("class", class_name)),

@@ -7,6 +7,7 @@ from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from typing import Any
 
+import httpx
 import pytest
 from alembic import command
 from alembic.config import Config
@@ -93,7 +94,7 @@ def issues(engine: Engine) -> set[tuple[str, str | None]]:
 def test_first_sync_fills_the_cache(engine: Engine) -> None:
     result = run_sync(engine, build_double())
     assert (result.teams.created, result.persons.created, result.assets.created) == (1, 1, 2)
-    assert (result.products.created, result.instances.created) == (2, 3)
+    assert (result.products.created, result.instances.created) == (3, 3)
     with Session(engine) as session:
         web = session.scalars(select(m.Asset).where(m.Asset.itop_ci_id == "100")).one()
         assert (web.name, str(web.ip), web.criticality, web.exposed, web.confidentiality) == (
@@ -112,7 +113,8 @@ def test_first_sync_fills_the_cache(engine: Engine) -> None:
             select(m.InstalledSoftware).where(m.InstalledSoftware.itop_instance_id == "301")
         ).one()
         assert (openssl.version, openssl.package_version) == ("3.0.2", "3.0.2-0ubuntu1.12")
-    assert any("no host, product or version" in w for w in result.warnings)
+    assert any("no version, skipped" in w for w in result.warnings)
+    assert any("no host or product, skipped" in w for w in result.warnings)
 
 
 def test_second_sync_changes_nothing_but_the_timestamp(engine: Engine) -> None:
@@ -146,6 +148,49 @@ def test_inventory_issues_list_incomplete_cis_and_unmapped_software(engine: Engi
             )
         )
     assert ("software_unmapped", "nginx") not in issues(engine)
+
+
+def test_product_without_version_is_known_and_pending_mapping(engine: Engine) -> None:
+    run_sync(engine, build_double())
+    assert ("software_unmapped", "NoVersion") in issues(engine)
+
+
+def test_product_change_is_applied_or_kept_when_findings_exist(engine: Engine, monkeypatch: pytest.MonkeyPatch) -> None:
+    double = build_double()
+    run_sync(engine, double)
+    double.data["WebServer"]["300"]["software_id"] = "201"  # iTop now says OpenSSL
+    run_sync(engine, double, T0 + timedelta(hours=1))
+
+    def product_of_300() -> str | None:
+        with engine.connect() as conn:
+            return conn.execute(
+                text(
+                    "SELECT p.itop_name FROM installed_software i "
+                    "JOIN software_product p ON p.id = i.software_product_id WHERE i.itop_instance_id = '300'"
+                )
+            ).scalar()
+
+    assert product_of_300() == "OpenSSL"
+    monkeypatch.setattr("core.inventory.sync._has_findings", lambda _s, _i: True)
+    double.data["WebServer"]["300"]["software_id"] = "200"
+    result = run_sync(engine, double, T0 + timedelta(hours=2))
+    assert product_of_300() == "OpenSSL"
+    assert "Software instance 300: product changed in iTop, kept" in result.warnings
+
+
+def test_the_lock_is_held_while_itop_is_read(engine: Engine) -> None:
+    double = build_double()
+    held: list[bool] = []
+
+    def spy(request: httpx.Request) -> httpx.Response:
+        with engine.connect() as other:
+            held.append(other.execute(text("SELECT pg_try_advisory_xact_lock(7001001)")).scalar() is False)
+        return double.transport.handle_request(request)
+
+    spying = ItopReader("http://localhost", str(double.token), http=httpx.Client(transport=httpx.MockTransport(spy)))
+    with Session(engine) as session, session.begin():
+        sync_from_itop(session, spying, now=T0)
+    assert held and all(held)
 
 
 def test_disappearing_cis_are_soft_deleted_and_can_return(engine: Engine) -> None:
