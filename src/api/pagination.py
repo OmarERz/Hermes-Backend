@@ -19,11 +19,17 @@ from typing import Annotated, Any
 from fastapi import Depends, Query, Request
 from pydantic import BaseModel, Field
 
-from api.errors import ApiError
+from api.errors import ApiError, ErrorResponse
 
 DEFAULT_LIMIT = 50
 MAX_LIMIT = 200
 MAX_CURSOR_LENGTH = 1024
+CURSOR_PATTERN = r"^[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+$"
+
+# Paginated operations can answer 400 `invalid_cursor`: an HMAC-signed cursor cannot be built from the schema.
+PAGINATED_RESPONSES: dict[int | str, dict[str, Any]] = {
+    400: {"model": ErrorResponse, "description": "Cursor inválido o alterado (code: invalid_cursor)"}
+}
 
 Keyset = dict[str, str | int | float | bool | None]
 
@@ -114,7 +120,15 @@ class PageParams:
 
 def page_params(
     signer: Signer,
-    cursor: Annotated[str | None, Query(max_length=MAX_CURSOR_LENGTH, description="Opaque cursor")] = None,
+    cursor: Annotated[
+        str | None,
+        Query(
+            max_length=MAX_CURSOR_LENGTH,
+            pattern=CURSOR_PATTERN,
+            description="Opaque cursor from `next_cursor`: base64url(payload).base64url(signature). "
+            "A cursor that is not ours or was altered is answered with 400 `invalid_cursor`.",
+        ),
+    ] = None,
     limit: Annotated[int, Query(ge=1, le=MAX_LIMIT, description="Page size")] = DEFAULT_LIMIT,
 ) -> PageParams:
     """FastAPI dependency: `params: Annotated[PageParams, Depends(page_params)]`."""

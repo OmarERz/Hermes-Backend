@@ -28,13 +28,18 @@ READ_OPERATIONS: Final = frozenset({"core/get", "list_operations"})
 MAX_BACKOFF_SECONDS: Final = 30.0
 
 
+KNOWN_ATTRIBUTES: Final = frozenset({"org_id", "caller_id", "team_id", "agent_id", "service_id", "contacts_list"})
+
+
 class ItopError(Exception):
     """iTop answered but refused the operation (`code != 0`). Not retried."""
 
-    def __init__(self, code: int) -> None:
-        # iTop's own message is never kept: it may echo request data (SEG-21). The code tells what happened.
+    def __init__(self, code: int, message: str = "") -> None:
+        # iTop's own message is never kept: it may echo request data (SEG-21). The code tells what happened, and
+        # `attributes` keeps only which known ticket attributes the message names (e.g. a refused team, TIC-09).
         super().__init__(f"iTop refused the operation (code {code})")
         self.code = code
+        self.attributes = frozenset(name for name in KNOWN_ATTRIBUTES if name in message)
 
 
 class ItopUnavailableError(Exception):
@@ -145,7 +150,7 @@ class ItopReader:
         if not isinstance(body, dict) or "code" not in body:
             raise ItopUnavailableError("unexpected answer shape from iTop")
         if body["code"] != 0:
-            raise ItopError(int(body["code"]))
+            raise ItopError(int(body["code"]), str(body.get("message") or ""))
         return body
 
     # --- operations (read only) -------------------------------------------------------------------------

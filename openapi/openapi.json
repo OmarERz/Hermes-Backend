@@ -1066,6 +1066,16 @@
       "FeedbackRequest": {
         "additionalProperties": false,
         "description": "Body of POST /api/feedback. The user and channel come from the token, never from the body.",
+        "if": {
+          "properties": {
+            "verdict": {
+              "const": "wrong_priority"
+            }
+          },
+          "required": [
+            "verdict"
+          ]
+        },
         "properties": {
           "assessment_id": {
             "title": "Assessment Id",
@@ -1129,6 +1139,16 @@
           "assessment_id",
           "verdict"
         ],
+        "then": {
+          "properties": {
+            "proposed_level": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "proposed_level"
+          ]
+        },
         "title": "FeedbackRequest",
         "type": "object"
       },
@@ -1235,6 +1255,41 @@
           "outside_delivery_model"
         ],
         "title": "InventoryPending",
+        "type": "object"
+      },
+      "ItopWebhookCall": {
+        "additionalProperties": false,
+        "description": "What iTop sends: the class, id and reference of the changed object, nothing else.",
+        "properties": {
+          "class": {
+            "const": "UserRequest",
+            "title": "Class",
+            "type": "string"
+          },
+          "id": {
+            "description": "iTop object id",
+            "pattern": "^[1-9][0-9]{0,11}$",
+            "title": "Id",
+            "type": "string"
+          },
+          "ref": {
+            "anyOf": [
+              {
+                "maxLength": 40,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Ref"
+          }
+        },
+        "required": [
+          "class",
+          "id"
+        ],
+        "title": "ItopWebhookCall",
         "type": "object"
       },
       "Mapping": {
@@ -2864,6 +2919,18 @@
         ],
         "title": "VulnerabilityList",
         "type": "object"
+      },
+      "WebhookAccepted": {
+        "properties": {
+          "status": {
+            "const": "accepted",
+            "default": "accepted",
+            "title": "Status",
+            "type": "string"
+          }
+        },
+        "title": "WebhookAccepted",
+        "type": "object"
       }
     },
     "securitySchemes": {
@@ -3034,7 +3101,7 @@
         "operationId": "list_alerts_api_alerts_get",
         "parameters": [
           {
-            "description": "Opaque cursor",
+            "description": "Opaque cursor from `next_cursor`: base64url(payload).base64url(signature). A cursor that is not ours or was altered is answered with 400 `invalid_cursor`.",
             "in": "query",
             "name": "cursor",
             "required": false,
@@ -3042,13 +3109,14 @@
               "anyOf": [
                 {
                   "maxLength": 1024,
+                  "pattern": "^[A-Za-z0-9_-]+\\.[A-Za-z0-9_-]+$",
                   "type": "string"
                 },
                 {
                   "type": "null"
                 }
               ],
-              "description": "Opaque cursor",
+              "description": "Opaque cursor from `next_cursor`: base64url(payload).base64url(signature). A cursor that is not ours or was altered is answered with 400 `invalid_cursor`.",
               "title": "Cursor"
             }
           },
@@ -3086,7 +3154,7 @@
                 }
               }
             },
-            "description": "La solicitud no es válida."
+            "description": "Cursor inválido o alterado (code: invalid_cursor)"
           },
           "401": {
             "content": {
@@ -3456,7 +3524,7 @@
             }
           },
           {
-            "description": "Opaque cursor",
+            "description": "Opaque cursor from `next_cursor`: base64url(payload).base64url(signature). A cursor that is not ours or was altered is answered with 400 `invalid_cursor`.",
             "in": "query",
             "name": "cursor",
             "required": false,
@@ -3464,13 +3532,14 @@
               "anyOf": [
                 {
                   "maxLength": 1024,
+                  "pattern": "^[A-Za-z0-9_-]+\\.[A-Za-z0-9_-]+$",
                   "type": "string"
                 },
                 {
                   "type": "null"
                 }
               ],
-              "description": "Opaque cursor",
+              "description": "Opaque cursor from `next_cursor`: base64url(payload).base64url(signature). A cursor that is not ours or was altered is answered with 400 `invalid_cursor`.",
               "title": "Cursor"
             }
           },
@@ -3508,7 +3577,7 @@
                 }
               }
             },
-            "description": "La solicitud no es válida."
+            "description": "Cursor inválido o alterado (code: invalid_cursor)"
           },
           "401": {
             "content": {
@@ -3607,7 +3676,7 @@
         "operationId": "list_proposals_api_calibration_proposals_get",
         "parameters": [
           {
-            "description": "Opaque cursor",
+            "description": "Opaque cursor from `next_cursor`: base64url(payload).base64url(signature). A cursor that is not ours or was altered is answered with 400 `invalid_cursor`.",
             "in": "query",
             "name": "cursor",
             "required": false,
@@ -3615,13 +3684,14 @@
               "anyOf": [
                 {
                   "maxLength": 1024,
+                  "pattern": "^[A-Za-z0-9_-]+\\.[A-Za-z0-9_-]+$",
                   "type": "string"
                 },
                 {
                   "type": "null"
                 }
               ],
-              "description": "Opaque cursor",
+              "description": "Opaque cursor from `next_cursor`: base64url(payload).base64url(signature). A cursor that is not ours or was altered is answered with 400 `invalid_cursor`.",
               "title": "Cursor"
             }
           },
@@ -3659,7 +3729,7 @@
                 }
               }
             },
-            "description": "La solicitud no es válida."
+            "description": "Cursor inválido o alterado (code: invalid_cursor)"
           },
           "401": {
             "content": {
@@ -4128,7 +4198,7 @@
         "operationId": "comparison_table_api_comparison_table_get",
         "parameters": [
           {
-            "description": "Opaque cursor",
+            "description": "Opaque cursor from `next_cursor`: base64url(payload).base64url(signature). A cursor that is not ours or was altered is answered with 400 `invalid_cursor`.",
             "in": "query",
             "name": "cursor",
             "required": false,
@@ -4136,13 +4206,14 @@
               "anyOf": [
                 {
                   "maxLength": 1024,
+                  "pattern": "^[A-Za-z0-9_-]+\\.[A-Za-z0-9_-]+$",
                   "type": "string"
                 },
                 {
                   "type": "null"
                 }
               ],
-              "description": "Opaque cursor",
+              "description": "Opaque cursor from `next_cursor`: base64url(payload).base64url(signature). A cursor that is not ours or was altered is answered with 400 `invalid_cursor`.",
               "title": "Cursor"
             }
           },
@@ -4180,7 +4251,7 @@
                 }
               }
             },
-            "description": "La solicitud no es válida."
+            "description": "Cursor inválido o alterado (code: invalid_cursor)"
           },
           "401": {
             "content": {
@@ -4641,7 +4712,7 @@
         "operationId": "config_versions_api_config_versions_get",
         "parameters": [
           {
-            "description": "Opaque cursor",
+            "description": "Opaque cursor from `next_cursor`: base64url(payload).base64url(signature). A cursor that is not ours or was altered is answered with 400 `invalid_cursor`.",
             "in": "query",
             "name": "cursor",
             "required": false,
@@ -4649,13 +4720,14 @@
               "anyOf": [
                 {
                   "maxLength": 1024,
+                  "pattern": "^[A-Za-z0-9_-]+\\.[A-Za-z0-9_-]+$",
                   "type": "string"
                 },
                 {
                   "type": "null"
                 }
               ],
-              "description": "Opaque cursor",
+              "description": "Opaque cursor from `next_cursor`: base64url(payload).base64url(signature). A cursor that is not ours or was altered is answered with 400 `invalid_cursor`.",
               "title": "Cursor"
             }
           },
@@ -4693,7 +4765,7 @@
                 }
               }
             },
-            "description": "La solicitud no es válida."
+            "description": "Cursor inválido o alterado (code: invalid_cursor)"
           },
           "401": {
             "content": {
@@ -5810,6 +5882,156 @@
         ]
       }
     },
+    "/api/itop/webhook": {
+      "post": {
+        "description": "Doorbell from iTop: re-read the ticket in the background (ARQ-02). Not for the frontend.",
+        "operationId": "itop_webhook_api_itop_webhook_post",
+        "parameters": [
+          {
+            "in": "header",
+            "name": "authorization",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Authorization"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ItopWebhookCall"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "202": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/WebhookAccepted"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "La solicitud no es válida."
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Missing or wrong webhook token"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "No tienes permiso para realizar esta acción."
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "El recurso solicitado no existe."
+          },
+          "405": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Método no permitido para esta ruta."
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "La solicitud entra en conflicto con el estado actual del recurso."
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Los datos enviados no son válidos."
+          },
+          "429": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Demasiadas solicitudes; intenta de nuevo más tarde."
+          },
+          "500": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Error interno del servidor."
+          },
+          "503": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Webhook or iTop not configured"
+          }
+        },
+        "summary": "Itop Webhook",
+        "tags": [
+          "itop"
+        ]
+      }
+    },
     "/api/mappings/{software}": {
       "put": {
         "operationId": "put_mapping_api_mappings__software__put",
@@ -6210,7 +6432,7 @@
             }
           },
           {
-            "description": "Opaque cursor",
+            "description": "Opaque cursor from `next_cursor`: base64url(payload).base64url(signature). A cursor that is not ours or was altered is answered with 400 `invalid_cursor`.",
             "in": "query",
             "name": "cursor",
             "required": false,
@@ -6218,13 +6440,14 @@
               "anyOf": [
                 {
                   "maxLength": 1024,
+                  "pattern": "^[A-Za-z0-9_-]+\\.[A-Za-z0-9_-]+$",
                   "type": "string"
                 },
                 {
                   "type": "null"
                 }
               ],
-              "description": "Opaque cursor",
+              "description": "Opaque cursor from `next_cursor`: base64url(payload).base64url(signature). A cursor that is not ours or was altered is answered with 400 `invalid_cursor`.",
               "title": "Cursor"
             }
           },
@@ -6262,7 +6485,7 @@
                 }
               }
             },
-            "description": "La solicitud no es válida."
+            "description": "Cursor inválido o alterado (code: invalid_cursor)"
           },
           "401": {
             "content": {
@@ -6488,7 +6711,7 @@
         "operationId": "list_peers_api_peer_companies_get",
         "parameters": [
           {
-            "description": "Opaque cursor",
+            "description": "Opaque cursor from `next_cursor`: base64url(payload).base64url(signature). A cursor that is not ours or was altered is answered with 400 `invalid_cursor`.",
             "in": "query",
             "name": "cursor",
             "required": false,
@@ -6496,13 +6719,14 @@
               "anyOf": [
                 {
                   "maxLength": 1024,
+                  "pattern": "^[A-Za-z0-9_-]+\\.[A-Za-z0-9_-]+$",
                   "type": "string"
                 },
                 {
                   "type": "null"
                 }
               ],
-              "description": "Opaque cursor",
+              "description": "Opaque cursor from `next_cursor`: base64url(payload).base64url(signature). A cursor that is not ours or was altered is answered with 400 `invalid_cursor`.",
               "title": "Cursor"
             }
           },
@@ -6540,7 +6764,7 @@
                 }
               }
             },
-            "description": "La solicitud no es válida."
+            "description": "Cursor inválido o alterado (code: invalid_cursor)"
           },
           "401": {
             "content": {
@@ -6634,6 +6858,7 @@
         ]
       },
       "post": {
+        "description": "The new company is kept for the life of the app, so the id in the answer works in PUT and DELETE.",
         "operationId": "create_peer_api_peer_companies_post",
         "requestBody": {
           "content": {
@@ -7374,7 +7599,7 @@
         "operationId": "list_recommendations_api_recommendations_get",
         "parameters": [
           {
-            "description": "Opaque cursor",
+            "description": "Opaque cursor from `next_cursor`: base64url(payload).base64url(signature). A cursor that is not ours or was altered is answered with 400 `invalid_cursor`.",
             "in": "query",
             "name": "cursor",
             "required": false,
@@ -7382,13 +7607,14 @@
               "anyOf": [
                 {
                   "maxLength": 1024,
+                  "pattern": "^[A-Za-z0-9_-]+\\.[A-Za-z0-9_-]+$",
                   "type": "string"
                 },
                 {
                   "type": "null"
                 }
               ],
-              "description": "Opaque cursor",
+              "description": "Opaque cursor from `next_cursor`: base64url(payload).base64url(signature). A cursor that is not ours or was altered is answered with 400 `invalid_cursor`.",
               "title": "Cursor"
             }
           },
@@ -7426,7 +7652,7 @@
                 }
               }
             },
-            "description": "La solicitud no es válida."
+            "description": "Cursor inválido o alterado (code: invalid_cursor)"
           },
           "401": {
             "content": {
@@ -7783,7 +8009,7 @@
         "operationId": "list_runs_api_runs_get",
         "parameters": [
           {
-            "description": "Opaque cursor",
+            "description": "Opaque cursor from `next_cursor`: base64url(payload).base64url(signature). A cursor that is not ours or was altered is answered with 400 `invalid_cursor`.",
             "in": "query",
             "name": "cursor",
             "required": false,
@@ -7791,13 +8017,14 @@
               "anyOf": [
                 {
                   "maxLength": 1024,
+                  "pattern": "^[A-Za-z0-9_-]+\\.[A-Za-z0-9_-]+$",
                   "type": "string"
                 },
                 {
                   "type": "null"
                 }
               ],
-              "description": "Opaque cursor",
+              "description": "Opaque cursor from `next_cursor`: base64url(payload).base64url(signature). A cursor that is not ours or was altered is answered with 400 `invalid_cursor`.",
               "title": "Cursor"
             }
           },
@@ -7835,7 +8062,7 @@
                 }
               }
             },
-            "description": "La solicitud no es válida."
+            "description": "Cursor inválido o alterado (code: invalid_cursor)"
           },
           "401": {
             "content": {
@@ -7948,7 +8175,23 @@
             "content": {
               "text/event-stream": {
                 "schema": {
-                  "type": "string"
+                  "properties": {
+                    "data": {
+                      "description": "JSON text: run_id, progress (0-100) and message",
+                      "type": "string"
+                    },
+                    "event": {
+                      "enum": [
+                        "progress"
+                      ],
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "event",
+                    "data"
+                  ],
+                  "type": "object"
                 }
               }
             },
@@ -8445,7 +8688,7 @@
         "operationId": "list_sources_api_sources_get",
         "parameters": [
           {
-            "description": "Opaque cursor",
+            "description": "Opaque cursor from `next_cursor`: base64url(payload).base64url(signature). A cursor that is not ours or was altered is answered with 400 `invalid_cursor`.",
             "in": "query",
             "name": "cursor",
             "required": false,
@@ -8453,13 +8696,14 @@
               "anyOf": [
                 {
                   "maxLength": 1024,
+                  "pattern": "^[A-Za-z0-9_-]+\\.[A-Za-z0-9_-]+$",
                   "type": "string"
                 },
                 {
                   "type": "null"
                 }
               ],
-              "description": "Opaque cursor",
+              "description": "Opaque cursor from `next_cursor`: base64url(payload).base64url(signature). A cursor that is not ours or was altered is answered with 400 `invalid_cursor`.",
               "title": "Cursor"
             }
           },
@@ -8497,7 +8741,7 @@
                 }
               }
             },
-            "description": "La solicitud no es válida."
+            "description": "Cursor inválido o alterado (code: invalid_cursor)"
           },
           "401": {
             "content": {
@@ -9003,7 +9247,7 @@
             }
           },
           {
-            "description": "Opaque cursor",
+            "description": "Opaque cursor from `next_cursor`: base64url(payload).base64url(signature). A cursor that is not ours or was altered is answered with 400 `invalid_cursor`.",
             "in": "query",
             "name": "cursor",
             "required": false,
@@ -9011,13 +9255,14 @@
               "anyOf": [
                 {
                   "maxLength": 1024,
+                  "pattern": "^[A-Za-z0-9_-]+\\.[A-Za-z0-9_-]+$",
                   "type": "string"
                 },
                 {
                   "type": "null"
                 }
               ],
-              "description": "Opaque cursor",
+              "description": "Opaque cursor from `next_cursor`: base64url(payload).base64url(signature). A cursor that is not ours or was altered is answered with 400 `invalid_cursor`.",
               "title": "Cursor"
             }
           },
@@ -9055,7 +9300,7 @@
                 }
               }
             },
-            "description": "La solicitud no es válida."
+            "description": "Cursor inválido o alterado (code: invalid_cursor)"
           },
           "401": {
             "content": {
@@ -9288,7 +9533,7 @@
             }
           },
           {
-            "description": "Last seen on or after (ISO 8601)",
+            "description": "Last seen on or after (RFC 3339)",
             "in": "query",
             "name": "date_from",
             "required": false,
@@ -9302,12 +9547,12 @@
                   "type": "null"
                 }
               ],
-              "description": "Last seen on or after (ISO 8601)",
+              "description": "Last seen on or after (RFC 3339)",
               "title": "Date From"
             }
           },
           {
-            "description": "Last seen on or before (ISO 8601)",
+            "description": "Last seen on or before (RFC 3339)",
             "in": "query",
             "name": "date_to",
             "required": false,
@@ -9321,7 +9566,7 @@
                   "type": "null"
                 }
               ],
-              "description": "Last seen on or before (ISO 8601)",
+              "description": "Last seen on or before (RFC 3339)",
               "title": "Date To"
             }
           },
@@ -9341,7 +9586,7 @@
             }
           },
           {
-            "description": "Opaque cursor",
+            "description": "Opaque cursor from `next_cursor`: base64url(payload).base64url(signature). A cursor that is not ours or was altered is answered with 400 `invalid_cursor`.",
             "in": "query",
             "name": "cursor",
             "required": false,
@@ -9349,13 +9594,14 @@
               "anyOf": [
                 {
                   "maxLength": 1024,
+                  "pattern": "^[A-Za-z0-9_-]+\\.[A-Za-z0-9_-]+$",
                   "type": "string"
                 },
                 {
                   "type": "null"
                 }
               ],
-              "description": "Opaque cursor",
+              "description": "Opaque cursor from `next_cursor`: base64url(payload).base64url(signature). A cursor that is not ours or was altered is answered with 400 `invalid_cursor`.",
               "title": "Cursor"
             }
           },
@@ -9393,7 +9639,7 @@
                 }
               }
             },
-            "description": "La solicitud no es válida."
+            "description": "Cursor inválido o alterado (code: invalid_cursor)"
           },
           "401": {
             "content": {

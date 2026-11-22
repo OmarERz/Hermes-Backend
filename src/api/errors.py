@@ -7,6 +7,7 @@ field path and the rule that failed, never the offending input value (SEG-21).
 from __future__ import annotations
 
 import logging
+import re
 from http import HTTPStatus
 from typing import Any, cast
 
@@ -85,13 +86,28 @@ def _api_error_handler(_request: Request, exc: Exception) -> JSONResponse:
     return error_response(exc.status_code, exc.code, exc.message, exc.details)
 
 
-def _http_exception_handler(_request: Request, exc: Exception) -> JSONResponse:
+def _methods_for_path(app: FastAPI, path: str) -> list[str]:
+    """Every method the OpenAPI document declares for a path. Starlette's own `Allow` lists only the methods of
+    the first route that matched, because FastAPI registers each method as a separate route."""
+    methods: set[str] = set()
+    for template, operations in app.openapi().get("paths", {}).items():
+        pattern = re.sub(r"\\\{[^/]+?\\\}", "[^/]+", re.escape(template))
+        if re.fullmatch(pattern, path):
+            methods.update(method.upper() for method in operations)
+    return sorted(methods)
+
+
+def _http_exception_handler(request: Request, exc: Exception) -> JSONResponse:
     exc = cast(StarletteHTTPException, exc)
     status = exc.status_code
     default = _GENERIC_SERVER if status >= HTTPStatus.INTERNAL_SERVER_ERROR else _GENERIC_CLIENT
     code, message = _STATUS_CODES.get(status, default)
-    headers = dict(exc.headers) if exc.headers else None
-    return error_response(status, code, message, headers=headers)
+    headers = dict(exc.headers) if exc.headers else {}
+    if status == HTTPStatus.METHOD_NOT_ALLOWED:
+        allowed = _methods_for_path(request.app, request.url.path)
+        if allowed:
+            headers["Allow"] = ", ".join(allowed)
+    return error_response(status, code, message, headers=headers or None)
 
 
 def _validation_handler(_request: Request, exc: Exception) -> JSONResponse:

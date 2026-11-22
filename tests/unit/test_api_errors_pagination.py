@@ -193,6 +193,22 @@ def test_limit_out_of_range_is_422(limit: object) -> None:
 
 
 def test_invalid_cursor_is_400_envelope() -> None:
-    response = build().get("/items", params={"cursor": "garbage!"})
+    response = build().get("/items", params={"cursor": "abc.def"})
     assert response.status_code == 400
     assert response.json()["error"]["code"] == "invalid_cursor"
+
+
+def test_malformed_cursor_is_rejected_by_the_documented_pattern() -> None:
+    response = build().get("/items", params={"cursor": "garbage!"})
+    assert response.status_code == 422
+    assert response.json()["error"]["details"][0]["field"] == "query.cursor"
+
+
+def test_envelope_forwards_exception_headers_and_lists_every_allowed_method() -> None:
+    client = build()
+    forbidden = client.get("/http")
+    assert forbidden.headers["x-test"] == "1"
+    wrong_method = client.options("/items")
+    assert wrong_method.status_code == 405
+    assert wrong_method.headers["allow"] == "GET"
+    assert wrong_method.json()["error"]["code"] == "method_not_allowed"
