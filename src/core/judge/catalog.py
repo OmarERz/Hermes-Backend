@@ -50,6 +50,7 @@ class ReasonSpec:
     min_points: int
     max_points: int
     enabled: bool = True
+    applies_to_asset: bool = False  # judge_reason_type.applies_to_asset: adds to one CI, not the group (D-035)
 
     def __post_init__(self) -> None:
         if self.min_points > self.max_points:
@@ -58,11 +59,6 @@ class ReasonSpec:
             raise CatalogError(f"reason {self.code!r}: an upward range must be positive")
         if self.direction is Direction.DOWN and self.max_points >= 0:
             raise CatalogError(f"reason {self.code!r}: a downward range must be negative")
-
-    @property
-    def applies_to_asset(self) -> bool:
-        """Only `more_critical_asset` adds to one CI; every other reason adds to the whole group (D-035)."""
-        return self.code == MORE_CRITICAL_ASSET
 
     @property
     def package_types(self) -> frozenset[str]:
@@ -79,12 +75,12 @@ class ReasonSpec:
         return low <= points <= high and abs(points) >= magnitude
 
 
-# docs/07 §5 initial list (also seeded in src/core/db/seeds.py): code, direction, min, max.
+# docs/07 §5 initial list; a test keeps it equal to the seed (src/core/db/seeds.py REASONS).
 DEFAULT_REASONS: tuple[ReasonSpec, ...] = (
     ReasonSpec("mass_exploitation", Direction.UP, 5, 20),
     ReasonSpec("ransomware", Direction.UP, 5, 20),
     ReasonSpec("zero_day", Direction.UP, 5, 20),
-    ReasonSpec(MORE_CRITICAL_ASSET, Direction.UP, 4, 15),
+    ReasonSpec(MORE_CRITICAL_ASSET, Direction.UP, 4, 15, applies_to_asset=True),
     ReasonSpec("exploit_chain", Direction.UP, 5, 20),
     ReasonSpec("requires_authentication", Direction.DOWN, -20, -5),
     ReasonSpec("missing_configuration", Direction.DOWN, -30, -5),
@@ -120,6 +116,7 @@ def load_reason_catalog(session: Session) -> ReasonCatalog:
         select(
             JudgeReasonType.code,
             JudgeReasonType.direction,
+            JudgeReasonType.applies_to_asset,
             FormulaReasonRange.min_points,
             FormulaReasonRange.max_points,
             FormulaReasonRange.enabled,
@@ -132,8 +129,8 @@ def load_reason_catalog(session: Session) -> ReasonCatalog:
     if not rows:
         raise CatalogError("no active formula version with reason ranges")
     return ReasonCatalog.from_specs(
-        ReasonSpec(code, Direction(direction), min_points, max_points, enabled)
-        for code, direction, min_points, max_points, enabled in rows
+        ReasonSpec(code, Direction(direction), min_points, max_points, enabled, applies_to_asset)
+        for code, direction, applies_to_asset, min_points, max_points, enabled in rows
     )
 
 

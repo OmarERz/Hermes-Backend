@@ -87,4 +87,5 @@ def test_catalog_reflects_edited_ranges_and_disabled_reasons(engine: Engine) -> 
     assert not catalog.reasons["unverified_poc"].enabled
     assert catalog.reasons["zero_day"].enabled
     assert catalog.reasons["other"].direction is Direction.BOTH
+    assert [code for code, r in catalog.reasons.items() if r.applies_to_asset] == ["more_critical_asset"]
     assert catalog.reasons["requires_authentication"].max_points == -5

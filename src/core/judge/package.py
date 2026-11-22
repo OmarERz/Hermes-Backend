@@ -327,6 +327,8 @@ def _thaw(node: Any) -> Any:
 # --- snapshot and cleaning ------------------------------------------------------------------------------------
 def _json_number(value: Any) -> Any:
     if isinstance(value, Decimal):
+        if not value.is_finite():
+            raise ValueError("non-finite decimal")
         return int(value) if value == value.to_integral_value() else float(value)
     raise TypeError(f"not JSON serializable: {type(value).__name__}")
 
@@ -355,7 +357,8 @@ def _clean(content: dict[str, Any]) -> frozenset[str]:
     carried injection markers; a flagged news item also gets `suspicious = true` in the snapshot (SEG-03)."""
     flagged: set[str] = set()
     cve = content["cve_data"]
-    if cve is not None and _clean_tree(cve):
+    kev_dirty = _clean_tree(content["kev"])  # KEV text is part of the CVE element
+    if cve is not None and (_clean_tree(cve) or kev_dirty):
         flagged.add(cve["element_id"])
     for news in content["news"]:
         if _clean_tree(news):
@@ -370,7 +373,8 @@ def _clean(content: dict[str, Any]) -> frozenset[str]:
         ci["description"] = description
         if dirty:
             flagged.add(ci["element_id"])
-    for key in ("group", "kev", "tickets", "profile_summary", "iocs", "base", "additional_urls"):
+    # context shown to the judge; IOC values and extra URLs stay verbatim (hashes would look like base64 blocks)
+    for key in ("group", "tickets", "profile_summary", "base"):
         if content.get(key) is not None:
             _clean_tree(content[key], skip=("cis",))
     return frozenset(flagged)
