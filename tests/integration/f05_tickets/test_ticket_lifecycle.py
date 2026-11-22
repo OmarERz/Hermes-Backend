@@ -466,3 +466,36 @@ def test_a_suppression_of_an_older_version_no_longer_silences(session: Session) 
         select(m.Suppression).where(m.Suppression.finding_id == sc.findings["web-01"].id)
     ).one()
     assert (suppression.lifted_at, suppression.lift_reason) == (sc.clock, "version_changed")
+
+
+def test_a_false_positive_ci_never_drives_a_level_up(session: Session) -> None:
+    sc = Scenario(session)
+    ops = sc.team("Ops")
+    sc.ci("web-01", ops)
+    sc.ci("web-02", ops)
+    lifecycle(sc).apply(
+        session, sc.assess({"web-01": 60, "web-02": 60}, sc.scan({"web-01": "new", "web-02": "new"})).id
+    )
+    ticket = tickets(session, sc)[0]
+    created_in_itop(ticket, "100", 3)
+    analyst = m.AppUser(
+        firebase_uid=f"d-{sc.product}", email=f"d-{sc.product}@example.test", role="analyst", active=True, created_at=T0
+    )
+    session.add(analyst)
+    session.flush()
+    session.add(
+        m.Suppression(
+            finding_id=sc.findings["web-02"].id,
+            suppressed_version="1.24.0",
+            reason="Falso positivo",
+            created_by=analyst.id,
+            created_at=T0,
+        )
+    )
+    session.flush()
+    sc.later(days=1)
+
+    lifecycle(sc).apply(session, sc.assess({"web-01": 61, "web-02": 95}, sc.run("news")).id)
+
+    assert [e.event_type for e in events(session, ticket)] == ["new_ticket"]
+    assert not any(action == "raise_urgency" for action, _ in writes(session, ticket))
