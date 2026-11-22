@@ -25,7 +25,7 @@ boundaries: ## Package boundary contracts (import-linter)
 test: ## Unit and integration tests (pytest), writes coverage.json
 	uv run --locked pytest --cov --cov-report=json --cov-report=term-missing:skip-covered
 
-coverage: ## Coverage gate: 80% global, 95% core (needs make test first)
+coverage: test ## Coverage gate: 80% global, 95% core (runs the tests first)
 	uv run --locked python scripts/check_coverage.py
 
 # Semgrep CE in Docker (docs/14 §3.2). Registry packs: python, owasp-top-ten, secrets, fastapi.
