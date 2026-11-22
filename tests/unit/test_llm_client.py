@@ -5,6 +5,7 @@ from __future__ import annotations
 import json
 import logging
 from collections.abc import Callable
+from pathlib import Path
 from typing import Any
 
 import httpx2
@@ -24,7 +25,7 @@ from core.llm import (
     load_tools,
     make_tool,
 )
-from core.llm.tools import check_strict_compatible
+from core.llm.tools import SCHEMAS_DIR_ENV, check_strict_compatible, default_schemas_dir
 
 pytestmark = pytest.mark.unit
 
@@ -127,12 +128,15 @@ def test_call_sends_strict_tools_and_returns_validated_arguments() -> None:
     assert body["tools"][0]["function"]["strict"] is True
     assert body["tools"][0]["function"]["parameters"]["additionalProperties"] is False
     assert body["tool_choice"] == {"type": "function", "function": {"name": "submit_result"}}
+    assert body["thinking"] == {"type": "disabled"}  # forced tool choices fail with thinking on
 
 
 def test_tool_choice_defaults_to_required() -> None:
     server = Server(ok())
     call(server.client())
-    assert json.loads(server.requests[0].content)["tool_choice"] == "required"
+    body = json.loads(server.requests[0].content)
+    assert body["tool_choice"] == "required"
+    assert body["thinking"] == {"type": "disabled"}
 
 
 def test_arguments_that_do_not_match_the_schema_raise_without_echoing_values() -> None:
@@ -274,3 +278,23 @@ def test_load_tools_rejects_missing_and_duplicate_files(tmp_path: Any) -> None:
 def test_tool_definition_exposes_parameters() -> None:
     assert isinstance(TOOL, ToolDefinition)
     assert TOOL.parameters["required"] == ["verdict", "score"]
+
+
+def test_schemas_dir_resolves_from_the_environment_or_the_source_tree(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Any
+) -> None:
+    monkeypatch.delenv(SCHEMAS_DIR_ENV, raising=False)
+    assert (default_schemas_dir() / "judge_tools.json").is_file()
+    monkeypatch.setenv(SCHEMAS_DIR_ENV, str(tmp_path))
+    assert default_schemas_dir() == tmp_path
+    with pytest.raises(ToolDefinitionError, match="not found"):
+        load_tools()  # resolved through the environment, like in the image
+    (tmp_path / "judge_tools.json").write_text(json.dumps([DEFINITION]))
+    assert set(load_tools()) == {"submit_result"}
+
+
+def test_production_image_ships_the_schemas() -> None:
+    """The image installs the project with --no-editable, so schemas/ must be copied and pointed to explicitly."""
+    dockerfile = (Path(__file__).resolve().parents[2] / "Dockerfile").read_text(encoding="utf-8")
+    assert "COPY --chown=root:root schemas ./schemas" in dockerfile
+    assert "SCHEMAS_DIR=/app/schemas" in dockerfile
