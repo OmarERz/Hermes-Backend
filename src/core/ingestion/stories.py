@@ -5,9 +5,9 @@ becomes two articles. Here an article without a story goes through, in order:
 
 - layer 2: same set of CVEs and same event type as a story inside the window;
 - layer 3: embedding similarity at or above `dedup.similarity` against a story inside the window (pgvector);
-- layer 4: same victim and same actor (needs analyst entities; inactive with the default regex provider);
-- layer 5: similarity in the gray zone (`dedup.gray_zone` up to `dedup.similarity`) decided with the entities,
-  without another model call.
+- layer 4: same victim and same actor, for attacks without CVE (needs analyst entities; inactive by default);
+- layer 5: similarity in the gray zone (`dedup.gray_zone` up to `dedup.similarity`) decided with the analyst entities,
+  without another model call; with no analyst entities a gray-zone pair stays as two stories.
 
 A story keeps every URL and takes its date from its oldest article; republications across outlets are one story,
 hence one source for the independent-sources rule. A text that matches nothing starts a new story.
@@ -21,7 +21,7 @@ from dataclasses import dataclass
 from datetime import datetime, timedelta
 from decimal import Decimal
 
-from sqlalchemy import select
+from sqlalchemy import func, select
 from sqlalchemy.orm import Session, aliased
 
 from core.db import models as m
@@ -41,6 +41,7 @@ from core.ingestion.settings import get_decimal, get_int
 log = logging.getLogger("ingestion")
 
 BATCH_LIMIT = 500
+DEDUP_LOCK_KEY = 20_260_222  # arbitrary key of the transaction-level advisory lock held while grouping
 
 
 @dataclass(frozen=True)
@@ -87,23 +88,28 @@ def _window_stories(
     return [(story, rep_article) for story, rep_article in session.execute(stmt)]
 
 
-def _nearest(
+GRAY_NEIGHBORS = 10
+
+
+def _neighbors(
     session: Session, article: m.RawArticle, vector: list[float], settings: DedupSettings
-) -> tuple[m.Story, Decimal] | None:
+) -> list[tuple[m.Story, Decimal]]:
+    """Stories in the window at or above the gray-zone similarity, most similar first."""
     rep = aliased(m.RawArticle)
     low, high = _window(article, settings)
     distance = m.Story.embedding.cosine_distance(vector)
     stmt = (
         select(m.Story, distance)
         .join(rep, rep.id == m.Story.representative_article_id)
-        .where(m.Story.embedding.is_not(None), rep.published_at.between(low, high))
+        .where(
+            m.Story.embedding.is_not(None),
+            rep.published_at.between(low, high),
+            distance <= float(Decimal(1) - settings.gray_zone),
+        )
         .order_by(distance)
-        .limit(1)
+        .limit(GRAY_NEIGHBORS)
     )
-    row = session.execute(stmt).first()
-    if row is None:
-        return None
-    return row[0], Decimal(1) - Decimal(str(row[1]))
+    return [(story, Decimal(1) - Decimal(str(dist))) for story, dist in session.execute(stmt)]
 
 
 def _join(session: Session, article: m.RawArticle, story: m.Story) -> None:
@@ -154,19 +160,19 @@ def _place(ctx: _Context, article: m.RawArticle, vector: list[float]) -> Placeme
         if same_event(mine, entities_of(story, rep)):
             _join(session, article, story)
             return Placement(article.id, story.id, "cve_event")
-    nearest = _nearest(session, article, vector, ctx.settings)
-    if nearest is not None and nearest[1] >= ctx.settings.similarity:  # layer 3
-        _join(session, article, nearest[0])
-        return Placement(article.id, nearest[0].id, "similarity", nearest[1])
+    neighbors = _neighbors(session, article, vector, ctx.settings)
+    if neighbors and neighbors[0][1] >= ctx.settings.similarity:  # layer 3
+        _join(session, article, neighbors[0][0])
+        return Placement(article.id, neighbors[0][0].id, "similarity", neighbors[0][1])
     for story, rep in candidates:  # layer 4
         if same_attack(mine, entities_of(story, rep)):
             _join(session, article, story)
             return Placement(article.id, story.id, "attack")
-    if nearest is not None and nearest[1] >= ctx.settings.gray_zone:  # layer 5: gray zone, decided by the entities
-        rep = next(rep for story, rep in candidates if story.id == nearest[0].id)
-        if entities_agree(mine, entities_of(nearest[0], rep)):
-            _join(session, article, nearest[0])
-            return Placement(article.id, nearest[0].id, "gray_zone", nearest[1])
+    by_id = {story.id: rep for story, rep in candidates}
+    for story, similarity in neighbors:  # layer 5: gray zone, decided by the entities; every neighbor is checked
+        if entities_agree(mine, entities_of(story, by_id[story.id])):
+            _join(session, article, story)
+            return Placement(article.id, story.id, "gray_zone", similarity)
     story = _new_story(session, article, vector, ctx.model, ctx.clock)
     return Placement(article.id, story.id, "new")
 
@@ -179,6 +185,10 @@ def group_new_articles(
     embedding_model: str = EMBEDDING_MODEL,
 ) -> list[Placement]:
     """Assign every article without a story to a story; commits at the end."""
+    # One grouping at a time: two runs reading the same pending articles would each open a story for them.
+    if not session.scalar(select(func.pg_try_advisory_xact_lock(DEDUP_LOCK_KEY))):
+        log.info("dedup: another run is grouping; skipped")
+        return []
     settings = load_settings(session)
     pending = list(
         session.scalars(

@@ -68,10 +68,16 @@ def same_event(a: ArticleEntities, b: ArticleEntities) -> bool:
 
 
 def same_attack(a: ArticleEntities, b: ArticleEntities) -> bool:
-    """Layer 4: same victim and same actor, for attacks without CVE."""
-    return bool(a.victim and a.actor) and (a.victim, a.actor) == (b.victim, b.actor)
+    """Layer 4: same victim and same actor, for attacks without CVE (neither article cites one)."""
+    return not a.cves and not b.cves and bool(a.victim and a.actor) and (a.victim, a.actor) == (b.victim, b.actor)
 
 
 def entities_agree(a: ArticleEntities, b: ArticleEntities) -> bool:
-    """Layer 5 (gray zone): the same attack, or the same non-empty CVE set, whatever the event hint says."""
-    return same_attack(a, b) or (bool(a.cves) and a.cves == b.cves)
+    """Layer 5 (gray zone): the analyst's entities say it is the same fact.
+
+    Same victim and same actor, unless both name CVEs and the sets differ. Without analyst entities nothing agrees,
+    so a gray-zone pair stays as two stories.
+    """
+    if a.cves and b.cves and a.cves != b.cves:
+        return False
+    return bool(a.victim and a.actor) and (a.victim, a.actor) == (b.victim, b.actor)

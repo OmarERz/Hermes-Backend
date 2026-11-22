@@ -53,8 +53,7 @@ def test_layer_rules() -> None:
     assert not same_event(a, c)
     assert not same_event(a, d)
     assert not same_event(empty, empty)
-    assert entities_agree(a, c)  # gray zone ignores the event hint
-    assert not entities_agree(a, d)
+    assert not entities_agree(a, c)  # regex entities alone never settle a gray-zone pair
     assert not entities_agree(empty, empty)
 
     x = ArticleEntities(frozenset(), "disclosure", victim="acme", actor="lockbit")
@@ -64,3 +63,16 @@ def test_layer_rules() -> None:
     assert entities_agree(x, y)
     assert not same_attack(z, z)
     assert not same_attack(x, ArticleEntities(frozenset(), "x", victim="other", actor="lockbit"))
+
+
+def test_attack_layers_need_analyst_entities_and_respect_cves() -> None:
+    with_cve = ArticleEntities(frozenset({"CVE-2026-0001"}), "exploitation", victim="acme", actor="lockbit")
+    other_cve = ArticleEntities(frozenset({"CVE-2026-0002"}), "exploitation", victim="acme", actor="lockbit")
+    no_cve = ArticleEntities(frozenset(), "exploitation", victim="acme", actor="lockbit")
+    assert not same_attack(with_cve, with_cve)  # layer 4 is for attacks without CVE
+    assert not same_attack(with_cve, no_cve)
+    assert not entities_agree(with_cve, other_cve)  # different CVE sets: different facts
+    assert entities_agree(with_cve, no_cve)  # one side names no CVE: the victim and actor decide
+    assert entities_agree(with_cve, with_cve)
+    plain = regex_entities("t", "CVE-2026-0001 exploited")
+    assert not entities_agree(plain, plain)  # no analyst entities: nothing agrees
