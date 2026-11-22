@@ -15,7 +15,7 @@ import logging
 import random
 import time
 from collections.abc import Callable, Mapping, Sequence
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from typing import Any, Literal, cast
 
 import httpx2
@@ -59,11 +59,35 @@ class Timeouts:
 
 
 @dataclass(frozen=True)
+class Usage:
+    """Token usage of one or more completions (audit record L13, budget docs/09 §4).
+
+    `output` excludes reasoning tokens, which are counted apart (P-017); `cached_input` is part of `input`.
+    """
+
+    input: int = 0
+    cached_input: int = 0
+    output: int = 0
+    reasoning: int = 0
+
+    def __add__(self, other: Usage) -> Usage:
+        return Usage(
+            input=self.input + other.input,
+            cached_input=self.cached_input + other.cached_input,
+            output=self.output + other.output,
+            reasoning=self.reasoning + other.reasoning,
+        )
+
+
+@dataclass(frozen=True)
 class ToolCall:
-    """The tool call chosen by the model, with already validated arguments."""
+    """The tool call chosen by the model, with already validated arguments, plus what the audit needs."""
 
     name: str
     arguments: dict[str, Any]
+    call_id: str = ""
+    usage: Usage = field(default_factory=Usage)
+    response_model: str | None = None
 
 
 class LlmClient:
@@ -134,7 +158,13 @@ class LlmClient:
         except json.JSONDecodeError as exc:
             raise LlmResponseError("tool call arguments are not valid JSON") from exc
         tool.validate_arguments(arguments)
-        return ToolCall(name=tool.name, arguments=arguments)
+        return ToolCall(
+            name=tool.name,
+            arguments=arguments,
+            call_id=str(getattr(calls[0], "id", "") or ""),
+            usage=_usage(completion),
+            response_model=getattr(completion, "model", None),
+        )
 
     def _with_retries[T](self, operation: Callable[[], T]) -> T:
         for attempt in range(1, self._retry.max_attempts + 1):
@@ -158,6 +188,29 @@ class LlmClient:
         if retry_after is not None:
             delay = max(delay, min(retry_after, MAX_RETRY_AFTER_SECONDS))
         return delay
+
+
+def _count(value: Any) -> int:
+    return value if isinstance(value, int) and not isinstance(value, bool) and value > 0 else 0
+
+
+def _usage(completion: Any) -> Usage:
+    """Read token counts defensively: OpenAI-style details or DeepSeek's prompt_cache_hit_tokens ⚠️."""
+    usage = getattr(completion, "usage", None)
+    if usage is None:
+        return Usage()
+    prompt_details = getattr(usage, "prompt_tokens_details", None)
+    cached = _count(getattr(prompt_details, "cached_tokens", None)) or _count(
+        getattr(usage, "prompt_cache_hit_tokens", None)
+    )
+    reasoning = _count(getattr(getattr(usage, "completion_tokens_details", None), "reasoning_tokens", None))
+    completion_tokens = _count(getattr(usage, "completion_tokens", None))
+    return Usage(
+        input=_count(getattr(usage, "prompt_tokens", None)),
+        cached_input=cached,
+        output=max(completion_tokens - reasoning, 0),
+        reasoning=reasoning,
+    )
 
 
 def _retry_after(exc: Exception) -> float | None:

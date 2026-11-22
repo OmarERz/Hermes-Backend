@@ -1,6 +1,6 @@
 """Strict-mode LLM client over the official `openai` SDK (JUE-03, docs/09)."""
 
-from core.llm.client import LlmClient, RetryPolicy, Timeouts, ToolCall
+from core.llm.client import LlmClient, RetryPolicy, Timeouts, ToolCall, Usage
 from core.llm.errors import (
     LlmError,
     LlmRequestError,
@@ -23,6 +23,7 @@ __all__ = [
     "ToolCall",
     "ToolDefinition",
     "ToolDefinitionError",
+    "Usage",
     "load_tools",
     "make_tool",
 ]

@@ -31,7 +31,7 @@ from urllib.parse import urlsplit
 from jsonschema import Draft202012Validator
 
 from core.ingestion.cleaning import clean_html, clean_plain
-from core.llm.tools import DEFAULT_SCHEMAS_DIR
+from core.llm.tools import default_schemas_dir
 
 PACKAGE_SCHEMA_FILE = "review_package.schema.json"
 VIEW_OPEN = "<paquete>"
@@ -134,9 +134,10 @@ class ReviewPackage:
     elements: Mapping[str, Element]
 
     @classmethod
-    def from_content(cls, content: Mapping[str, Any], schemas_dir: Path = DEFAULT_SCHEMAS_DIR) -> ReviewPackage:
+    def from_content(cls, content: Mapping[str, Any], schemas_dir: Path | None = None) -> ReviewPackage:
         snapshot = _snapshot(content)
-        errors = sorted(_validator(schemas_dir).iter_errors(snapshot), key=lambda e: list(e.path))
+        validator = _validator(schemas_dir or default_schemas_dir())
+        errors = sorted(validator.iter_errors(snapshot), key=lambda e: list(e.path))
         if errors:
             paths = [f"{'.'.join(str(p) for p in e.path) or '<root>'}: {e.validator}" for e in errors]
             raise PackageError("review package rejected: " + "; ".join(paths))
