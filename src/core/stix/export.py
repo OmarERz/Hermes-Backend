@@ -78,7 +78,7 @@ def _moment(raw: str | None, *, end: bool) -> datetime:
             day = datetime.combine(date.fromisoformat(raw), datetime.min.time(), tzinfo=UTC)
             return day + timedelta(days=1) if end else day
         parsed = datetime.fromisoformat(str(raw))
-    except ValueError:
+    except (ValueError, OverflowError):
         raise StixExportError("the date range needs ISO dates") from None
     return parsed if parsed.tzinfo else parsed.replace(tzinfo=UTC)
 
@@ -266,7 +266,13 @@ def _gather(session: Session, group_id: uuid.UUID, options: ExportOptions) -> _G
         return None
     created = published or group_created
     tickets = session.scalars(
-        text("SELECT DISTINCT status FROM ticket WHERE finding_group_id = :g ORDER BY status"), {"g": group_id}
+        text(
+            "SELECT DISTINCT t.status FROM ticket t WHERE t.finding_group_id = :g AND (:all_assets OR EXISTS ("
+            "SELECT 1 FROM ticket_finding tf JOIN finding f ON f.id = tf.finding_id "
+            "JOIN installed_software i ON i.id = f.installed_software_id "
+            "WHERE tf.ticket_id = t.id AND tf.removed_at IS NULL AND i.asset_id = ANY(:assets))) ORDER BY t.status"
+        ),
+        {"g": group_id, "all_assets": not assets.excluded, "assets": assets.asset_ids},
     ).all()
     return _GroupData(
         cve_id=cve_id,
