@@ -8,11 +8,14 @@ requires-python = ">=3.12,<3.13"
 dependencies = [
     "alembic>=1.20.1",
     "fastapi>=0.165.0",
+    "feedparser>=6.0.14",
+    "httpx>=0.28.1",
     "pgvector>=0.5.1",
     "psycopg[binary]>=3.3.9",
     "pydantic>=2.14.4",
     "pydantic-settings>=2.16.3",
     "sqlalchemy>=2.1.9",
+    "trafilatura>=2.3.1",
     "uvicorn>=0.54.0",
 ]
 
@@ -26,6 +29,7 @@ dev = [
     "pytest",
     "pytest-cov>=7.1.0",
     "pyyaml>=6.0.4",
+    "respx>=0.23.1",
     "ruff",
     "testcontainers>=4.15.0",
     "types-pyyaml>=6.0.12.20261113",
