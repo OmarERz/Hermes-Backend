@@ -41,7 +41,9 @@ class Settings(BaseSettings):
     )
 
     # Connections required to start
-    database_url: SecretStr = Field(description="PostgreSQL connection URL (contains the password)")
+    database_url: SecretStr = Field(description="PostgreSQL connection URL; the password may come from PGPASSWORD")
+    # libpq/psycopg read PGPASSWORD when the URL has none, so passwords never need URL encoding (compose.yaml)
+    pgpassword: SecretStr | None = None
     firebase_project_id: str = Field(min_length=1, description="Firebase project that issues the ID tokens")
 
     # Firebase Admin SDK service account: the most sensitive secret (SEG-20)
@@ -74,11 +76,18 @@ class Settings(BaseSettings):
     def _project_id_stripped(cls, value: Any) -> Any:
         return value.strip() if isinstance(value, str) else value
 
-    @field_validator(*_OPTIONAL_FIELDS, mode="before")
+    @field_validator(*_OPTIONAL_FIELDS, "pgpassword", mode="before")
     @classmethod
     def _blank_means_unset(cls, value: Any) -> Any:
         if isinstance(value, str) and not value.strip():
             return None
+        return value
+
+    @field_validator("llm_base_url_judge", mode="before")
+    @classmethod
+    def _blank_judge_url_means_default(cls, value: Any) -> Any:
+        if value is None or (isinstance(value, str) and not value.strip()):
+            return DEFAULT_LLM_BASE_URL
         return value
 
     @model_validator(mode="after")

@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+from pathlib import Path
+
 import pytest
 from pydantic import ValidationError
 
@@ -98,3 +100,21 @@ def test_missing_reports_unconfigured_connections(monkeypatch: pytest.MonkeyPatc
     assert "ITOP_TOKEN" not in missing
     assert "DEEPSEEK_API_KEY" in missing
     assert "LLM_BASE_URL_ANALYSTS" not in missing  # defaults to the judge URL
+
+
+def test_example_env_file_loads(monkeypatch: pytest.MonkeyPatch) -> None:
+    """The shipped example file starts as-is: blank values fall back to defaults or 'not configured'."""
+    example = Path(__file__).resolve().parents[2] / ".env.example"
+    settings = Settings(_env_file=example)  # type: ignore[call-arg]
+    assert str(settings.llm_base_url_judge) == DEFAULT_LLM_BASE_URL
+    assert settings.itop_token is None
+
+
+def test_blank_judge_url_uses_default(monkeypatch: pytest.MonkeyPatch) -> None:
+    assert str(load(monkeypatch, {"LLM_BASE_URL_JUDGE": ""}).llm_base_url_judge) == DEFAULT_LLM_BASE_URL
+
+
+def test_pgpassword_is_a_masked_secret(monkeypatch: pytest.MonkeyPatch) -> None:
+    settings = load(monkeypatch, {"PGPASSWORD": "pw/with@reserved:chars"})
+    assert "pw/with@reserved:chars" in settings.secret_values()
+    assert "pw/with@reserved:chars" not in repr(settings)
