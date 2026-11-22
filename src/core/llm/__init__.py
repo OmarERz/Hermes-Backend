@@ -10,6 +10,7 @@ from core.llm.errors import (
     ToolDefinitionError,
 )
 from core.llm.tools import ToolDefinition, load_tools, make_tool
+from core.llm.usage import Usage
 
 __all__ = [
     "LlmClient",
@@ -23,6 +24,7 @@ __all__ = [
     "ToolCall",
     "ToolDefinition",
     "ToolDefinitionError",
+    "Usage",
     "load_tools",
     "make_tool",
 ]
