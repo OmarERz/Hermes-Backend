@@ -90,7 +90,6 @@ jobs:
           scan-type: image
           image-ref: hermes-backend:scan
           severity: HIGH,CRITICAL
-          ignore-unfixed: true
           exit-code: "1"
       - name: Trivy image scan (auth emulator)
         uses: aquasecurity/trivy-action@ed142fd0673e97e23eac54620cfb913e5ce36c25 # v0.36.0
@@ -98,7 +97,6 @@ jobs:
           scan-type: image
           image-ref: hermes-auth-emulator:scan
           severity: HIGH,CRITICAL
-          ignore-unfixed: true
           exit-code: "1"
 
   zap:
