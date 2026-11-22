@@ -101,7 +101,7 @@ zap: ## OWASP ZAP API scan in Docker against API_URL/api/openapi.json (needs API
 
 bruno: ## Bruno API collection (bruno/ folder, environment local)
 	@test -d bruno || { echo "bruno/ folder not found: the Bruno collection is created in F0.7 (D-070)" >&2; exit 2; }
-	cd bruno && npx --yes @usebruno/cli@$(BRUNO_CLI_VERSION) run --env local
+	cd bruno && npx --yes @usebruno/cli@$(BRUNO_CLI_VERSION) run --env local $${TEST_TOKEN:+--env-var token="$$TEST_TOKEN"}
 
 # Prints one Firebase Auth emulator ID token (D-069); the emulator comes from `docker compose up auth-emulator`.
 # Defaults to the emulator published on localhost; the tool itself refuses to run without an emulator host.
