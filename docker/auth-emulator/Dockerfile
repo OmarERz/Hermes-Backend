@@ -1,10 +1,12 @@
 # Firebase Auth emulator for backend tests only (D-069): issues test ID tokens per role, no network.
 FROM node:22-slim@sha256:e9f565d32859f0cbfb52125eafe8be39390f24dac302dc3cdf566e8ba3ab21ee
-ARG FIREBASE_TOOLS_VERSION=15.37.0
-RUN npm install --global --no-fund --no-audit "firebase-tools@${FIREBASE_TOOLS_VERSION}" && npm cache clean --force
 WORKDIR /emulator
+# firebase-tools is pinned in package.json and package-lock.json, so Dependabot can track it.
+COPY package.json package-lock.json ./
+RUN npm ci --omit=dev --no-fund --no-audit && npm cache clean --force
 COPY firebase.json .firebaserc ./
 RUN chown -R node:node /emulator
+ENV PATH="/emulator/node_modules/.bin:${PATH}"
 USER node
 EXPOSE 9099
 HEALTHCHECK --interval=5s --timeout=3s --retries=20 \
