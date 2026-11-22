@@ -11,6 +11,7 @@ x-backend: &backend
     FIREBASE_PROJECT_ID: ${FIREBASE_PROJECT_ID:-demo-hermes}
     FIREBASE_AUTH_EMULATOR_HOST: auth-emulator:9099
     FIREBASE_CREDENTIALS_FILE: ${FIREBASE_CREDENTIALS_FILE:-}
+    API_DOCS_ENABLED: ${API_DOCS_ENABLED:-false}
     # Backend connections of docs/11 §2 (blank means not configured)
     ITOP_URL: ${ITOP_URL:-}
     ITOP_TOKEN: ${ITOP_TOKEN:-}
