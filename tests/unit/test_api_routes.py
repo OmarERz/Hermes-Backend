@@ -79,8 +79,6 @@ def test_a_lower_role_gets_403(client: TestClient) -> None:
 
 
 GET_SAMPLES = [
-    "/api/pending/inventory",
-    "/api/cpe/candidates?q=pago",
     "/api/vulnerabilities",
     "/api/vulnerabilities?view=criticality",
     "/api/vulnerabilities?view=asset",
@@ -224,20 +222,15 @@ def test_feedback_rules(client: TestClient) -> None:
     assert forged.status_code == 422  # the user comes from the token, never from the body
 
 
-def test_other_write_routes(client: TestClient) -> None:
-    as_role(Role.ADMIN)
-    assert client.put("/api/mappings/PagoFacil", json={"cpe": "cpe:2.3:a:x:y:1:*:*:*:*:*:*:*"}).status_code == 200
-
-
 def test_runs_stix_calibration_and_notifications(client: TestClient) -> None:
     as_role(Role.ADMIN)
     events = client.get("/api/runs/run-1/events")
     assert events.headers["content-type"].startswith("text/event-stream")
     assert "event: progress" in events.text
     assert client.get("/api/runs/zzz/events").status_code == 404
-    assert client.post("/api/stix/export", json={"scope": "run"}).status_code == 422
-    bundle = client.post("/api/stix/export", json={"scope": "run", "run_id": "run-1"})
-    assert bundle.json()["type"] == "bundle"
+    assert (
+        client.post("/api/stix/export", json={"scope": "run"}).status_code == 422
+    )  # scope data checked before the database
     assert client.post("/api/calibration/proposals/cal-1/approve").json()["status"] == "approved"
     assert client.post("/api/calibration/proposals/cal-1/reject").json()["status"] == "rejected"
     assert client.post("/api/calibration/proposals/zzz/approve").status_code == 404

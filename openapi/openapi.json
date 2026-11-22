@@ -2514,6 +2514,11 @@
             ],
             "title": "Date To"
           },
+          "exclude_ultra_classified": {
+            "default": false,
+            "title": "Exclude Ultra Classified",
+            "type": "boolean"
+          },
           "run_id": {
             "anyOf": [
               {
@@ -5271,6 +5276,7 @@
     },
     "/api/cpe/candidates": {
       "get": {
+        "description": "Candidate CPE vendor and product pairs for a software name: NVD's dictionary plus what is already loaded.",
         "operationId": "cpe_candidates_api_cpe_candidates_get",
         "parameters": [
           {
@@ -6055,6 +6061,7 @@
     },
     "/api/mappings/{software}": {
       "put": {
+        "description": "Maps a software product (its identifier) to the vendor and product of a CPE name (ESC-05, ESC-06).",
         "operationId": "put_mapping_api_mappings__software__put",
         "parameters": [
           {
@@ -7260,6 +7267,7 @@
     },
     "/api/pending/inventory": {
       "get": {
+        "description": "Inventory items waiting for a person, up to 200 per type (FRO-17); `outside_delivery_model` is not modelled.",
         "operationId": "pending_inventory_api_pending_inventory_get",
         "responses": {
           "200": {
@@ -9121,7 +9129,7 @@
     },
     "/api/stix/export": {
       "post": {
-        "description": "Exports a STIX 2.1 bundle. The scope needs its matching identifier or range.",
+        "description": "Exports a STIX 2.1 bundle with TLP marking (STX-03, STX-06). The scope needs its identifier or range.",
         "operationId": "stix_export_api_stix_export_post",
         "requestBody": {
           "content": {
