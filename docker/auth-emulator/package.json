@@ -1,0 +1,9 @@
+{
+  "name": "hermes-auth-emulator",
+  "version": "0.0.0",
+  "private": true,
+  "description": "Firebase Auth emulator for backend tests only (D-069)",
+  "dependencies": {
+    "firebase-tools": "15.37.0"
+  }
+}

@@ -10,6 +10,7 @@ import os
 import secrets
 import shutil
 import subprocess
+import tempfile
 from collections.abc import Iterator
 from pathlib import Path
 
@@ -45,13 +46,29 @@ def stack() -> Iterator[dict[str, str]]:
         **PORTS,
         "CURSOR_SIGNING_KEY": secrets.token_urlsafe(32),
         "POSTGRES_PASSWORD": "p/w@" + secrets.token_urlsafe(12) + ":x",
+        "MIGRATOR_DB_PASSWORD": secrets.token_urlsafe(16),
+        "APP_DB_PASSWORD": "a@p/" + secrets.token_urlsafe(12),
+        "RETENTION_DB_PASSWORD": secrets.token_urlsafe(16),
     }
+    secrets_dir = tempfile.mkdtemp(prefix="hermes-e2e-secrets-")
+    env["COMPOSE_SECRETS_DIR"] = secrets_dir
+    written = subprocess.run(
+        [shutil.which("bash") or "/bin/bash", str(ROOT / "docker" / "compose-secrets.sh")],
+        env=env,
+        cwd=ROOT,
+        capture_output=True,
+        text=True,
+        check=False,
+        timeout=60,
+    )
+    assert written.returncode == 0, written.stderr
     up = compose(env, "up", "-d", "--build", "--wait", "--wait-timeout", "300")
     try:
         assert up.returncode == 0, up.stderr[-3000:]
         yield env
     finally:
         compose(env, "down", "-v", "--remove-orphans", timeout=300)
+        shutil.rmtree(secrets_dir, ignore_errors=True)
 
 
 def get(url: str) -> tuple[int, bytes]:
@@ -71,11 +88,41 @@ def test_auth_emulator_answers(stack: dict[str, str]) -> None:
 
 
 def test_all_services_running(stack: dict[str, str]) -> None:
-    ps = compose(stack, "ps", "--format", "json")
+    ps = compose(stack, "ps", "--all", "--format", "json")
     services = {json.loads(line)["Service"]: json.loads(line)["State"] for line in ps.stdout.splitlines() if line}
-    assert services == {"db": "running", "auth-emulator": "running", "api": "running", "workers": "running"}
+    assert services == {
+        "db": "running",
+        "auth-emulator": "running",
+        "provision": "exited",
+        "migrate": "exited",
+        "api": "running",
+        "workers": "running",
+    }
+
+
+def test_migrations_ran_as_migrator(stack: dict[str, str]) -> None:
+    query = "SELECT tableowner, count(*) FROM pg_tables WHERE schemaname = 'public' GROUP BY 1"
+    out = compose(stack, "exec", "-T", "db", "psql", "-U", "hermes", "-d", "hermes", "-tAc", query)
+    assert out.stdout.strip() == "migrator|76"  # 75 model tables + alembic_version
+
+
+def test_api_connects_as_the_app_role(stack: dict[str, str]) -> None:
+    code = (
+        "from core.config import Settings; from core.db.session import make_session_factory; "
+        "from sqlalchemy import text; s = make_session_factory(Settings())(); "
+        "print(s.execute(text('SELECT current_user')).scalar_one())"
+    )
+    out = compose(stack, "exec", "-T", "api", "python", "-c", code)
+    assert out.stdout.strip() == "app", out.stderr[-2000:]
 
 
 def test_api_runs_as_non_root(stack: dict[str, str]) -> None:
     whoami = compose(stack, "exec", "-T", "api", "id", "-u")
     assert whoami.stdout.strip() == "10001"
+
+
+def test_provisioning_is_repeatable(stack: dict[str, str]) -> None:
+    """Re-running provision on an already provisioned volume (e.g. one created before F0.6) succeeds."""
+    rerun = compose(stack, "run", "--rm", "provision")
+    assert rerun.returncode == 0, rerun.stderr[-2000:]
+    assert "database provisioned" in rerun.stdout

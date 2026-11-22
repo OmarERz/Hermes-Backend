@@ -1,0 +1,184 @@
+name: Security weekly
+
+on:
+  schedule:
+    - cron: "17 5 * * 1" # Mondays 05:17 UTC
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: security-weekly-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  audit:
+    name: pip-audit
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: astral-sh/setup-uv@1db35dd8eee11c5894872e0b383ae6c406cf738d # v10.4.0
+        with:
+          enable-cache: true
+          python-version-file: .python-version
+      - name: pip-audit on the locked dependencies
+        run: make audit
+
+  gitleaks-history:
+    name: gitleaks-full-history
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+      - name: Gitleaks over all history
+        run: GITLEAKS_FULL_HISTORY=1 make secrets
+
+  slow-tests:
+    name: slow-tests
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: astral-sh/setup-uv@1db35dd8eee11c5894872e0b383ae6c406cf738d # v10.4.0
+        with:
+          enable-cache: true
+          python-version-file: .python-version
+      - name: Install dependencies
+        run: uv sync --locked
+      - name: Slow tests
+        run: |
+          rc=0
+          uv run --locked pytest -m slow --no-cov || rc=$?
+          # Exit code 5 means that no test carries the slow marker yet.
+          if [ "$rc" -eq 5 ]; then
+            echo "SKIPPED: no test carries the slow marker yet"
+          else
+            exit "$rc"
+          fi
+
+  kics:
+    name: kics-compose
+    # Trivy does not cover Compose files, so KICS (platform dockerCompose) checks compose.yaml.
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - name: KICS scan of compose.yaml (fails on HIGH and MEDIUM)
+        uses: Checkmarx/kics-github-action@4a16c2130b02104dc2624c133d5224080e7cc49b # v2.2.1
+        with:
+          path: compose.yaml
+          platform_type: dockerCompose
+          fail_on: high,medium
+          enable_annotations: "false"
+          output_path: kics-results
+
+  trivy:
+    name: trivy
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - name: Trivy config scan (Dockerfiles)
+        uses: aquasecurity/trivy-action@ed142fd0673e97e23eac54620cfb913e5ce36c25 # v0.36.0
+        with:
+          scan-type: config
+          scan-ref: .
+          severity: HIGH,CRITICAL
+          exit-code: "1"
+      # Every scan runs even if an earlier one fails, so the job reports all findings (docs/14 §4).
+      - name: Build the backend image
+        if: ${{ !cancelled() }}
+        run: docker build -t hermes-backend:scan .
+      - name: Build the auth emulator image
+        if: ${{ !cancelled() }}
+        run: docker build -t hermes-auth-emulator:scan docker/auth-emulator
+      - name: Resolve the database image from compose.yaml
+        id: db_image
+        if: ${{ !cancelled() }}
+        run: |
+          image=$(docker compose config --no-interpolate --format json | jq -r '.services.db.image')
+          [ -n "$image" ] && [ "$image" != "null" ] || { echo "::error::no image for the db service"; exit 1; }
+          echo "ref=$image" >> "$GITHUB_OUTPUT"
+      - name: Trivy image scan (backend)
+        if: ${{ !cancelled() }}
+        uses: aquasecurity/trivy-action@ed142fd0673e97e23eac54620cfb913e5ce36c25 # v0.36.0
+        with:
+          scan-type: image
+          image-ref: hermes-backend:scan
+          severity: HIGH,CRITICAL
+          exit-code: "1"
+      - name: Trivy image scan (auth emulator)
+        if: ${{ !cancelled() }}
+        uses: aquasecurity/trivy-action@ed142fd0673e97e23eac54620cfb913e5ce36c25 # v0.36.0
+        with:
+          scan-type: image
+          image-ref: hermes-auth-emulator:scan
+          severity: HIGH,CRITICAL
+          exit-code: "1"
+      - name: Trivy image scan (pgvector database)
+        if: ${{ !cancelled() && steps.db_image.outputs.ref != '' }}
+        uses: aquasecurity/trivy-action@ed142fd0673e97e23eac54620cfb913e5ce36c25 # v0.36.0
+        with:
+          scan-type: image
+          image-ref: ${{ steps.db_image.outputs.ref }}
+          severity: HIGH,CRITICAL
+          exit-code: "1"
+
+  zap:
+    name: zap
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - name: Check ZAP prerequisites
+        id: gate
+        run: |
+          # ZAP needs the running API and a bearer token from the Firebase Auth emulator. F0.7 is expected
+          # to provide the token command as the Makefile target emulator-token; until then ZAP is skipped.
+          if grep -q '^emulator-token:' Makefile; then
+            echo "enabled=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "SKIPPED: OWASP ZAP, no Makefile target emulator-token yet (F0.7 provides the test token)"
+          fi
+      - uses: astral-sh/setup-uv@1db35dd8eee11c5894872e0b383ae6c406cf738d # v10.4.0
+        if: steps.gate.outputs.enabled == 'true'
+        with:
+          enable-cache: true
+          python-version-file: .python-version
+      - name: Start the stack with throwaway passwords
+        if: steps.gate.outputs.enabled == 'true'
+        run: |
+          for var in POSTGRES_PASSWORD MIGRATOR_DB_PASSWORD APP_DB_PASSWORD RETENTION_DB_PASSWORD; do
+            value=$(openssl rand -hex 24)
+            echo "::add-mask::$value"
+            echo "$var=$value" >> "$GITHUB_ENV"
+          done
+          # ZAP reads the schema from /api/openapi.json, which is served only with the docs enabled.
+          echo "API_DOCS_ENABLED=true" >> "$GITHUB_ENV"
+      - name: Wait for the stack
+        if: steps.gate.outputs.enabled == 'true'
+        run: docker compose up --build --wait -d
+      - name: ZAP API scan
+        if: steps.gate.outputs.enabled == 'true'
+        run: |
+          TEST_TOKEN=$(make --no-print-directory emulator-token)
+          echo "::add-mask::$TEST_TOKEN"
+          API_URL=http://localhost:8000 TEST_TOKEN="$TEST_TOKEN" make zap
+      - name: Stop the stack
+        if: always() && steps.gate.outputs.enabled == 'true'
+        run: docker compose down -v

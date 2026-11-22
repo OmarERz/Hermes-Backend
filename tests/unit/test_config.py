@@ -7,7 +7,7 @@ from pathlib import Path
 import pytest
 from pydantic import ValidationError
 
-from core.config import DEFAULT_LLM_BASE_URL, Settings
+from core.config import DEFAULT_LLM_BASE_URL, Settings, read_secret
 
 REQUIRED = {
     "DATABASE_URL": "postgresql://app:s3cret-pw@db:5432/hermes",
@@ -157,3 +157,11 @@ def test_cursor_signing_key_can_come_from_a_secret_file(monkeypatch: pytest.Monk
             monkeypatch.setenv(name, value)
     settings = Settings(_env_file=None, _secrets_dir=tmp_path)  # type: ignore[call-arg]
     assert settings.cursor_signing_key.get_secret_value() == "s" * 40
+
+
+def test_read_secret_keeps_spaces_and_drops_final_newline(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.delenv("SAMPLE_SECRET", raising=False)
+    (tmp_path / "sample_secret").write_text("  padded value \n", encoding="utf-8")
+    assert read_secret("sample_secret", tmp_path) == "  padded value "
+    (tmp_path / "blank_secret").write_text("   \n", encoding="utf-8")
+    assert read_secret("blank_secret", tmp_path) is None

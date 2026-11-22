@@ -1,0 +1,161 @@
+# Synthetic stack for the iTop test instance (F0.7): one organization, two teams, two owners, seven devices, four software instances and the
+# software catalogue, with the D-037 extension attributes. Some CIs are deliberately incomplete (no exposure, no
+# classification, no owner or custodian) to exercise the inventory-pending screen (ESC-03c, P-013).
+#   make itop-seed            dry run
+#   make itop-seed APPLY=1    write
+# iTop requires: status production|implementation|stock|obsolete (devices) and active|inactive (software and
+# solutions); business_criticity high|medium|low; system_id on every software instance.
+objects:
+  - class: Organization
+    name: Demo-Lab
+
+  - class: Person
+    name: Rivera
+    fields: { first_name: Ana, org_id: "@Organization:Demo-Lab", email: ana.rivera@example.test }
+  - class: Person
+    name: Soto
+    fields: { first_name: Luis, org_id: "@Organization:Demo-Lab", email: luis.soto@example.test }
+  - class: Team
+    name: Platform Ops
+    fields:
+      org_id: "@Organization:Demo-Lab"
+      persons_list:
+        - person_id: "@Person:Rivera"
+  - class: Team
+    name: Data Custody
+    fields:
+      org_id: "@Organization:Demo-Lab"
+      persons_list:
+        - person_id: "@Person:Soto"
+
+  # Servers
+  - class: Server
+    name: web-frontend-01
+    fields: &web
+      org_id: "@Organization:Demo-Lab"
+      status: production
+      business_criticity: medium
+      managementip: 10.0.0.11
+      internet_exposed: "yes"
+      confidentiality: public
+      personal_data: "no"
+      owner_id: "@Person:Rivera"
+      custodian_id: "@Team:Platform Ops"
+  - class: Server
+    name: web-frontend-02
+    fields: { <<: *web, managementip: 10.0.0.14 }
+  - class: Server
+    name: k8s-node-01
+    fields:
+      org_id: "@Organization:Demo-Lab"
+      status: production
+      business_criticity: high
+      managementip: 10.0.0.12
+      internet_exposed: "no"
+      confidentiality: classified
+      personal_data: unknown
+      owner_id: "@Person:Rivera"
+      custodian_id: "@Team:Platform Ops"
+  - class: Server
+    name: db-host-01
+    fields:
+      org_id: "@Organization:Demo-Lab"
+      status: production
+      business_criticity: high
+      managementip: 10.0.0.13
+      internet_exposed: "no"
+      confidentiality: highly_classified
+      personal_data: "yes"
+      owner_id: "@Person:Soto"
+      custodian_id: "@Team:Data Custody"
+
+  # Virtualization: a virtual machine needs a virtual host (hypervisor); vm-legacy-01 is incomplete on purpose
+  - class: Hypervisor
+    name: hv-01
+    fields:
+      org_id: "@Organization:Demo-Lab"
+      status: production
+      business_criticity: medium
+      server_id: "@Server:k8s-node-01"
+      internet_exposed: "no"
+      confidentiality: classified
+      personal_data: "no"
+      owner_id: "@Person:Rivera"
+      custodian_id: "@Team:Platform Ops"
+  - class: VirtualMachine
+    name: vm-batch-01
+    fields:
+      org_id: "@Organization:Demo-Lab"
+      virtualhost_id: "@Hypervisor:hv-01"
+      status: production
+      business_criticity: low
+      internet_exposed: "no"
+      confidentiality: unclassified
+      personal_data: unknown
+      owner_id: "@Person:Soto"
+      custodian_id: "@Team:Data Custody"
+  - class: VirtualMachine
+    name: vm-legacy-01
+    fields: { org_id: "@Organization:Demo-Lab", virtualhost_id: "@Hypervisor:hv-01", status: production, business_criticity: low }
+
+  # Software catalogue (product + version, some deliberately old)
+  - class: Software
+    name: nginx
+    fields: { vendor: F5, version: "1.24.0", type: WebServer }
+  - class: Software
+    name: PostgreSQL
+    fields: { vendor: PostgreSQL, version: "15.4", type: DBServer }
+  - class: Software
+    name: OpenSSL
+    fields: { vendor: OpenSSL, version: "3.0.2", type: OtherSoftware }
+
+  # Installations: what runs where
+  - class: WebServer
+    name: nginx 1.24.0 @ web-frontend-01
+    fields: { org_id: "@Organization:Demo-Lab", system_id: "@Server:web-frontend-01", software_id: "@Software:nginx", status: active }
+  - class: WebServer
+    name: nginx 1.24.0 @ web-frontend-02
+    fields: { org_id: "@Organization:Demo-Lab", system_id: "@Server:web-frontend-02", software_id: "@Software:nginx", status: active }
+  - class: DBServer
+    name: PostgreSQL 15.4 @ db-host-01
+    fields: { org_id: "@Organization:Demo-Lab", system_id: "@Server:db-host-01", software_id: "@Software:PostgreSQL", status: active }
+  - class: OtherSoftware
+    name: OpenSSL 3.0.2 @ k8s-node-01
+    fields: { org_id: "@Organization:Demo-Lab", system_id: "@Server:k8s-node-01", software_id: "@Software:OpenSSL", status: active }
+
+  # Service catalogue: a ticket can only be resolved with a service linked, through a customer contract, to the
+  # ticket's organization (analysis §5.5)
+  - class: ServiceFamily
+    name: Security
+  - class: Service
+    name: Vulnerability management
+    fields: { org_id: "@Organization:Demo-Lab", servicefamily_id: "@ServiceFamily:Security", status: production }
+  - class: CustomerContract
+    name: Demo-Lab security contract
+    fields:
+      org_id: "@Organization:Demo-Lab"
+      provider_id: "@Organization:Demo-Lab"
+      status: production
+      services_list:                     # creates the lnkCustomerContractToService rows
+        - service_id: "@Service:Vulnerability management"
+
+  # One ticket shaped like D-036: team_id = custodian team, contacts_list = owners, caller_id = the system person,
+  # agent_id empty (so it is still `new` and ev_assign can be tested), functionalcis_list with impact_code manual.
+  - class: UserRequest
+    name: "CVE-2026-0001 nginx 1.24.0 / Platform Ops"
+    key: title
+    fields:
+      org_id: "@Organization:Demo-Lab"
+      caller_id: "@Person:Hermes System"
+      description: "Synthetic sample ticket for the iTop test instance."
+      impact: "2"
+      urgency: "2"
+      service_id: "@Service:Vulnerability management"
+      team_id: "@Team:Platform Ops"
+      contacts_list:
+        - contact_id: "@Person:Rivera"
+      functionalcis_list:
+        - functionalci_id: "@Server:web-frontend-01"
+          impact_code: manual
+        - functionalci_id: "@Server:web-frontend-02"
+          impact_code: manual

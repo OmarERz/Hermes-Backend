@@ -4,7 +4,7 @@
 SHELL := /bin/bash
 .SHELLFLAGS := -eu -o pipefail -c
 
-.PHONY: help openapi verify lint typecheck boundaries test coverage semgrep secrets audit verify-full zap bruno review
+.PHONY: up compose-secrets help openapi verify lint typecheck boundaries test coverage semgrep secrets audit verify-full schemathesis adversarial dynamic zap bruno ci-lint seed events emulator-token itop-up itop-install itop-seed itop-token itop-down review
 
 help: ## List the available targets
 	@grep -E '^[a-z-]+:.*## ' $(MAKEFILE_LIST) | awk 'BEGIN {FS = ":.*## "}; {printf "  %-12s %s\n", $$1, $$2}'
@@ -22,8 +22,8 @@ typecheck: ## Strict type checking (mypy)
 boundaries: ## Package boundary contracts (import-linter)
 	uv run --locked lint-imports
 
-test: ## Unit and integration tests (pytest), writes coverage.json
-	uv run --locked pytest --cov --cov-report=json --cov-report=term-missing:skip-covered
+test: ## Unit and integration tests (pytest), writes coverage.json and coverage.xml
+	uv run --locked pytest --cov --cov-report=json --cov-report=xml --cov-report=term-missing:skip-covered
 
 openapi: ## Regenerate the OpenAPI snapshot (openapi/openapi.json) after changing routes or schemas
 	uv run --locked python scripts/export_openapi.py
@@ -81,7 +81,11 @@ SCHEMATHESIS_EXCLUDES ?= --exclude-path /api/scans --exclude-path /api/stix/expo
 
 # Not part of plain `make verify`. A step is skipped only while the phase that creates its prerequisite
 # has not landed, and says so with an explicit SKIPPED line; once the prerequisite exists it must pass.
-verify-full: verify ## Full gate before closing a feature: verify + Schemathesis + adversarial suite
+verify-full: verify dynamic ## Full gate before closing a feature: verify + dynamic checks
+
+dynamic: schemathesis adversarial ## Dynamic checks only: Schemathesis + adversarial suite (CI runs them after verify's steps)
+
+schemathesis: ## Schemathesis against the running API (API_URL and TEST_TOKEN) once openapi/openapi.json exists
 	@if [ -f "$(OPENAPI_SNAPSHOT)" ]; then \
 	  test -n "$${API_URL:-}" || { echo "API_URL is not set: Schemathesis needs the running API (e.g. API_URL=http://localhost:8000)" >&2; exit 2; }; \
 	  test -n "$${TEST_TOKEN:-}" || { echo "TEST_TOKEN is not set: Schemathesis needs a Firebase emulator bearer token (docs/14 §4.3)" >&2; exit 2; }; \
@@ -90,6 +94,8 @@ verify-full: verify ## Full gate before closing a feature: verify + Schemathesis
 	else \
 	  echo "SKIPPED: Schemathesis, $(OPENAPI_SNAPSHOT) does not exist yet (arrives in F0.5)"; \
 	fi
+
+adversarial: ## Adversarial judge suite (pytest -m adversarial)
 	@rc=0; uv run --locked pytest -m adversarial -q --no-cov || rc=$$?; \
 	if [ $$rc -eq 5 ]; then echo "SKIPPED: adversarial suite, no test carries the adversarial marker yet (arrives in F6)"; \
 	else exit $$rc; fi
@@ -104,7 +110,49 @@ zap: ## OWASP ZAP API scan in Docker against API_URL/api/openapi.json (needs API
 
 bruno: ## Bruno API collection (bruno/ folder, environment local)
 	@test -d bruno || { echo "bruno/ folder not found: the Bruno collection is created in F0.7 (D-070)" >&2; exit 2; }
-	cd bruno && npx --yes @usebruno/cli@$(BRUNO_CLI_VERSION) run --env local
+	cd bruno && npx --yes @usebruno/cli@$(BRUNO_CLI_VERSION) run --env local $${TEST_TOKEN:+--env-var token="$$TEST_TOKEN"}
+
+# Prints one Firebase Auth emulator ID token (D-069); the emulator comes from `docker compose up auth-emulator`.
+# Defaults to the emulator published on localhost; the tool itself refuses to run without an emulator host.
+emulator-token: ## Print an emulator ID token: make emulator-token ROLE=admin|analyst|reader
+	@test -n "$${ROLE:-}" || { echo "Usage: make emulator-token ROLE=admin|analyst|reader" >&2; exit 2; }
+	@FIREBASE_AUTH_EMULATOR_HOST="$${FIREBASE_AUTH_EMULATOR_HOST:-127.0.0.1:9099}" \
+	  uv run --locked python -m core.devtools.emulator token --role "$$ROLE"
+
+# Admin CLI (core.devtools.admin): seed as migrator (MIGRATION_DATABASE_URL), events as app (DATABASE_URL).
+seed: ## Load a seed scenario: make seed SCENARIO=empty|demo|edge
+	@test -n "$${SCENARIO:-}" || { echo "Usage: make seed SCENARIO=empty|demo|edge" >&2; exit 2; }
+	uv run --locked python -m core.devtools.admin seed --scenario "$$SCENARIO"
+
+events: ## List the latest notification events as JSON lines (optional LIMIT, STATUS, TYPE)
+	@uv run --locked python -m core.devtools.admin events --limit "$${LIMIT:-20}" \
+	  $${STATUS:+--status "$$STATUS"} $${TYPE:+--type "$$TYPE"}
+
+# iTop 3.2.2 test instance (compose.itop.yaml, docs/itop-test-instance.md). Needs ITOP_DB_ROOT_PASSWORD,
+# ITOP_DB_PASSWORD and ITOP_ADMIN_PASSWORD in the environment; every compose call below reads them.
+ITOP_COMPOSE ?= docker compose -f compose.itop.yaml --profile itop
+
+itop-up: ## Start the iTop test instance (Docker)
+	$(ITOP_COMPOSE) up -d --build --wait --wait-timeout 300
+
+itop-install: ## Unattended iTop install, extension and REST users (idempotent)
+	$(ITOP_COMPOSE) exec -T -u www-data itop /opt/hermes-itop/install.sh
+
+itop-seed: ## Load the synthetic stack into iTop (dry run; add APPLY=1 to write)
+	@ITOP_URL="http://127.0.0.1:$${ITOP_PORT:-8080}" \
+	  ITOP_TOKEN="$$($(ITOP_COMPOSE) exec -T itop cat /var/www/html/data/hermes-seed-token)" \
+	  PYTHONPATH=tests uv run --locked python -m harness.itop_seed docker/itop/stack.yaml $(if $(APPLY),--apply)
+
+itop-token: ## Print the least-privilege REST token of the iTop test instance
+	@$(ITOP_COMPOSE) exec -T itop cat /var/www/html/data/hermes-rest-token
+
+itop-down: ## Stop the iTop test instance and delete its data
+	$(ITOP_COMPOSE) down -v --remove-orphans
+
+ACTIONLINT_VERSION ?= 1.7.12.24
+
+ci-lint: ## Lint the GitHub Actions workflows (actionlint, not part of verify)
+	uvx --from actionlint-py@$(ACTIONLINT_VERSION) actionlint
 
 # TASK and REVIEWER reach the recipe as environment variables, so quotes in the task title stay intact.
 export TASK REVIEWER
@@ -113,3 +161,9 @@ review: ## Automatic review by the other agent: make review TASK="F0.1-T1 · ...
 	@test -n "$$TASK" || { echo 'Usage: make review TASK="FNN.M-Tk · description" REVIEWER=codex|claude' >&2; exit 2; }
 	@test -f scripts/review.sh || { echo "scripts/review.sh is local-only (D-062) and is not present in this clone" >&2; exit 2; }
 	bash scripts/review.sh "$$TASK"
+
+compose-secrets: ## Write the Docker secret files compose.yaml mounts (from your environment)
+	bash docker/compose-secrets.sh
+
+up: compose-secrets ## Start the local stack: write the Docker secret files, then docker compose up --build -d
+	docker compose up --build -d --wait

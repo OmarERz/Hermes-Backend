@@ -1,0 +1,89 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<itop_design xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" version="3.2">
+  <classes>
+    <class id="FunctionalCI">
+      <fields>
+        <field id="internet_exposed" xsi:type="AttributeEnum" _delta="define">
+          <sort_type>rank</sort_type>
+          <values>
+            <value id="yes"><code>yes</code><rank>10</rank></value>
+            <value id="no"><code>no</code><rank>20</rank></value>
+          </values>
+          <sql>internet_exposed</sql>
+          <default_value/>
+          <is_null_allowed>true</is_null_allowed>
+          <display_style>list</display_style>
+        </field>
+        <field id="confidentiality" xsi:type="AttributeEnum" _delta="define">
+          <sort_type>rank</sort_type>
+          <values>
+            <value id="public"><code>public</code><rank>10</rank></value>
+            <value id="classified"><code>classified</code><rank>20</rank></value>
+            <value id="highly_classified"><code>highly_classified</code><rank>30</rank></value>
+            <value id="unclassified"><code>unclassified</code><rank>40</rank></value>
+          </values>
+          <sql>confidentiality</sql>
+          <default_value/>
+          <is_null_allowed>true</is_null_allowed>
+          <display_style>list</display_style>
+        </field>
+        <field id="personal_data" xsi:type="AttributeEnum" _delta="define">
+          <sort_type>rank</sort_type>
+          <values>
+            <value id="yes"><code>yes</code><rank>10</rank></value>
+            <value id="no"><code>no</code><rank>20</rank></value>
+            <value id="unknown"><code>unknown</code><rank>30</rank></value>
+          </values>
+          <sql>personal_data</sql>
+          <default_value/>
+          <is_null_allowed>true</is_null_allowed>
+          <display_style>list</display_style>
+        </field>
+        <field id="owner_id" xsi:type="AttributeExternalKey" _delta="define">
+          <sql>owner_id</sql>
+          <target_class>Person</target_class>
+          <is_null_allowed>true</is_null_allowed>
+          <on_target_delete>DEL_MANUAL</on_target_delete>
+        </field>
+        <field id="custodian_id" xsi:type="AttributeExternalKey" _delta="define">
+          <sql>custodian_id</sql>
+          <target_class>Team</target_class>
+          <is_null_allowed>true</is_null_allowed>
+          <on_target_delete>DEL_MANUAL</on_target_delete>
+        </field>
+      </fields>
+    </class>
+  </classes>
+  <user_rights>
+    <profiles>
+      <!-- Least privilege for the backend (C16): read everything, write only tickets and their links. -->
+      <profile id="100" _delta="define">
+        <name>Hermes Backend</name>
+        <description>Reads the CMDB and creates and assigns the security tickets of Hermes</description>
+        <groups>
+          <group id="Ticketing">
+            <actions>
+              <action id="action:write">allow</action>
+            </actions>
+          </group>
+          <group id="UserRequest">
+            <actions>
+              <action id="action:write">allow</action>
+              <action id="action:bulk write">allow</action>
+              <action id="stimulus:ev_assign">allow</action>
+              <action id="stimulus:ev_reassign">allow</action>
+              <action id="stimulus:ev_resolve">allow</action>
+              <action id="stimulus:ev_pending">allow</action>
+            </actions>
+          </group>
+          <group id="*">
+            <actions>
+              <action id="action:read">allow</action>
+              <action id="action:bulk read">allow</action>
+            </actions>
+          </group>
+        </groups>
+      </profile>
+    </profiles>
+  </user_rights>
+</itop_design>

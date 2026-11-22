@@ -7,6 +7,7 @@ valid empty key (prototype conflict C5).
 
 from __future__ import annotations
 
+import os
 from pathlib import Path
 from typing import Any, Self
 
@@ -16,6 +17,24 @@ from pydantic_settings import BaseSettings, SettingsConfigDict
 DOCKER_SECRETS_DIR = Path("/run/secrets")
 MIN_CURSOR_KEY_LENGTH = 32
 DEFAULT_LLM_BASE_URL = "https://api.deepseek.com/beta"  # strict tool mode (JUE-03) ⚠️ verified in F0.5
+
+
+def read_secret(name: str, secrets_dir: Path = DOCKER_SECRETS_DIR) -> str | None:
+    """A credential from the environment (upper-case name) or from a mounted Docker secret file (lower-case name).
+
+    Used where Settings is not available (provisioning, Alembic). A blank value counts as not configured;
+    otherwise the value is kept as is (leading and trailing spaces are part of a password).
+    """
+    value = os.environ.get(name.upper(), "")
+    if value.strip():
+        return value
+    path = secrets_dir / name.lower()
+    if path.is_file():
+        # Keep the credential as written; drop only a final line break (the postgres image does the same).
+        content = path.read_text(encoding="utf-8").removesuffix("\n").removesuffix("\r")
+        return content if content.strip() else None
+    return None
+
 
 _OPTIONAL_FIELDS = (
     "itop_url",

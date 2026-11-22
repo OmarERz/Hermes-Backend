@@ -1,38 +1,68 @@
 # Local stack: docker compose up --build
-# Requires POSTGRES_PASSWORD (see the example env file). Ports bind to 127.0.0.1 only.
+# Credentials travel as Docker secret files (D-042): `make compose-secrets` writes them from POSTGRES_PASSWORD,
+# MIGRATOR_DB_PASSWORD, APP_DB_PASSWORD, RETENTION_DB_PASSWORD (required) and ITOP_TOKEN, NVD_API_KEY,
+# DEEPSEEK_API_KEY, ABUSECH_AUTH_KEY, RANSOMWARELIVE_API_KEY (optional, blank means "not configured").
+# Ports bind to 127.0.0.1 only. On every start the provision service (re)applies the idempotent provisioning
+# (extensions, roles, schema owner, role passwords as SCRAM verifiers); the migrate service then runs Alembic as
+# migrator (DAT-05) and the API and workers connect as app, the least-privilege role.
 name: hermes
 
-x-backend: &backend
-  build: .
-  environment:
-    # The password travels in PGPASSWORD (read by libpq/psycopg), so it never needs URL encoding.
-    DATABASE_URL: postgresql://hermes@db:5432/hermes
-    PGPASSWORD: ${POSTGRES_PASSWORD:?set POSTGRES_PASSWORD}
-    FIREBASE_PROJECT_ID: ${FIREBASE_PROJECT_ID:-demo-hermes}
-    CURSOR_SIGNING_KEY: ${CURSOR_SIGNING_KEY:?set CURSOR_SIGNING_KEY}
-    FIREBASE_AUTH_EMULATOR_HOST: auth-emulator:9099
-    FIREBASE_CREDENTIALS_FILE: ${FIREBASE_CREDENTIALS_FILE:-}
-    API_DOCS_ENABLED: ${API_DOCS_ENABLED:-false}
-    # Backend connections of docs/11 §2 (blank means not configured)
-    ITOP_URL: ${ITOP_URL:-}
-    ITOP_TOKEN: ${ITOP_TOKEN:-}
-    ITOP_SYSTEM_USER: ${ITOP_SYSTEM_USER:-}
-    NVD_API_KEY: ${NVD_API_KEY:-}
-    DEEPSEEK_API_KEY: ${DEEPSEEK_API_KEY:-}
-    LLM_BASE_URL_JUDGE: ${LLM_BASE_URL_JUDGE:-}
-    LLM_BASE_URL_ANALYSTS: ${LLM_BASE_URL_ANALYSTS:-}
-    ABUSECH_AUTH_KEY: ${ABUSECH_AUTH_KEY:-}
-    RANSOMWARELIVE_API_KEY: ${RANSOMWARELIVE_API_KEY:-}
-  depends_on:
-    db:
-      condition: service_healthy
-    auth-emulator:
-      condition: service_healthy
+secrets:
+  postgres_password:
+    file: ${COMPOSE_SECRETS_DIR:-./.compose-secrets}/postgres_password
+  migrator_db_password:
+    file: ${COMPOSE_SECRETS_DIR:-./.compose-secrets}/migrator_db_password
+  app_db_password:
+    file: ${COMPOSE_SECRETS_DIR:-./.compose-secrets}/app_db_password
+  retention_db_password:
+    file: ${COMPOSE_SECRETS_DIR:-./.compose-secrets}/retention_db_password
+  itop_token:
+    file: ${COMPOSE_SECRETS_DIR:-./.compose-secrets}/itop_token
+  nvd_api_key:
+    file: ${COMPOSE_SECRETS_DIR:-./.compose-secrets}/nvd_api_key
+  deepseek_api_key:
+    file: ${COMPOSE_SECRETS_DIR:-./.compose-secrets}/deepseek_api_key
+  abusech_auth_key:
+    file: ${COMPOSE_SECRETS_DIR:-./.compose-secrets}/abusech_auth_key
+  ransomwarelive_api_key:
+    file: ${COMPOSE_SECRETS_DIR:-./.compose-secrets}/ransomwarelive_api_key
+
+x-hardening: &hardening
   read_only: true
   tmpfs:
     - /tmp
   cap_drop: [ALL]
   security_opt: ["no-new-privileges:true"]
+
+x-backend: &backend
+  <<: *hardening
+  build: .
+  environment:
+    # The password comes from the pgpassword secret (Settings reads the mounted file), never from the URL.
+    DATABASE_URL: postgresql://app@db:5432/hermes
+    FIREBASE_PROJECT_ID: ${FIREBASE_PROJECT_ID:-demo-hermes}
+    CURSOR_SIGNING_KEY: ${CURSOR_SIGNING_KEY:?set CURSOR_SIGNING_KEY}
+    FIREBASE_AUTH_EMULATOR_HOST: auth-emulator:9099
+    FIREBASE_CREDENTIALS_FILE: ${FIREBASE_CREDENTIALS_FILE:-}
+    API_DOCS_ENABLED: ${API_DOCS_ENABLED:-false}
+    # Non-secret connection settings of docs/11 §2 (blank means not configured)
+    ITOP_URL: ${ITOP_URL:-}
+    ITOP_SYSTEM_USER: ${ITOP_SYSTEM_USER:-}
+    LLM_BASE_URL_JUDGE: ${LLM_BASE_URL_JUDGE:-}
+    LLM_BASE_URL_ANALYSTS: ${LLM_BASE_URL_ANALYSTS:-}
+  secrets:
+    - source: app_db_password
+      target: pgpassword
+    - itop_token
+    - nvd_api_key
+    - deepseek_api_key
+    - abusech_auth_key
+    - ransomwarelive_api_key
+  depends_on:
+    migrate:
+      condition: service_completed_successfully
+    auth-emulator:
+      condition: service_healthy
   restart: unless-stopped
 
 services:
@@ -41,34 +71,98 @@ services:
     environment:
       POSTGRES_DB: hermes
       POSTGRES_USER: hermes
-      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?set POSTGRES_PASSWORD}
+      POSTGRES_PASSWORD_FILE: /run/secrets/postgres_password
+    secrets: [postgres_password]
     volumes:
       - db_data:/var/lib/postgresql
     ports:
       - "127.0.0.1:${DB_PORT:-5432}:5432"
     healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U hermes -d hermes"]
+      test: ["CMD-SHELL", "pg_isready -h 127.0.0.1 -U hermes -d hermes"]
+      interval: 5s
+      timeout: 3s
+      retries: 20
+    # Runs directly as the image's postgres user (a fresh named volume inherits its ownership), so no capability
+    # is needed at all.
+    user: postgres
+    cap_drop: [ALL]
+    security_opt: ["no-new-privileges:true"]
+    restart: unless-stopped
+
+  auth-emulator:
+    build: docker/auth-emulator
+    # Read-only image: the emulator writes its debug log to the working directory, so it runs from the tmpfs.
+    working_dir: /tmp
+    command: ["firebase", "emulators:start", "--only", "auth", "--project", "demo-hermes", "--config", "/emulator/firebase.json"]
+    read_only: true
+    tmpfs:
+      - /tmp
+      - /home/node/.cache
+      - /home/node/.config
+    cap_drop: [ALL]
+    security_opt: ["no-new-privileges:true"]
+    ports:
+      - "127.0.0.1:${AUTH_EMULATOR_PORT:-9099}:9099"
+    healthcheck:
+      test: ["CMD", "node", "-e", "fetch('http://127.0.0.1:9099/').then(r => process.exit(r.ok ? 0 : 1)).catch(() => process.exit(1))"]
       interval: 5s
       timeout: 3s
       retries: 20
     restart: unless-stopped
 
-  auth-emulator:
-    build: docker/auth-emulator
-    ports:
-      - "127.0.0.1:${AUTH_EMULATOR_PORT:-9099}:9099"
-    restart: unless-stopped
+  provision:
+    # Repeatable (every start, idempotent): also provisions a volume created before F0.6. Runs as superuser;
+    # role passwords become client-side SCRAM verifiers (core/db/provision.py).
+    <<: *hardening
+    build: .
+    command: ["python", "-m", "core.db.provision"]
+    environment:
+      PROVISION_DATABASE_URL: postgresql://hermes@db:5432/hermes
+    secrets: [postgres_password, migrator_db_password, app_db_password, retention_db_password]
+    depends_on:
+      db:
+        condition: service_healthy
+    healthcheck:
+      # One-shot job: dependants wait for successful completion; healthy while it runs.
+      test: ["CMD", "python", "-c", "pass"]
+      interval: 10s
+    restart: "no"
+
+  migrate:
+    <<: *hardening
+    build: .
+    command: ["alembic", "upgrade", "head"]
+    environment:
+      MIGRATION_DATABASE_URL: postgresql://migrator@db:5432/hermes
+    secrets: [migrator_db_password]
+    depends_on:
+      provision:
+        condition: service_completed_successfully
+    healthcheck:
+      # One-shot job: dependants wait for successful completion; healthy while it runs.
+      test: ["CMD", "python", "-c", "pass"]
+      interval: 10s
+    restart: "no"
 
   api:
     <<: *backend
     ports:
       - "127.0.0.1:${API_PORT:-8000}:8000"
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request,sys; sys.exit(urllib.request.urlopen('http://127.0.0.1:8000/api/health', timeout=2).status != 200)"]
+      interval: 10s
+      timeout: 3s
+      retries: 5
 
   workers:
     <<: *backend
     command: ["python", "-m", "workers"]
     healthcheck:
-      disable: true
+      # The worker has no port yet: healthy while its main process (PID 1) is alive.
+      test: ["CMD", "python", "-c", "import os; os.kill(1, 0)"]
+      interval: 10s
+      timeout: 3s
+      retries: 3
 
 volumes:
   db_data:
