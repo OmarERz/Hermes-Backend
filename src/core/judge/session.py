@@ -16,14 +16,18 @@ from dataclasses import dataclass, field, replace
 from datetime import date
 from decimal import Decimal
 from enum import StrEnum
-from typing import Any, Protocol
+from typing import TYPE_CHECKING, Any, Protocol
 
 from core.judge.budget import DailyBudget, ModelPrice, complexity, token_cap
 from core.judge.catalog import MORE_CRITICAL_ASSET, JudgeSettings, ReasonCatalog, SensitivityProfile
 from core.judge.mitigation import MitigationResult, validate_mitigation
 from core.judge.package import ReviewPackage
-from core.judge.prompt import MODE1_TOOLS, PromptVersions, system_prompt, user_message, versions
+from core.judge.prompt import MODE1_TOOLS, PROMPT_VERSION, PromptVersions, system_prompt, user_message, versions
 from core.judge.rules import AcceptedReason, ReasonProposal, RuleContext, check_reason
+
+if TYPE_CHECKING:
+    from core.judge.mode2 import AlertDecision
+
 from core.llm import (
     LlmError,
     LlmResponseError,
@@ -36,6 +40,7 @@ from core.llm import (
 )
 
 MAX_SUMMARY_CHARS = 1500
+ToolResult = tuple[dict[str, Any], str | None, str | None]  # answer to the model, broken rule, reason
 LADDER_SUGGESTION = 2  # docs/07 §8 level 2: adjustments are shown as a suggestion, not applied (TODO(P-006))
 LADDER_OFF = 3  # level 3: final = base
 
@@ -126,6 +131,9 @@ class ReviewOutcome:
     failure: Failure | None = None
     out_of_range: bool = False
     cites_suspicious: bool = False
+    mode: str = "scoring"  # llm_review.mode: scoring (mode 1) or dismissals (mode 2)
+    alert: AlertDecision | None = None  # mode 2: the validated alert, if the judge proposed one
+    dismissal: str | None = None  # mode 2: the reason the news does not apply, if dismissed
 
 
 def _never_active(_cve: str) -> bool:
@@ -148,7 +156,7 @@ class JudgeEnvironment:
 
 
 @dataclass(frozen=True)
-class _Decision:
+class Decision:
     adjustment: int | None
     ci_adjustments: Mapping[str, int]
     summary: str | None
@@ -157,7 +165,7 @@ class _Decision:
     cites_suspicious: bool = False
 
 
-_NO_DECISION = _Decision(None, {}, None, MitigationResult.absent())
+_NO_DECISION = Decision(None, {}, None, MitigationResult.absent())
 MAX_STORED_POINTS = 1000  # rejected proposals keep their points (smallint column); the raw value stays in calls
 
 
@@ -171,6 +179,12 @@ class _State:
 
 
 class JudgeSession:
+    """Mode 1 (scoring). Subclasses change the tools, the prompt, the handlers and how the review closes."""
+
+    MODE = "scoring"
+    PROMPT_VERSION = PROMPT_VERSION
+    TOOL_NAMES: tuple[str, ...] = MODE1_TOOLS
+
     def __init__(
         self,
         caller: ToolCaller,
@@ -184,15 +198,30 @@ class JudgeSession:
         self._settings = env.settings
         self._ctx = RuleContext(package, env.catalog, env.profile, env.today, env.active_cve)
         all_tools = tools or load_tools()
-        self._tools = [all_tools[name] for name in MODE1_TOOLS]
-        self._system = system_prompt(env.catalog, env.profile, env.settings)
-        self._versions = versions(self._system)
+        self._tools = [all_tools[name] for name in self.TOOL_NAMES]
+        self._system = self._system_prompt()
+        self._versions = versions(self._system, prompt_version=self.PROMPT_VERSION)
         self._cap = token_cap(package, env.settings.token_caps)
         self._usage = Usage()
         self._attempts = 0
         self._response_model: str | None = None
         self._state = _State()
         self._started = 0.0
+
+    # --- hooks for other modes -------------------------------------------------------------------------------
+    def _system_prompt(self) -> str:
+        return system_prompt(self._env.catalog, self._env.profile, self._env.settings)
+
+    def _handlers(self) -> Mapping[str, Callable[[Mapping[str, Any]], ToolResult]]:
+        return {
+            "read_element": self._read_element,
+            "propose_reason": self._propose_reason,
+            "withdraw_reason": self._withdraw_reason,
+            "finalize_review": self._finalize_review,
+        }
+
+    def _finished(self) -> bool:
+        return self._state.finalized is not None
 
     # --- public ----------------------------------------------------------------------------------------------
     def run(self) -> ReviewOutcome:
@@ -239,7 +268,7 @@ class JudgeSession:
             self._response_model = call.response_model or self._response_model
             last_turn_tokens = call.usage.input + call.usage.output + call.usage.reasoning
             result = self._dispatch(call)
-            if state.finalized is not None:
+            if self._finished():
                 return self._close(self._finished_status(), None)
             messages.append(_assistant(call))
             messages.append(
@@ -261,26 +290,20 @@ class JudgeSession:
 
     # --- tools -----------------------------------------------------------------------------------------------
     def _dispatch(self, call: ToolCall) -> dict[str, Any]:
-        handler = {
-            "read_element": self._read_element,
-            "propose_reason": self._propose_reason,
-            "withdraw_reason": self._withdraw_reason,
-            "finalize_review": self._finalize_review,
-        }[call.name]
-        result, rule, reason = handler(call.arguments)
+        result, rule, reason = self._handlers()[call.name](call.arguments)
         self._state.calls.append(
             CallRecord(len(self._state.calls) + 1, call.name, call.arguments, str(result["result"]), rule, reason)
         )
         return result
 
-    def _read_element(self, args: Mapping[str, Any]) -> tuple[dict[str, Any], str | None, str | None]:
+    def _read_element(self, args: Mapping[str, Any]) -> ToolResult:
         element = self._package.elements.get(str(args["element_id"]))
         if element is None:
             reason = "El elemento no existe en este paquete."
             return {"result": "error", "rule": "L5.element", "reason": reason}, "L5.element", reason
         return {"result": "ok", "element_id": element.element_id, "text": element.text}, None, None
 
-    def _propose_reason(self, args: Mapping[str, Any]) -> tuple[dict[str, Any], str | None, str | None]:
+    def _propose_reason(self, args: Mapping[str, Any]) -> ToolResult:
         state = self._state
         seq = len(state.records) + 1
         if type(args["points"]) is not int:  # E8: 1e1 parses as 10.0, which JSON Schema still calls an integer
@@ -318,9 +341,7 @@ class JudgeSession:
         result = {"result": "accepted", "proposed_reason_id": reason_id, "applied_points": verdict.points}
         return result, None, None
 
-    def _rejected(
-        self, args: Mapping[str, Any], seq: int, rule: str, reason: str
-    ) -> tuple[dict[str, Any], str | None, str | None]:
+    def _rejected(self, args: Mapping[str, Any], seq: int, rule: str, reason: str) -> ToolResult:
         state = self._state
         state.rejections += 1
         points = args["points"]
@@ -341,7 +362,7 @@ class JudgeSession:
         )
         return {"result": "rejected", "rule": rule, "reason": reason}, rule, reason
 
-    def _withdraw_reason(self, args: Mapping[str, Any]) -> tuple[dict[str, Any], str | None, str | None]:
+    def _withdraw_reason(self, args: Mapping[str, Any]) -> ToolResult:
         state = self._state
         reason_id = str(args["proposed_reason_id"])
         match = next((r for r in state.accepted if r.reason_id == reason_id), None)
@@ -354,7 +375,7 @@ class JudgeSession:
         ]
         return {"result": "ok", "withdrawn": reason_id}, None, None
 
-    def _finalize_review(self, args: Mapping[str, Any]) -> tuple[dict[str, Any], str | None, str | None]:
+    def _finalize_review(self, args: Mapping[str, Any]) -> ToolResult:
         summary = str(args["summary"]).strip()
         if not summary or len(summary) > MAX_SUMMARY_CHARS:
             reason = "El resumen debe tener entre 1 y 3 frases."
@@ -372,7 +393,7 @@ class JudgeSession:
             if reason.ci_id is not None:
                 per_ci[reason.ci_id] = per_ci.get(reason.ci_id, 0) + reason.points
         summary, mitigation = state.finalized or (None, MitigationResult.absent())
-        decision = _Decision(
+        decision = Decision(
             adjustment=group,
             ci_adjustments=per_ci,
             summary=summary,
@@ -386,7 +407,10 @@ class JudgeSession:
         """L11 / EVA-04: final = base, no drafted mitigation (JUE-MIT-09)."""
         return self._outcome(ReviewStatus.NO_JUDGE_REVIEW, failure, _NO_DECISION)
 
-    def _outcome(self, status: ReviewStatus, failure: Failure | None, decision: _Decision) -> ReviewOutcome:
+    def _outcome(self, status: ReviewStatus, failure: Failure | None, decision: Decision) -> ReviewOutcome:
+        return self._base_outcome(status, failure, decision)
+
+    def _base_outcome(self, status: ReviewStatus, failure: Failure | None, decision: Decision) -> ReviewOutcome:
         return ReviewOutcome(
             status=status,
             adjustment=decision.adjustment,
@@ -414,6 +438,7 @@ class JudgeSession:
             failure=failure,
             out_of_range=decision.out_of_range,
             cites_suspicious=decision.cites_suspicious,
+            mode=self.MODE,
         )
 
 

@@ -69,6 +69,7 @@ class NewsInfo:
     published: date | None
     domains: frozenset[str]
     suspicious: bool
+    prose: str = ""  # title and summary only: where a product is "named textually" (URLs and source excluded)
 
 
 @dataclass(frozen=True)
@@ -207,6 +208,11 @@ class ReviewPackage:
         )
 
     @property
+    def stack_summary(self) -> tuple[str, ...]:
+        """iTop products, versions and OS (mode 2 only, docs/07 §7)."""
+        return tuple(str(item) for item in self.content["profile_summary"]["stack_summary"])
+
+    @property
     def news_elements(self) -> tuple[Element, ...]:
         return tuple(e for e in self.elements.values() if e.kind is ElementKind.NEWS)
 
@@ -250,6 +256,8 @@ class ReviewPackage:
             ],
             "tickets": content["tickets"],
         }
+        if content["type"] == "dismissal_candidate":  # mode 2 also needs the stack, the profile and the peers
+            view["profile_summary"] = content["profile_summary"]
         body = json.dumps(_thaw(view), ensure_ascii=False, sort_keys=True).replace("<", "\\u003c")
         return f"{VIEW_OPEN}\n{body}\n{VIEW_CLOSE}"
 
@@ -470,6 +478,7 @@ def _news_element(news: Mapping[str, Any]) -> Element:
         published=_parse_date(str(news["date"])),
         domains=frozenset(d for d in (_domain(u) for u in news["urls"]) if d),
         suspicious=bool(news["suspicious"]),
+        prose=f"{news['title']}\n{news['summary']}",
     )
     return Element(
         element_id=str(news["element_id"]),
