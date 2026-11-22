@@ -20,6 +20,10 @@ dependencies = [
     "uvicorn>=0.54.0",
 ]
 
+[project.optional-dependencies]
+# Local embeddings (ING-07, TODO(P-019)): pulls torch, so CI and tests do not install it; the code imports it lazily.
+embeddings = ["sentence-transformers>=5.1.0"]
+
 [dependency-groups]
 dev = [
     "import-linter>=2.17",
