@@ -76,7 +76,7 @@ zap: ## OWASP ZAP API scan in Docker against API_URL/api/openapi.json (needs API
 
 bruno: ## Bruno API collection (bruno/ folder, environment local)
 	@test -d bruno || { echo "bruno/ folder not found: the Bruno collection is created in F0.7 (D-070)" >&2; exit 2; }
-	npx --yes @usebruno/cli@$(BRUNO_CLI_VERSION) run bruno --env local
+	cd bruno && npx --yes @usebruno/cli@$(BRUNO_CLI_VERSION) run --env local
 
 # TASK and REVIEWER reach the recipe as environment variables, so quotes in the task title stay intact.
 export TASK REVIEWER
