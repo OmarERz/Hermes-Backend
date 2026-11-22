@@ -129,16 +129,18 @@ jobs:
           failed=0
           for sha in $(git rev-list --reverse "${BASE_SHA}..${HEAD_SHA}"); do
             title=$(git log -1 --format=%s "$sha")
-            if [[ "$title" == Merge\ * ]]; then
-              echo "ok (merge) ${sha:0:9} $title"
-              continue
-            fi
             body=$(git log -1 --format=%b "$sha" | sed '/^[[:space:]]*$/d')
             full=$(git log -1 --format=%B "$sha")
+            # Merge commits are identified by their parent count (the output lists the commit and its
+            # parents), never by their title.
+            words=$(git rev-list --parents -n 1 "$sha" | wc -w)
             problems=()
-            [[ "$title" =~ $re ]] || problems+=("title is not a Conventional Commit")
-            [ "${#title}" -le 72 ] || problems+=("title is longer than 72 characters (${#title})")
-            [ -z "$body" ] || problems+=("commit has a body (title only)")
+            if [ "$words" -le 2 ]; then
+              [[ "$title" =~ $re ]] || problems+=("title is not a Conventional Commit")
+              [ "${#title}" -le 72 ] || problems+=("title is longer than 72 characters (${#title})")
+              [ -z "$body" ] || problems+=("commit has a body (title only)")
+            fi
+            # The attribution check applies to every commit, merges included.
             if grep -qiE '^co-authored-by:|generated with' <<<"$full"; then
               problems+=("commit carries an agent attribution mark")
             fi
