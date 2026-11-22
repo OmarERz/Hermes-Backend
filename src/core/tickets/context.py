@@ -15,6 +15,7 @@ from sqlalchemy import text
 from sqlalchemy.orm import Session
 
 from core.db import models as m
+from core.mitigation.builder import Mitigation, build_mitigation
 from core.tickets.content import CiLine, NewsLine, ReasonLine, TicketContext
 
 MAX_NEWS: Final = 20
@@ -45,7 +46,6 @@ _GROUP: Final = text(
      WHERE g.id = :group_id
     """
 )
-_MITIGATION: Final = text("SELECT * FROM data_mitigation WHERE finding_group_id = :group_id")
 _REASONS: Final = text(
     """
     SELECT r.reason_code, r.points FROM judge_reason r
@@ -91,22 +91,15 @@ def _merge_by_asset(rows: Sequence[Any]) -> list[Any]:
     return list(merged.values())
 
 
-def mitigation_text(row: Any | None) -> str | None:
-    """Mitigation from the data (D-017), in Spanish: fixed version, KEV action, workarounds, advisories, IOCs."""
-    if row is None:
+def mitigation_text(mitigation: Mitigation | None) -> str | None:
+    """Mitigation from the data (D-017, built by `core.mitigation`) as plain lines for the ticket and the event."""
+    if mitigation is None:
         return None
-    parts: list[str] = []
-    if row.fixed_versions:
-        parts.append("Actualizar a una versión corregida: " + ", ".join(row.fixed_versions) + ".")
-    if row.kev_required_action:
-        due = f" (fecha límite de CISA: {row.kev_due_date})" if row.kev_due_date else ""
-        parts.append(f"Acción requerida por CISA KEV{due}: {row.kev_required_action}")
-    parts += [f"Medida temporal: {w}" for w in row.workarounds or ()]
-    if row.patch_references:
-        parts.append("Avisos y parches: " + ", ".join(row.patch_references))
-    if row.iocs:
-        parts.append("Indicadores para detección: " + ", ".join(row.iocs))
-    return "\n".join(parts) or None
+    lines = [*mitigation.correction, *mitigation.temporal, *mitigation.detection, *mitigation.verification]
+    references = [*mitigation.patch_references, *mitigation.advisory_references]
+    if references:
+        lines.append("Referencias: " + ", ".join(references))
+    return "\n".join(lines) or None
 
 
 def load_context(session: Session, ticket: m.Ticket, assessment: m.Assessment | None) -> TicketContext:
@@ -156,7 +149,7 @@ def load_context(session: Session, ticket: m.Ticket, assessment: m.Assessment | 
         else 0,
         factors=factors,
         reasons=[ReasonLine(r.reason_code, r.points) for r in reasons],
-        mitigation=mitigation_text(session.execute(_MITIGATION, {"group_id": ticket.finding_group_id}).first()),
+        mitigation=mitigation_text(build_mitigation(session, ticket.finding_group_id)),
         mitigation_draft=list(draft) or None,
         news=[
             NewsLine(n.title, n.canonical_url, n.source, n.published_at.date().isoformat())

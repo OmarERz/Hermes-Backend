@@ -2,10 +2,9 @@
 
 from __future__ import annotations
 
-from types import SimpleNamespace
-
 import pytest
 
+from core.mitigation.builder import Mitigation
 from core.tickets.content import (
     CiLine,
     ItopIdentity,
@@ -114,31 +113,24 @@ def test_create_fields_follow_d_036() -> None:
     assert "service_id" not in create_fields(CONTEXT, ItopIdentity("1", "5"), 2, "service")
 
 
-def test_mitigation_from_the_data_lists_every_source() -> None:
-    row = SimpleNamespace(
-        fixed_versions=["1.26.1"],
-        kev_required_action="Aplicar el parche.",
-        kev_due_date="2026-12-01",
-        workarounds=["Desactivar el módulo."],
-        patch_references=["https://vendor.example.test/advisory"],
-        iocs=["ip:203.0.113.5"],
+def test_mitigation_from_the_data_lists_every_section() -> None:
+    mitigation = Mitigation(
+        cve_id="CVE-2026-1000",
+        correction=("Actualizar a 1.26.1 o superior.",),
+        temporal=("CISA KEV exige: Aplicar el parche.",),
+        detection=("Buscar en registros y tráfico el indicador ip:203.0.113.5.",),
+        verification=("Volver a correr el escaneo.",),
+        patch_references=("https://vendor.example.test/patch",),
+        advisory_references=("https://vendor.example.test/advisory",),
     )
-    text = mitigation_text(row)
-    assert text is not None
-    assert text.splitlines() == [
-        "Actualizar a una versión corregida: 1.26.1.",
-        "Acción requerida por CISA KEV (fecha límite de CISA: 2026-12-01): Aplicar el parche.",
-        "Medida temporal: Desactivar el módulo.",
-        "Avisos y parches: https://vendor.example.test/advisory",
-        "Indicadores para detección: ip:203.0.113.5",
-    ]
-    empty = SimpleNamespace(
-        fixed_versions=None,
-        kev_required_action=None,
-        kev_due_date=None,
-        workarounds=None,
-        patch_references=None,
-        iocs=None,
+    assert mitigation_text(mitigation) == "\n".join(
+        [
+            "Actualizar a 1.26.1 o superior.",
+            "CISA KEV exige: Aplicar el parche.",
+            "Buscar en registros y tráfico el indicador ip:203.0.113.5.",
+            "Volver a correr el escaneo.",
+            "Referencias: https://vendor.example.test/patch, https://vendor.example.test/advisory",
+        ]
     )
-    assert mitigation_text(empty) is None
+    assert mitigation_text(Mitigation("CVE-2026-1", (), (), (), (), (), ())) is None
     assert mitigation_text(None) is None
