@@ -94,3 +94,10 @@ def test_stack_info_masked() -> None:
 def test_configure_replaces_existing_handlers(capture: io.StringIO) -> None:
     configure_logging(stream=capture)
     assert len(logging.getLogger().handlers) == 1
+
+
+@pytest.mark.parametrize("name", ["uvicorn.access", "uvicorn.error"])
+def test_uvicorn_records_are_masked(capture: io.StringIO, name: str) -> None:
+    logging.getLogger(name).info('"GET /api/x?token=%s HTTP/1.1" 200', CONFIGURED)
+    assert CONFIGURED not in capture.getvalue()
+    assert MASK in capture.getvalue()
