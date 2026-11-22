@@ -9,7 +9,11 @@ from pydantic import ValidationError
 
 from core.config import DEFAULT_LLM_BASE_URL, Settings, read_secret
 
-REQUIRED = {"DATABASE_URL": "postgresql://app:s3cret-pw@db:5432/hermes", "FIREBASE_PROJECT_ID": "demo-hermes"}
+REQUIRED = {
+    "DATABASE_URL": "postgresql://app:s3cret-pw@db:5432/hermes",
+    "FIREBASE_PROJECT_ID": "demo-hermes",
+    "CURSOR_SIGNING_KEY": "k" * 40,
+}
 
 
 @pytest.fixture(autouse=True)
@@ -68,7 +72,9 @@ def test_secrets_do_not_leak_in_repr(monkeypatch: pytest.MonkeyPatch) -> None:
 
 def test_secret_values_lists_only_configured_secrets(monkeypatch: pytest.MonkeyPatch) -> None:
     settings = load(monkeypatch, {"ITOP_TOKEN": "itop-token-value"})
-    assert sorted(settings.secret_values()) == sorted([REQUIRED["DATABASE_URL"], "itop-token-value"])
+    assert sorted(settings.secret_values()) == sorted(
+        [REQUIRED["DATABASE_URL"], REQUIRED["CURSOR_SIGNING_KEY"], "itop-token-value"]
+    )
 
 
 def test_llm_defaults(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -136,6 +142,21 @@ def test_blank_env_var_does_not_shadow_secret_file(monkeypatch: pytest.MonkeyPat
     settings = Settings(_env_file=None, _secrets_dir=tmp_path)  # type: ignore[call-arg]
     assert settings.itop_token is not None
     assert settings.itop_token.get_secret_value() == "from-secret-file"
+
+
+def test_cursor_signing_key_must_be_long_enough(monkeypatch: pytest.MonkeyPatch) -> None:
+    with pytest.raises(ValidationError) as error:
+        load(monkeypatch, {"CURSOR_SIGNING_KEY": "short-key"})
+    assert "short-key" not in str(error.value)
+
+
+def test_cursor_signing_key_can_come_from_a_secret_file(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
+    (tmp_path / "cursor_signing_key").write_text("s" * 40)
+    for name, value in REQUIRED.items():
+        if name != "CURSOR_SIGNING_KEY":
+            monkeypatch.setenv(name, value)
+    settings = Settings(_env_file=None, _secrets_dir=tmp_path)  # type: ignore[call-arg]
+    assert settings.cursor_signing_key.get_secret_value() == "s" * 40
 
 
 def test_read_secret_keeps_spaces_and_drops_final_newline(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:

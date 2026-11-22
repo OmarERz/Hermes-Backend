@@ -1,0 +1,77 @@
+{
+  "event_id": "evt-sample-fixed",
+  "contract_version": "1.0",
+  "type": "fixed",
+  "priority": "digest",
+  "date": "2026-01-15T10:30:00Z",
+  "ticket": {
+    "itop_id": "R-000123",
+    "url": "https://itop.example.test/pages/UI.php?operation=details&class=UserRequest&id=123",
+    "custodian": "Infrastructure Team",
+    "owners": [
+      {
+        "name": "Alex Example",
+        "email": "alex@example.test"
+      },
+      {
+        "name": "Sam Sample",
+        "email": null
+      }
+    ],
+    "urgency": 4,
+    "fixed_cis": 2,
+    "total_cis": 2
+  },
+  "vulnerability": {
+    "cve": "CVE-2099-0001",
+    "product": "ExampleServer 1.2",
+    "cvss": 9.8,
+    "in_kev": true
+  },
+  "alert": null,
+  "score": {
+    "base": 0,
+    "judge_adjustment": 0,
+    "final": 0,
+    "level": "low",
+    "previous": 40,
+    "driving_ci": null
+  },
+  "assets": [
+    {
+      "ci_id": "CI-0001",
+      "name": "srv-example-01",
+      "score": null,
+      "criticality": "high",
+      "exposed": true,
+      "confidentiality": "classified",
+      "personal_data": true,
+      "owner": "Alex Example",
+      "status": "fixed"
+    },
+    {
+      "ci_id": "CI-0002",
+      "name": "srv-example-02",
+      "score": null,
+      "criticality": "medium",
+      "exposed": false,
+      "confidentiality": "public",
+      "personal_data": null,
+      "owner": null,
+      "status": "fixed"
+    }
+  ],
+  "justification": "Vulnerabilidad explotada activamente en un activo expuesto (texto sintético de ejemplo).",
+  "mitigation": null,
+  "mitigation_draft": null,
+  "news": [
+    {
+      "title": "Synthetic headline about CVE-2099-0001",
+      "url": "https://news.example.test/story-1",
+      "source": "Example News",
+      "date": "2026-01-14"
+    }
+  ],
+  "assessment_id": "asm-0001",
+  "frontend_url": "https://hermes.example.test/recommendations/asm-0001"
+}

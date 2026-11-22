@@ -20,7 +20,10 @@ from workers.jobs import (
 
 pytestmark = pytest.mark.unit
 SETTINGS = Settings(
-    _env_file=None, database_url=SecretStr("postgresql://app:pw@db/hermes"), firebase_project_id="demo-hermes"
+    _env_file=None,
+    database_url=SecretStr("postgresql://app:pw@db/hermes"),
+    firebase_project_id="demo-hermes",
+    cursor_signing_key=SecretStr("k" * 40),
 )
 
 

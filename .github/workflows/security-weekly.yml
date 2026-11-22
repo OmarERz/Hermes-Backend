@@ -163,7 +163,7 @@ jobs:
       - name: Start the stack with throwaway passwords
         if: steps.gate.outputs.enabled == 'true'
         run: |
-          for var in POSTGRES_PASSWORD MIGRATOR_DB_PASSWORD APP_DB_PASSWORD RETENTION_DB_PASSWORD; do
+          for var in POSTGRES_PASSWORD MIGRATOR_DB_PASSWORD APP_DB_PASSWORD RETENTION_DB_PASSWORD CURSOR_SIGNING_KEY; do
             value=$(openssl rand -hex 24)
             echo "::add-mask::$value"
             echo "$var=$value" >> "$GITHUB_ENV"
@@ -177,7 +177,7 @@ jobs:
       - name: ZAP API scan
         if: steps.gate.outputs.enabled == 'true'
         run: |
-          TEST_TOKEN=$(make --no-print-directory emulator-token)
+          TEST_TOKEN=$(make --no-print-directory emulator-token ROLE=admin)
           echo "::add-mask::$TEST_TOKEN"
           API_URL=http://localhost:8000 TEST_TOKEN="$TEST_TOKEN" make zap
       - name: Stop the stack

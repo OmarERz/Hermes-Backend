@@ -176,7 +176,10 @@ def test_expired_token_is_rejected_although_the_emulator_skips_the_check(emulato
 
 def client_for() -> TestClient:
     settings = Settings(
-        _env_file=None, database_url=SecretStr("postgresql://app:pw@db/hermes"), firebase_project_id=PROJECT
+        _env_file=None,
+        cursor_signing_key=SecretStr("k" * 40),
+        database_url=SecretStr("postgresql://app:pw@db/hermes"),
+        firebase_project_id=PROJECT,
     )
     verifier = FirebaseTokenVerifier(PROJECT)
     return TestClient(

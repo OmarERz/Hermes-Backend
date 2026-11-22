@@ -11,8 +11,10 @@ from api.auth.admin_routes import build_admin_router
 from api.auth.dependencies import CurrentUser
 from api.auth.directory import SqlUserDirectory
 from api.auth.role_admin import FirebaseRoleManager, RoleManager
-from api.errors import ErrorResponse, install_error_handlers
+from api.errors import ERROR_RESPONSES, ErrorResponse, install_error_handlers
 from api.itop_webhook import build_itop_webhook_router
+from api.pagination import CursorSigner
+from api.routes import routers, samples
 from core.config import Settings
 from core.db.session import make_session_factory
 from core.itop.client import reader_from_settings
@@ -37,8 +39,13 @@ def create_app(
         docs_url="/api/docs" if docs else None,
         redoc_url=None,
         openapi_url="/api/openapi.json" if docs else None,
+        responses=ERROR_RESPONSES,
     )
 
+    app.state.cursor_signer = CursorSigner(settings.cursor_signing_key.get_secret_value())
+    app.state.runs = list(samples.RUNS)
+    app.state.peers = list(samples.PEERS)
+    app.state.sources = list(samples.SOURCES)
     install_error_handlers(app)
     if token_verifier is None or role_manager is None:
         firebase = FirebaseTokenVerifier(settings.firebase_project_id, settings.firebase_credentials_file)
@@ -73,4 +80,6 @@ def create_app(
 
     app.include_router(build_admin_router())
     app.include_router(build_itop_webhook_router(settings.itop_webhook_token, ticket_sync))
+    for router in routers:
+        app.include_router(router)
     return app

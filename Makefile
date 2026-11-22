@@ -4,7 +4,7 @@
 SHELL := /bin/bash
 .SHELLFLAGS := -eu -o pipefail -c
 
-.PHONY: up compose-secrets help verify lint typecheck boundaries test coverage semgrep secrets audit verify-full schemathesis adversarial dynamic zap bruno ci-lint seed events emulator-token itop-up itop-install itop-seed itop-token itop-down review
+.PHONY: up compose-secrets help openapi verify lint typecheck boundaries test coverage semgrep secrets audit verify-full schemathesis adversarial dynamic zap bruno ci-lint seed events emulator-token itop-up itop-install itop-seed itop-token itop-down review
 
 help: ## List the available targets
 	@grep -E '^[a-z-]+:.*## ' $(MAKEFILE_LIST) | awk 'BEGIN {FS = ":.*## "}; {printf "  %-12s %s\n", $$1, $$2}'
@@ -17,13 +17,16 @@ lint: ## Formatting and lint (ruff)
 
 typecheck: ## Strict type checking (mypy)
 	uv run --locked mypy
-	uv run --locked mypy --package-root=. scripts/check_coverage.py
+	uv run --locked mypy --package-root=. scripts/check_coverage.py scripts/export_openapi.py
 
 boundaries: ## Package boundary contracts (import-linter)
 	uv run --locked lint-imports
 
 test: ## Unit and integration tests (pytest), writes coverage.json and coverage.xml
 	uv run --locked pytest --cov --cov-report=json --cov-report=xml --cov-report=term-missing:skip-covered
+
+openapi: ## Regenerate the OpenAPI snapshot (openapi/openapi.json) after changing routes or schemas
+	uv run --locked python scripts/export_openapi.py
 
 coverage: test ## Coverage gate: 80% global, 95% core (runs the tests first)
 	uv run --locked python scripts/check_coverage.py
