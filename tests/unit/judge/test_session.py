@@ -11,7 +11,7 @@ from typing import Any
 
 import pytest
 
-from core.judge.budget import ModelPrice
+from core.judge.budget import FREE, ModelPrice, UnlimitedDailyBudget
 from core.judge.catalog import JudgeSettings, ReasonCatalog, SensitivityProfile, TokenCaps
 from core.judge.mitigation import MitigationStatus
 from core.judge.package import ReviewPackage
@@ -74,6 +74,8 @@ def env(**overrides: Any) -> JudgeEnvironment:
         "profile": SensitivityProfile.named("normal"),
         "settings": JudgeSettings(),
         "today": TODAY,
+        "daily_budget": UnlimitedDailyBudget(),
+        "price": FREE,
     }
     values.update(overrides)
     return JudgeEnvironment(**values)
@@ -94,7 +96,6 @@ def test_full_review_applies_group_and_ci_adjustments() -> None:
     outcome, double = review([read("news-1"), propose(MASS, 1), propose(CRITICAL_ASSET, 2), finalize([STEP])])
     assert outcome.status is ReviewStatus.APPLIED
     assert outcome.adjustment == 10
-    assert outcome.proposed_adjustment == 10
     assert outcome.ci_adjustments == {"CI-2": 8}  # more_critical_asset adds only to CI-2 (D-035)
     assert outcome.summary == "Explotación masiva reciente."
     assert outcome.mitigation.status is MitigationStatus.ACCEPTED
@@ -224,6 +225,8 @@ def test_e15_same_format_error_twice_has_no_third_attempt() -> None:
     outcome, double = review([text_completion("no json"), text_completion("still no json"), finalize()])
     assert outcome.status is ReviewStatus.NO_JUDGE_REVIEW
     assert outcome.failure is Failure.FORMAT
+    assert outcome.usage.input == 20  # the two unusable completions were paid for and count for the budget (L12)
+    assert outcome.attempts == 2
     double.assert_calls(2)
 
 
@@ -277,6 +280,15 @@ def test_ladder_levels() -> None:
     assert suggestion.status is ReviewStatus.SUGGESTION
     assert suggestion.adjustment == 10
     assert suggestion.ladder_level == 2
+
+
+def test_ladder_level_two_turns_a_partial_review_into_a_suggestion() -> None:
+    bad = {**MASS, "quote": "not in the element at all"}
+    responses = [propose(MASS, 1), propose(bad, 2), propose(bad, 3), propose(bad, 4)]
+    outcome, _ = review(responses, ladder_level=2)
+    assert outcome.status is ReviewStatus.SUGGESTION
+    assert outcome.failure is Failure.LIMIT
+    assert outcome.adjustment == 10
 
 
 class _Budget:

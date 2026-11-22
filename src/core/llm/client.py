@@ -24,8 +24,9 @@ from openai.types.chat import ChatCompletionMessageParam, ChatCompletionToolPara
 from pydantic import SecretStr
 
 from core.config import Settings
-from core.llm.errors import LlmRequestError, LlmResponseError, LlmTransportError
+from core.llm.errors import LlmRequestError, LlmResponseError, LlmTransportError, ToolArgumentsError
 from core.llm.tools import ToolDefinition
+from core.llm.usage import Usage
 
 logger = logging.getLogger(__name__)
 
@@ -56,27 +57,6 @@ class Timeouts:
 
     def to_httpx(self) -> httpx2.Timeout:
         return httpx2.Timeout(connect=self.connect, read=self.read, write=self.write, pool=self.pool)
-
-
-@dataclass(frozen=True)
-class Usage:
-    """Token usage of one or more completions (audit record L13, budget docs/09 §4).
-
-    `output` excludes reasoning tokens, which are counted apart (P-017); `cached_input` is part of `input`.
-    """
-
-    input: int = 0
-    cached_input: int = 0
-    output: int = 0
-    reasoning: int = 0
-
-    def __add__(self, other: Usage) -> Usage:
-        return Usage(
-            input=self.input + other.input,
-            cached_input=self.cached_input + other.cached_input,
-            output=self.output + other.output,
-            reasoning=self.reasoning + other.reasoning,
-        )
 
 
 @dataclass(frozen=True)
@@ -146,6 +126,17 @@ class LlmClient:
                 extra_body={"thinking": {"type": "disabled"}},
             )
         )
+        usage = _usage(completion)
+        try:
+            return self._tool_call(completion, by_name, force_tool, usage)
+        except (LlmResponseError, ToolArgumentsError) as exc:
+            exc.usage = usage  # the completion was paid for even if its answer is unusable (L12)
+            raise
+
+    @staticmethod
+    def _tool_call(
+        completion: Any, by_name: Mapping[str, ToolDefinition], force_tool: str | None, usage: Usage
+    ) -> ToolCall:
         calls = completion.choices[0].message.tool_calls if completion.choices else None
         if not calls or len(calls) != 1:
             raise LlmResponseError("expected exactly one tool call")
@@ -162,7 +153,7 @@ class LlmClient:
             name=tool.name,
             arguments=arguments,
             call_id=str(getattr(calls[0], "id", "") or ""),
-            usage=_usage(completion),
+            usage=usage,
             response_model=getattr(completion, "model", None),
         )
 

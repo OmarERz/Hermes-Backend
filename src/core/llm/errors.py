@@ -2,9 +2,14 @@
 
 from __future__ import annotations
 
+from core.llm.usage import Usage
+
 
 class LlmError(Exception):
-    """Base class of every LLM client error."""
+    """Base class of every LLM client error. `usage` holds the tokens of a completion that was received but could
+    not be used (format errors), so the budget still counts them."""
+
+    usage: Usage = Usage()
 
 
 class LlmTransportError(LlmError):

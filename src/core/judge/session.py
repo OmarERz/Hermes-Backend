@@ -18,7 +18,7 @@ from decimal import Decimal
 from enum import StrEnum
 from typing import Any, Protocol
 
-from core.judge.budget import FREE, DailyBudget, ModelPrice, UnlimitedDailyBudget, complexity, token_cap
+from core.judge.budget import DailyBudget, ModelPrice, complexity, token_cap
 from core.judge.catalog import MORE_CRITICAL_ASSET, JudgeSettings, ReasonCatalog, SensitivityProfile
 from core.judge.mitigation import MitigationResult, validate_mitigation
 from core.judge.package import ReviewPackage
@@ -127,11 +127,6 @@ class ReviewOutcome:
     out_of_range: bool = False
     cites_suspicious: bool = False
 
-    @property
-    def proposed_adjustment(self) -> int | None:
-        """Sum of accepted group reasons (without more_critical_asset); llm_review.proposed_adjustment (A-8)."""
-        return self.adjustment
-
 
 def _never_active(_cve: str) -> bool:
     return False
@@ -145,9 +140,9 @@ class JudgeEnvironment:
     profile: SensitivityProfile
     settings: JudgeSettings
     today: date
+    daily_budget: DailyBudget  # required: a wiring mistake must not silently disable L12
+    price: ModelPrice  # required: cost_usd feeds the daily budget (llm_usage_daily)
     active_cve: Callable[[str], bool] = _never_active
-    daily_budget: DailyBudget = field(default_factory=UnlimitedDailyBudget)
-    price: ModelPrice = FREE
     ladder_level: int = 0
     clock: Callable[[], float] = time.monotonic
 
@@ -220,13 +215,14 @@ class JudgeSession:
         state = self._state
         while True:
             if len(state.calls) >= self._settings.max_calls or state.rejections >= self._settings.max_rejections:
-                return self._close(ReviewStatus.PARTIAL_REVIEW, Failure.LIMIT)
+                return self._close(self._partial_status(), Failure.LIMIT)
             if state.calls and not self._can_afford(last_turn_tokens):
-                return self._close(ReviewStatus.PARTIAL_REVIEW, Failure.BUDGET)
+                return self._close(self._partial_status(), Failure.BUDGET)
             try:
                 call = self._caller.call_tool(model=self._settings.model, messages=messages, tools=self._tools)
             except (ToolArgumentsError, LlmResponseError) as exc:
                 self._attempts += 1
+                self._usage = self._usage + exc.usage
                 format_failures += 1
                 error = str(exc)
                 if format_failures > self._settings.format_retries or error == last_error:
@@ -255,6 +251,10 @@ class JudgeSession:
         used = self._usage.input + self._usage.output + self._usage.reasoning
         fits = used + last_turn_tokens <= self._cap
         return fits and self._env.daily_budget.allows(critical=self._package.is_critical)
+
+    def _partial_status(self) -> ReviewStatus:
+        """Ladder level 2 shows any adjustment as a suggestion, partial or not (docs/07 §8)."""
+        return ReviewStatus.SUGGESTION if self._env.ladder_level >= LADDER_SUGGESTION else ReviewStatus.PARTIAL_REVIEW
 
     def _finished_status(self) -> ReviewStatus:
         return ReviewStatus.SUGGESTION if self._env.ladder_level >= LADDER_SUGGESTION else ReviewStatus.APPLIED
