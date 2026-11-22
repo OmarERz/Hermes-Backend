@@ -1,0 +1,54 @@
+# Schemathesis configuration (docs/14 §4.3). Read from the working directory by `make schemathesis`.
+#
+# Paginated operations take a signed cursor (HMAC, API-02). A cursor generated from the schema (a string that only
+# matches the documented pattern) is correctly refused with 400 `invalid_cursor`, which the OpenAPI declares on
+# those operations. So for them, and only for them, a documented 400 counts as accepted for positive data.
+# Every other operation keeps the default expectations.
+
+[[operations]]
+include-name = "GET /api/alerts"
+checks.positive_data_acceptance.expected-statuses = ["2xx", "3xx", "400", "401", "403", "404", "409", "429", "5xx"]
+
+[[operations]]
+include-name = "GET /api/audit"
+checks.positive_data_acceptance.expected-statuses = ["2xx", "3xx", "400", "401", "403", "404", "409", "429", "5xx"]
+
+[[operations]]
+include-name = "GET /api/calibration/proposals"
+checks.positive_data_acceptance.expected-statuses = ["2xx", "3xx", "400", "401", "403", "404", "409", "429", "5xx"]
+
+[[operations]]
+include-name = "GET /api/comparison/table"
+checks.positive_data_acceptance.expected-statuses = ["2xx", "3xx", "400", "401", "403", "404", "409", "429", "5xx"]
+
+[[operations]]
+include-name = "GET /api/config/versions"
+checks.positive_data_acceptance.expected-statuses = ["2xx", "3xx", "400", "401", "403", "404", "409", "429", "5xx"]
+
+[[operations]]
+include-name = "GET /api/notifications/events"
+checks.positive_data_acceptance.expected-statuses = ["2xx", "3xx", "400", "401", "403", "404", "409", "429", "5xx"]
+
+[[operations]]
+include-name = "GET /api/peer-companies"
+checks.positive_data_acceptance.expected-statuses = ["2xx", "3xx", "400", "401", "403", "404", "409", "429", "5xx"]
+
+[[operations]]
+include-name = "GET /api/recommendations"
+checks.positive_data_acceptance.expected-statuses = ["2xx", "3xx", "400", "401", "403", "404", "409", "429", "5xx"]
+
+[[operations]]
+include-name = "GET /api/runs"
+checks.positive_data_acceptance.expected-statuses = ["2xx", "3xx", "400", "401", "403", "404", "409", "429", "5xx"]
+
+[[operations]]
+include-name = "GET /api/sources"
+checks.positive_data_acceptance.expected-statuses = ["2xx", "3xx", "400", "401", "403", "404", "409", "429", "5xx"]
+
+[[operations]]
+include-name = "GET /api/tickets"
+checks.positive_data_acceptance.expected-statuses = ["2xx", "3xx", "400", "401", "403", "404", "409", "429", "5xx"]
+
+[[operations]]
+include-name = "GET /api/vulnerabilities"
+checks.positive_data_acceptance.expected-statuses = ["2xx", "3xx", "400", "401", "403", "404", "409", "429", "5xx"]
