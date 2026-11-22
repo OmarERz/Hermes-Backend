@@ -19,6 +19,10 @@ class Role(StrEnum):
     def at_least(self, minimum: Role) -> bool:
         return self.rank >= minimum.rank
 
+    def capped_by(self, other: Role) -> Role:
+        """The lesser of two roles (fail closed when token and database copy disagree)."""
+        return self if self.rank <= other.rank else other
+
 
 _RANKS = {Role.READER: 1, Role.ANALYST: 2, Role.ADMIN: 3}
 

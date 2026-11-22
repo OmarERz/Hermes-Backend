@@ -25,7 +25,8 @@ from testcontainers.core.image import DockerImage
 from testcontainers.core.waiting_utils import wait_for_logs
 
 from api.app import create_app
-from api.auth import FirebaseTokenVerifier, TokenError
+from api.auth import FirebaseTokenVerifier, InMemoryUserDirectory, TokenError
+from api.auth.role_admin import FirebaseRoleManager
 from core.config import Settings
 
 testcontainers_config.ryuk_disabled = True
@@ -177,7 +178,15 @@ def client_for() -> TestClient:
     settings = Settings(
         _env_file=None, database_url=SecretStr("postgresql://app:pw@db/hermes"), firebase_project_id=PROJECT
     )
-    return TestClient(create_app(settings, token_verifier=FirebaseTokenVerifier(PROJECT)))
+    verifier = FirebaseTokenVerifier(PROJECT)
+    return TestClient(
+        create_app(
+            settings,
+            token_verifier=verifier,
+            user_directory=InMemoryUserDirectory(),
+            role_manager=FirebaseRoleManager(verifier),
+        )
+    )
 
 
 def test_roles_through_the_api(emulator_host: str, admin_app: Any) -> None:
@@ -195,3 +204,43 @@ def test_api_rejects_missing_garbage_and_roleless_tokens(emulator_host: str, adm
     assert client.get("/api/me", headers={"Authorization": "Bearer not-a-jwt"}).status_code == 401
     _, roleless = mint(emulator_host, admin_app, None)
     assert client.get("/api/me", headers={"Authorization": f"Bearer {roleless}"}).status_code == 401
+
+
+def test_reader_is_forbidden_on_the_admin_route(emulator_host: str, admin_app: Any) -> None:
+    client = client_for()
+    target, _ = mint(emulator_host, admin_app, "reader")
+    _, reader_token = mint(emulator_host, admin_app, "reader")
+    response = client.put(
+        f"/api/admin/users/{target}/role", json={"role": "admin"}, headers={"Authorization": f"Bearer {reader_token}"}
+    )
+    assert response.status_code == 403
+    assert response.json()["error"]["code"] == "forbidden"
+
+
+def test_admin_assigns_a_role_and_revokes_the_old_sessions(emulator_host: str, admin_app: Any) -> None:
+    client = client_for()
+    target, target_token = mint(emulator_host, admin_app, "analyst")
+    _, admin_token = mint(emulator_host, admin_app, "admin")
+    assert client.get("/api/me", headers={"Authorization": f"Bearer {target_token}"}).status_code == 200
+    # No wait here: the role manager itself revokes after the next full second (second-granular revocation).
+
+    response = client.put(
+        f"/api/admin/users/{target}/role", json={"role": "reader"}, headers={"Authorization": f"Bearer {admin_token}"}
+    )
+
+    assert response.status_code == 200, response.text
+    assert response.json() == {"uid": target, "role": "reader", "sessions_revoked": True, "known_user": True}
+    assert auth.get_user(target, app=admin_app).custom_claims == {"role": "reader"}
+    # The analyst token issued before the change is revoked.
+    assert client.get("/api/me", headers={"Authorization": f"Bearer {target_token}"}).status_code == 401
+
+
+def test_unknown_uid_is_not_found(emulator_host: str, admin_app: Any) -> None:
+    client = client_for()
+    _, admin_token = mint(emulator_host, admin_app, "admin")
+    response = client.put(
+        "/api/admin/users/no-such-user/role",
+        json={"role": "reader"},
+        headers={"Authorization": f"Bearer {admin_token}"},
+    )
+    assert response.status_code == 404

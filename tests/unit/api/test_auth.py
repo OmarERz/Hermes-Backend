@@ -6,9 +6,9 @@ import logging
 from typing import Annotated, Any
 
 import pytest
+from authfakes import SETTINGS, FakeVerifier, bearer
 from fastapi import Depends
 from fastapi.testclient import TestClient
-from pydantic import SecretStr
 
 from api.app import create_app
 from api.auth import (
@@ -16,35 +16,9 @@ from api.auth import (
     CurrentUser,
     InMemoryUserDirectory,
     Role,
-    TokenError,
-    VerifiedIdentity,
     require_role,
 )
 from api.auth.roles import parse_role
-from core.config import Settings
-
-SETTINGS = Settings(
-    _env_file=None, database_url=SecretStr("postgresql://app:pw@db/hermes"), firebase_project_id="demo-hermes"
-)
-
-
-class FakeVerifier:
-    def __init__(self) -> None:
-        self.identities: dict[str, VerifiedIdentity | Exception] = {}
-
-    def add(self, token: str, role: Role, uid: str | None = None) -> VerifiedIdentity:
-        uid = uid or f"uid-{token}"
-        identity = VerifiedIdentity(uid=uid, email=f"{uid}@example.com", display_name="Ana", role=role)
-        self.identities[token] = identity
-        return identity
-
-    def verify(self, token: str) -> VerifiedIdentity:
-        result = self.identities.get(token)
-        if result is None:
-            raise TokenError("token_invalid")
-        if isinstance(result, Exception):
-            raise result
-        return result
 
 
 @pytest.fixture
@@ -73,10 +47,6 @@ def client(verifier: FakeVerifier, directory: InMemoryUserDirectory) -> TestClie
         return {"uid": user.uid}
 
     return TestClient(app)
-
-
-def bearer(token: str) -> dict[str, str]:
-    return {"Authorization": f"Bearer {token}"}
 
 
 def test_role_hierarchy() -> None:
@@ -162,12 +132,13 @@ def test_login_syncs_user_directory(
     assert first.role is Role.READER
     assert first.email == "uid-reader@example.com"
     assert first.last_login_at is not None
+    # A claim raised outside the backend (D-030: only the backend assigns roles) is capped by the copy.
     verifier.add("reader", Role.ANALYST)
-    assert client.get("/api/me", headers=bearer("reader")).json()["role"] == "analyst"
+    assert client.get("/api/me", headers=bearer("reader")).json()["role"] == "reader"
     again = directory.get("uid-reader")
     assert again is not None
     assert again.id == first.id
-    assert again.role is Role.ANALYST
+    assert again.role is Role.READER
     assert again.last_login_at is not None
     assert again.last_login_at >= first.last_login_at
 

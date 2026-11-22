@@ -6,10 +6,14 @@ from typing import Annotated
 
 from fastapi import Depends, FastAPI
 
-from api.auth import FirebaseTokenVerifier, InMemoryUserDirectory, Role, TokenVerifier, UserDirectory, require_role
+from api.auth import FirebaseTokenVerifier, Role, TokenVerifier, UserDirectory, require_role
+from api.auth.admin_routes import build_admin_router
 from api.auth.dependencies import CurrentUser
+from api.auth.directory import SqlUserDirectory
+from api.auth.role_admin import FirebaseRoleManager, RoleManager
 from api.errors import ErrorResponse, install_error_handlers
 from core.config import Settings
+from core.db.session import make_session_factory
 from core.logging import configure_logging
 
 
@@ -17,6 +21,7 @@ def create_app(
     settings: Settings | None = None,
     token_verifier: TokenVerifier | None = None,
     user_directory: UserDirectory | None = None,
+    role_manager: RoleManager | None = None,
 ) -> FastAPI:
     """Build the API. Settings load (and fail closed) here, never at import time."""
     settings = settings or Settings()
@@ -31,11 +36,14 @@ def create_app(
     )
 
     install_error_handlers(app)
-    app.state.token_verifier = token_verifier or FirebaseTokenVerifier(
-        settings.firebase_project_id, settings.firebase_credentials_file
-    )
-    # In-memory until the SQL directory lands with the database branch.
-    app.state.user_directory = user_directory or InMemoryUserDirectory()
+    if token_verifier is None or role_manager is None:
+        firebase = FirebaseTokenVerifier(settings.firebase_project_id, settings.firebase_credentials_file)
+        token_verifier = token_verifier or firebase
+        role_manager = role_manager or FirebaseRoleManager(firebase)
+    app.state.token_verifier = token_verifier
+    app.state.role_manager = role_manager
+    # The engine connects lazily: building the app never opens a database connection.
+    app.state.user_directory = user_directory or SqlUserDirectory(make_session_factory(settings))
 
     @app.get("/api/health", tags=["operations"])
     def health() -> dict[str, str]:
@@ -48,6 +56,7 @@ def create_app(
         responses={
             401: {"model": ErrorResponse, "description": "Missing, invalid, expired or revoked token"},
             403: {"model": ErrorResponse, "description": "Inactive user"},
+            409: {"model": ErrorResponse, "description": "The e-mail belongs to another account"},
             503: {"model": ErrorResponse, "description": "Identity provider unavailable"},
         },
     )
@@ -55,4 +64,5 @@ def create_app(
         """Current user and role (API-01)."""
         return user
 
+    app.include_router(build_admin_router())
     return app

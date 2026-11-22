@@ -10,7 +10,7 @@ from fastapi import Depends, HTTPException, Request
 from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
 from pydantic import BaseModel
 
-from api.auth.directory import UserDirectory
+from api.auth.directory import UserConflictError, UserDirectory
 from api.auth.identity import AuthUnavailableError, TokenError, TokenVerifier
 from api.auth.roles import Role
 from api.errors import ApiError, ErrorDetail
@@ -49,11 +49,24 @@ def get_current_user(
         raise _unauthenticated() from exc
     except AuthUnavailableError as exc:
         raise ApiError(503, "auth_unavailable", "No se pudo verificar la identidad. Intenta de nuevo.") from exc
-    record = directory.sync_login(identity)
+    try:
+        record = directory.sync_login(identity)
+    except UserConflictError as exc:
+        logger.warning("account conflict: user %s shares an e-mail with an older account", identity.uid)
+        raise ApiError(
+            409, "account_conflict", "Tu correo ya pertenece a otra cuenta. Pide a un administrador que la revise."
+        ) from exc
     if not record.active:
+        logger.warning("authorization denied: inactive user %s", record.firebase_uid)
         raise ApiError(403, "user_inactive", "El usuario está desactivado.")
+    # Effective role = the lower of the token claim and the database copy. The copy changes the moment an admin
+    # assigns a role, so a downgrade applies at once even to tokens still alive (revocation is asynchronous
+    # and can fail); an upgrade applies when the user's token refreshes.
     return CurrentUser(
-        uid=record.firebase_uid, email=record.email, display_name=record.display_name, role=identity.role
+        uid=record.firebase_uid,
+        email=record.email,
+        display_name=record.display_name,
+        role=identity.role.capped_by(record.role),
     )
 
 
@@ -62,6 +75,9 @@ def require_role(minimum: Role) -> Callable[[CurrentUser], CurrentUser]:
 
     def dependency(user: Annotated[CurrentUser, Depends(get_current_user)]) -> CurrentUser:
         if not user.role.at_least(minimum):
+            logger.warning(
+                "authorization denied: user %s with role %s needs %s", user.uid, user.role.value, minimum.value
+            )
             raise ApiError(
                 403,
                 "forbidden",

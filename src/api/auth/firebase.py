@@ -51,6 +51,10 @@ class FirebaseTokenVerifier:
                 self._app = firebase_admin.initialize_app(cred, options, name=f"hermes-{uuid.uuid4().hex}")
             return self._app
 
+    def sdk_app(self) -> firebase_admin.App:
+        """The firebase-admin app (created on first use); shared with the role manager."""
+        return self._get_app()
+
     def verify(self, token: str) -> VerifiedIdentity:
         if not token:
             raise TokenError("token_missing")
