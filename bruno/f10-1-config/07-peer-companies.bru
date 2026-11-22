@@ -1,0 +1,23 @@
+meta {
+  name: peer-companies
+  type: http
+  seq: 7
+}
+
+get {
+  url: {{baseUrl}}/api/peer-companies
+  body: none
+  auth: bearer
+}
+
+auth:bearer {
+  token: {{token}}
+}
+
+assert {
+  res.status: eq 200
+}
+
+docs {
+  Peer companies. Manual flow: POST, PUT and DELETE by the returned id.
+}

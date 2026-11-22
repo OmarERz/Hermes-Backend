@@ -44,8 +44,6 @@ def create_app(
 
     app.state.cursor_signer = CursorSigner(settings.cursor_signing_key.get_secret_value())
     app.state.runs = list(samples.RUNS)
-    app.state.peers = list(samples.PEERS)
-    app.state.sources = list(samples.SOURCES)
     install_error_handlers(app)
     if token_verifier is None or role_manager is None:
         firebase = FirebaseTokenVerifier(settings.firebase_project_id, settings.firebase_credentials_file)
@@ -55,6 +53,7 @@ def create_app(
     app.state.role_manager = role_manager
     # The engine connects lazily: building the app never opens a database connection.
     session_factory = make_session_factory(settings)
+    app.state.session_factory = session_factory
     app.state.user_directory = user_directory or SqlUserDirectory(session_factory)
     if ticket_sync is None and settings.itop_url is not None and settings.itop_token is not None:
         ticket_sync = TicketStateSync(session_factory, reader_from_settings(settings), settings.itop_system_user)

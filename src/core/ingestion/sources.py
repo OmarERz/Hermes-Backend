@@ -36,6 +36,18 @@ class SourceRuleError(ValueError):
     """The change breaks a source rule; the message is meant for the person who asked."""
 
 
+class SourcePermissionError(SourceRuleError):
+    """The user's role does not allow the change."""
+
+
+class SourceNotFoundError(SourceRuleError):
+    """The source does not exist."""
+
+
+class SourceConflictError(SourceRuleError):
+    """The change clashes with what the source is (a structural source cannot be switched off)."""
+
+
 @dataclass(frozen=True)
 class Change:
     """Who did what, when, to which source (one `audit_log` row)."""
@@ -65,14 +77,14 @@ def _audit(session: Session, source: m.Source, change: Change) -> None:
 def _require_role(session: Session, actor: uuid.UUID | None, allowed: tuple[str, ...]) -> uuid.UUID:
     user = session.get(m.AppUser, actor) if actor is not None else None
     if user is None or not user.active or user.role not in allowed:
-        raise SourceRuleError("No tienes permiso para este cambio")
+        raise SourcePermissionError("No tienes permiso para este cambio")
     return user.id
 
 
 def _get(session: Session, source_id: uuid.UUID) -> m.Source:
     source = session.get(m.Source, source_id)
     if source is None:
-        raise SourceRuleError("La fuente no existe")
+        raise SourceNotFoundError("La fuente no existe")
     return source
 
 
@@ -82,7 +94,7 @@ def set_source_enabled(
     actor = _require_role(session, actor, ("analyst", "admin"))
     source = _get(session, source_id)
     if source.is_structural and not enabled:
-        raise SourceRuleError("Las fuentes estructurales no se pueden apagar")
+        raise SourceConflictError("Las fuentes estructurales no se pueden apagar")
     if source.enabled != enabled:
         action = "source.enable" if enabled else "source.disable"
         _audit(session, source, Change(actor, now, action, {"enabled": source.enabled}, {"enabled": enabled}))

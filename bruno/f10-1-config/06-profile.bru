@@ -1,0 +1,23 @@
+meta {
+  name: profile
+  type: http
+  seq: 6
+}
+
+get {
+  url: {{baseUrl}}/api/profile
+  body: none
+  auth: bearer
+}
+
+auth:bearer {
+  token: {{token}}
+}
+
+assert {
+  res.status: eq 200
+}
+
+docs {
+  Company profile with its version (sector and subsectors are catalog codes).
+}
