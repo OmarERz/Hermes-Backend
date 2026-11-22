@@ -1,0 +1,24 @@
+meta {
+  name: itop webhook without token
+  type: http
+  seq: 1
+}
+
+post {
+  url: {{baseUrl}}/api/itop/webhook
+  body: json
+  auth: none
+}
+
+body:json {
+  {"class": "UserRequest", "id": "1", "ref": "R-000001"}
+}
+
+assert {
+  res.status: in 401,503
+}
+
+docs {
+  Doorbell iTop calls when a UserRequest changes (ARQ-02). Without `Authorization: Bearer <ITOP_WEBHOOK_TOKEN>`
+  it answers 401, or 503 when the webhook or iTop is not configured (fails closed).
+}

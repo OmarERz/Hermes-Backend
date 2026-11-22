@@ -12,11 +12,14 @@ from api.auth.dependencies import CurrentUser
 from api.auth.directory import SqlUserDirectory
 from api.auth.role_admin import FirebaseRoleManager, RoleManager
 from api.errors import ERROR_RESPONSES, ErrorResponse, install_error_handlers
+from api.itop_webhook import build_itop_webhook_router
 from api.pagination import CursorSigner
 from api.routes import routers, samples
 from core.config import Settings
 from core.db.session import make_session_factory
+from core.itop.client import reader_from_settings
 from core.logging import configure_logging
+from core.tickets.sync import TicketStateSync
 
 
 def create_app(
@@ -24,6 +27,7 @@ def create_app(
     token_verifier: TokenVerifier | None = None,
     user_directory: UserDirectory | None = None,
     role_manager: RoleManager | None = None,
+    ticket_sync: TicketStateSync | None = None,
 ) -> FastAPI:
     """Build the API. Settings load (and fail closed) here, never at import time."""
     settings = settings or Settings()
@@ -50,7 +54,10 @@ def create_app(
     app.state.token_verifier = token_verifier
     app.state.role_manager = role_manager
     # The engine connects lazily: building the app never opens a database connection.
-    app.state.user_directory = user_directory or SqlUserDirectory(make_session_factory(settings))
+    session_factory = make_session_factory(settings)
+    app.state.user_directory = user_directory or SqlUserDirectory(session_factory)
+    if ticket_sync is None and settings.itop_url is not None and settings.itop_token is not None:
+        ticket_sync = TicketStateSync(session_factory, reader_from_settings(settings), settings.itop_system_user)
 
     @app.get("/api/health", tags=["operations"])
     def health() -> dict[str, str]:
@@ -72,6 +79,7 @@ def create_app(
         return user
 
     app.include_router(build_admin_router())
+    app.include_router(build_itop_webhook_router(settings.itop_webhook_token, ticket_sync))
     for router in routers:
         app.include_router(router)
     return app

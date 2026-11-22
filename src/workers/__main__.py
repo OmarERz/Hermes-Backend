@@ -1,7 +1,7 @@
 """Worker process entry point: python -m workers.
 
-F0 only starts, logs and waits for SIGTERM/SIGINT; APScheduler and the PostgreSQL queue arrive with
-the features that need them.
+Runs the periodic jobs of the configured integrations (workers.jobs) until SIGTERM/SIGINT; with none
+configured it only waits. APScheduler and the PostgreSQL queue arrive with the features that need them.
 """
 
 from __future__ import annotations
@@ -11,7 +11,9 @@ import signal
 import threading
 
 from core.config import Settings
+from core.db.session import make_session_factory
 from core.logging import configure_logging
+from workers.jobs import build_jobs, run_jobs
 
 log = logging.getLogger("workers")
 
@@ -20,7 +22,11 @@ def run(stop: threading.Event, settings: Settings | None = None) -> None:
     settings = settings or Settings()
     configure_logging(settings.secret_values())
     log.info("workers started")
-    stop.wait()
+    jobs = build_jobs(settings, make_session_factory(settings))
+    if jobs:
+        run_jobs(stop, jobs)
+    else:
+        stop.wait()
     log.info("workers stopped")
 
 

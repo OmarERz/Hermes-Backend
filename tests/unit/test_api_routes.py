@@ -15,7 +15,8 @@ from core.config import Settings
 
 pytestmark = pytest.mark.unit
 
-F0_2_ROUTES = {"/api/health", "/api/me", "/api/admin/users/{uid}/role"}  # outside ROUTE_ROLES (F0.2)
+# Outside ROUTE_ROLES: F0.2 auth routes, and the iTop webhook (its own Bearer token, F5.1/ARQ-02).
+F0_2_ROUTES = {"/api/health", "/api/me", "/api/admin/users/{uid}/role", "/api/itop/webhook"}
 SETTINGS = Settings(  # type: ignore[call-arg]
     _env_file=None,
     database_url=SecretStr("postgresql://a:b@db/h"),

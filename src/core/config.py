@@ -40,6 +40,7 @@ _OPTIONAL_FIELDS = (
     "itop_url",
     "itop_token",
     "itop_system_user",
+    "itop_webhook_token",
     "nvd_api_key",
     "deepseek_api_key",
     "llm_base_url_analysts",
@@ -79,6 +80,8 @@ class Settings(BaseSettings):
     itop_url: HttpUrl | None = None
     itop_token: SecretStr | None = None
     itop_system_user: str | None = None
+    # Shared secret iTop sends as `Authorization: Bearer` to the webhook doorbell (ARQ-02); unset = webhook off
+    itop_webhook_token: SecretStr | None = None
 
     # Vulnerability and threat sources
     nvd_api_key: SecretStr | None = None
