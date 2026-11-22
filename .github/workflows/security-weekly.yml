@@ -116,6 +116,13 @@ jobs:
           image-ref: hermes-auth-emulator:scan
           severity: HIGH,CRITICAL
           exit-code: "1"
+      - name: Trivy image scan (pgvector database)
+        uses: aquasecurity/trivy-action@ed142fd0673e97e23eac54620cfb913e5ce36c25 # v0.36.0
+        with:
+          scan-type: image
+          image-ref: pgvector/pgvector:pg18@sha256:38681dc6eaf55308e2a4c6de392d131652dcfac70e1263e35cd9b5ea3fe39782
+          severity: HIGH,CRITICAL
+          exit-code: "1"
 
   zap:
     name: zap
