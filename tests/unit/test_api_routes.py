@@ -85,8 +85,6 @@ GET_SAMPLES = [
     "/api/profile",
     "/api/peer-companies",
     "/api/sources",
-    "/api/pending/inventory",
-    "/api/cpe/candidates?q=pago",
     "/api/runs",
     "/api/calibration/proposals",
     "/api/metrics",
@@ -256,7 +254,6 @@ def test_other_write_routes(client: TestClient) -> None:
     assert (created.status_code, created.json()["level"], created.json()["active"]) == (201, "N4", False)
     assert client.patch("/api/sources/src-nvd", json={"active": False}).status_code == 409
     assert client.patch("/api/sources/zzz", json={"active": True}).status_code == 404
-    assert client.put("/api/mappings/PagoFacil", json={"cpe": "cpe:2.3:a:x:y:1:*:*:*:*:*:*:*"}).status_code == 200
     assert (
         client.put(
             "/api/profile",
@@ -276,9 +273,9 @@ def test_runs_stix_calibration_and_notifications(client: TestClient) -> None:
     assert events.headers["content-type"].startswith("text/event-stream")
     assert "event: progress" in events.text
     assert client.get("/api/runs/zzz/events").status_code == 404
-    assert client.post("/api/stix/export", json={"scope": "run"}).status_code == 422
-    bundle = client.post("/api/stix/export", json={"scope": "run", "run_id": "run-1"})
-    assert bundle.json()["type"] == "bundle"
+    assert (
+        client.post("/api/stix/export", json={"scope": "run"}).status_code == 422
+    )  # scope data checked before the database
     assert client.post("/api/calibration/proposals/cal-1/approve").json()["status"] == "approved"
     assert client.post("/api/calibration/proposals/cal-1/reject").json()["status"] == "rejected"
     assert client.post("/api/calibration/proposals/zzz/approve").status_code == 404

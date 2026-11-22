@@ -16,10 +16,12 @@ from api.itop_webhook import build_itop_webhook_router
 from api.pagination import CursorSigner
 from api.routes import routers, samples
 from core.config import Settings
+from core.cpe.candidates import CpeDictionaryClient
 from core.db.session import make_session_factory
 from core.itop.client import reader_from_settings
 from core.logging import configure_logging
 from core.tickets.sync import TicketStateSync
+from core.vulndata.nvd import nvd_client
 
 
 def create_app(
@@ -57,6 +59,13 @@ def create_app(
     # The engine connects lazily: building the app never opens a database connection.
     session_factory = make_session_factory(settings)
     app.state.session_factory = session_factory
+    # NVD's CPE dictionary is queried only when a key is configured: without one the dynamic test stack (Schemathesis,
+    # ZAP) would hit the real NVD, and the public rate limit is too low to share. Local candidates always work.
+    app.state.cpe_dictionary = (
+        CpeDictionaryClient(nvd_client(settings.nvd_api_key).source, settings.nvd_api_key)
+        if settings.nvd_api_key is not None
+        else None
+    )
     app.state.user_directory = user_directory or SqlUserDirectory(session_factory)
     if ticket_sync is None and settings.itop_url is not None and settings.itop_token is not None:
         ticket_sync = TicketStateSync(session_factory, reader_from_settings(settings), settings.itop_system_user)

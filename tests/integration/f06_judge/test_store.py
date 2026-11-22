@@ -22,8 +22,15 @@ from core.db.session import make_engine
 from core.judge.budget import FREE, UnlimitedDailyBudget
 from core.judge.catalog import JudgeSettings, ReasonCatalog, SensitivityProfile
 from core.judge.package import ReviewPackage
-from core.judge.session import JudgeEnvironment, JudgeSession, ReviewOutcome, ReviewStatus
-from core.judge.store import JudgeStoreError, ReviewTarget, load_judge_settings, resolve_assets, save_review
+from core.judge.session import Failure, JudgeEnvironment, JudgeSession, ReviewOutcome, ReviewStatus
+from core.judge.store import (
+    JudgeStoreError,
+    ReviewTarget,
+    load_judge_settings,
+    resolve_assets,
+    save_review,
+    sync_error_queue,
+)
 from doubles.llm import LlmDouble, tool_call_completion
 from harness.judge import double_llm_client, finding_package
 
@@ -119,10 +126,9 @@ def test_review_with_reasons_and_mitigation_is_stored(engine: Engine) -> None:
     assert outcome.status is ReviewStatus.APPLIED
     with Session(engine) as session, session.begin():
         package_id = package_row(session, finding_package())
-        stored = save_review(session, outcome, ReviewTarget(package_id, f"review_package:{package_id}", NOW))
-    assert not stored.queued
+        review_id = save_review(session, outcome, ReviewTarget(package_id, f"review_package:{package_id}", NOW))
     with Session(engine) as session:
-        review = session.get_one(m.LlmReview, stored.review_id)
+        review = session.get_one(m.LlmReview, review_id)
         assert (review.agent, review.mode, review.status) == ("judge", "scoring", "applied")
         assert review.review_package_id == package_id
         assert review.proposed_adjustment == 10
@@ -158,42 +164,91 @@ def test_rejected_more_critical_asset_without_a_ci_stays_only_in_calls(engine: E
         ]
     )
     with Session(engine) as session, session.begin():
-        stored = save_review(session, outcome, ReviewTarget(None, "inline", NOW))
+        review_id = save_review(session, outcome, ReviewTarget(None, "inline", NOW))
     with Session(engine) as session:
-        assert session.scalars(select(m.JudgeReason).where(m.JudgeReason.llm_review_id == stored.review_id)).all() == []
-        review = session.get_one(m.LlmReview, stored.review_id)
+        assert session.scalars(select(m.JudgeReason).where(m.JudgeReason.llm_review_id == review_id)).all() == []
+        review = session.get_one(m.LlmReview, review_id)
         assert review.calls[0]["rule"] == "L4.more_critical_asset"
         assert review.mitigation_status == "absent"
 
 
-def test_fallback_is_stored_and_queued(engine: Engine) -> None:
+def test_fallback_is_stored(engine: Engine) -> None:
     outcome = run([])  # API down
     assert outcome.status is ReviewStatus.NO_JUDGE_REVIEW
     with Session(engine) as session, session.begin():
         package_id = package_row(session, finding_package())
-        stored = save_review(session, outcome, ReviewTarget(package_id, "ref", NOW))
-    assert stored.queued
+        review_id = save_review(session, outcome, ReviewTarget(package_id, "ref", NOW))
     with Session(engine) as session:
-        review = session.get_one(m.LlmReview, stored.review_id)
+        review = session.get_one(m.LlmReview, review_id)
         assert review.status == "no_judge_review"
         assert review.proposed_adjustment is None
         assert review.parameters["failure"] == "transport"
-        queue = session.scalars(select(m.ErrorQueue).where(m.ErrorQueue.review_package_id == package_id)).one()
-        assert (queue.component, queue.status, queue.reason) == ("judge", "pending", "judge transport")
 
 
-def test_second_review_is_linked_and_never_queued(engine: Engine) -> None:
+@pytest.mark.parametrize(
+    ("failure", "queued"),
+    [
+        (Failure.TRANSPORT, True),
+        (Failure.REQUEST, True),
+        (Failure.FORMAT, True),
+        (Failure.BUDGET, True),
+        (Failure.LADDER, False),
+        (Failure.LIMIT, False),
+        (None, False),
+    ],
+)
+def test_which_failures_are_queued(engine: Engine, failure: Failure | None, queued: bool) -> None:
+    with Session(engine) as session, session.begin():
+        package_id = package_row(session, finding_package())
+        assert sync_error_queue(session, package_id, failure, NOW) is queued
+        rows = session.scalars(select(m.ErrorQueue).where(m.ErrorQueue.review_package_id == package_id)).all()
+        assert len(rows) == int(queued)
+        if queued:
+            assert (rows[0].component, rows[0].status, rows[0].attempts) == ("judge", "pending", 0)
+            assert rows[0].reason == f"judge {failure}"
+        assert sync_error_queue(session, None, failure, NOW) is False
+
+
+def test_queue_counts_attempts_gives_up_and_resolves(engine: Engine) -> None:
+    with Session(engine) as session, session.begin():
+        package_id = package_row(session, finding_package())
+        assert sync_error_queue(session, package_id, Failure.TRANSPORT, NOW)
+        assert sync_error_queue(session, package_id, Failure.FORMAT, NOW)  # one entry, attempt 1
+        assert not sync_error_queue(session, package_id, Failure.TRANSPORT, NOW)  # attempt 2: given up
+        entry = session.scalars(select(m.ErrorQueue).where(m.ErrorQueue.review_package_id == package_id)).one()
+        assert (entry.attempts, entry.status, entry.reason) == (2, "gave_up", "judge transport")
+        other = package_row(session, finding_package())
+        sync_error_queue(session, other, Failure.TRANSPORT, NOW)
+        sync_error_queue(session, other, Failure.LADDER, NOW)  # skipped on purpose: still pending
+        assert sync_error_queue(session, other, Failure.LIMIT, NOW) is False  # partial answer resolves it
+        resolved = session.scalars(select(m.ErrorQueue).where(m.ErrorQueue.review_package_id == other)).one()
+        assert resolved.status == "resolved"
+
+
+def test_a_given_up_entry_stays_single_and_is_resolved_by_a_later_success(engine: Engine) -> None:
+    with Session(engine) as session, session.begin():
+        package_id = package_row(session, finding_package())
+        for _ in range(3):
+            sync_error_queue(session, package_id, Failure.TRANSPORT, NOW)
+        assert not sync_error_queue(session, package_id, Failure.FORMAT, NOW)  # still given up, no new row
+        entries = session.scalars(select(m.ErrorQueue).where(m.ErrorQueue.review_package_id == package_id)).all()
+        assert [(e.status, e.attempts, e.reason) for e in entries] == [("gave_up", 2, "judge format")]
+        assert not sync_error_queue(session, package_id, None, NOW)
+        assert entries[0].status == "resolved"
+        assert sync_error_queue(session, package_id, Failure.TRANSPORT, NOW)  # a new outage opens a new entry
+
+
+def test_second_review_is_linked(engine: Engine) -> None:
     first = run([tool_call_completion("finalize_review", {"summary": "Uno.", "mitigation_steps": []})])
     second = run([])
     with Session(engine) as session, session.begin():
         package_id = package_row(session, finding_package())
         target = ReviewTarget(package_id, "ref", NOW)
         one = save_review(session, first, target, status=ReviewStatus.JUDGE_DISAGREEMENT)
-        two = save_review(session, second, target, second_review_of=one.review_id)
-    assert not two.queued
+        two = save_review(session, second, target, second_review_of=one)
     with Session(engine) as session:
-        assert session.get_one(m.LlmReview, one.review_id).status == "judge_disagreement"
-        assert session.get_one(m.LlmReview, two.review_id).second_review_of_id == one.review_id
+        assert session.get_one(m.LlmReview, one).status == "judge_disagreement"
+        assert session.get_one(m.LlmReview, two).second_review_of_id == one
         assert session.scalars(select(m.ErrorQueue)).all() == []
 
 
