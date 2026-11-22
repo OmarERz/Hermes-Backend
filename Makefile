@@ -52,15 +52,31 @@ secrets: ## Gitleaks (Docker, pinned by tag and digest) on the working tree
 audit: ## pip-audit on the locked dependencies
 	uv export --locked --no-hashes --no-emit-project --format requirements-txt | uvx pip-audit --no-deps --disable-pip -r /dev/stdin
 
+SCHEMATHESIS_VERSION ?= 4.33.4
+BRUNO_CLI_VERSION ?= 4.3.0
+ZAP_IMAGE ?= ghcr.io/zaproxy/zaproxy@sha256:9624669db72f54d86c4b46a7064518bd9bf79d8c61a4c31befa9923489f328af
+OPENAPI_SNAPSHOT ?= openapi/openapi.json
+
+# Not part of plain `make verify`. A step is skipped only while the phase that creates its prerequisite
+# has not landed, and says so with an explicit SKIPPED line; once the prerequisite exists it must pass.
 verify-full: verify ## Full gate before closing a feature: verify + Schemathesis + adversarial suite
-	@echo "Schemathesis: not available until F0.5 (needs the OpenAPI of the API); skipped."
-	@echo "Adversarial suite (E1-E22): not available until F6 (needs the judge); skipped."
+	@if [ -f "$(OPENAPI_SNAPSHOT)" ]; then \
+	  test -n "$${API_URL:-}" || { echo "API_URL is not set: Schemathesis needs the running API (e.g. API_URL=http://localhost:8000)" >&2; exit 2; }; \
+	  uvx schemathesis@$(SCHEMATHESIS_VERSION) run "$(OPENAPI_SNAPSHOT)" --url "$$API_URL"; \
+	else \
+	  echo "SKIPPED: Schemathesis, $(OPENAPI_SNAPSHOT) does not exist yet (arrives in F0.5)"; \
+	fi
+	@rc=0; uv run --locked pytest -m adversarial -q --no-cov || rc=$$?; \
+	if [ $$rc -eq 5 ]; then echo "SKIPPED: adversarial suite, no test carries the adversarial marker yet (arrives in F6)"; \
+	else exit $$rc; fi
 
-zap: ## OWASP ZAP against the API in Docker (placeholder, arrives in F12)
-	@echo "make zap is a placeholder: OWASP ZAP is wired in F12 (security hardening)."
+zap: ## OWASP ZAP API scan in Docker against API_URL/api/openapi.json (needs API_URL)
+	@test -n "$${API_URL:-}" || { echo "API_URL is not set: ZAP needs the running API (e.g. API_URL=http://localhost:8000)" >&2; exit 2; }
+	docker run --rm --network host $(ZAP_IMAGE) zap-api-scan.py -t "$${API_URL%/}/api/openapi.json" -f openapi
 
-bruno: ## Bruno API collection (placeholder, arrives in F0.7)
-	@echo "make bruno is a placeholder: the Bruno collection is created in F0.7."
+bruno: ## Bruno API collection (bruno/ folder, environment local)
+	@test -d bruno || { echo "bruno/ folder not found: the Bruno collection is created in F0.7 (D-070)" >&2; exit 2; }
+	npx --yes @usebruno/cli@$(BRUNO_CLI_VERSION) run bruno --env local
 
 # TASK and REVIEWER reach the recipe as environment variables, so quotes in the task title stay intact.
 export TASK REVIEWER

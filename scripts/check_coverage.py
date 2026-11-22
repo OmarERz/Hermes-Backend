@@ -1,7 +1,8 @@
 """Fail the quality gate when coverage is below the thresholds (docs/14 COB-01, COB-02).
 
 Reads ``coverage.json`` (written by ``make test``) and the core globs from
-``[tool.core_coverage] paths`` in ``pyproject.toml``. Percentages are line+branch.
+``[tool.core_coverage] paths`` in ``pyproject.toml``. Line and branch coverage are
+checked separately; a file or project without branches passes the branch check.
 """
 
 from __future__ import annotations
@@ -24,19 +25,33 @@ def load_core_globs(pyproject: Path) -> list[str]:
     return [str(p) for p in paths]
 
 
+def _percentages(summary: dict[str, Any]) -> tuple[float, float | None]:
+    """Return (line %, branch % or None when there are no branches)."""
+    statements = int(summary["num_statements"])
+    lines = 100.0 if statements == 0 else 100.0 * int(summary["covered_lines"]) / statements
+    branches = int(summary.get("num_branches", 0))
+    if branches == 0:
+        return lines, None
+    return lines, 100.0 * int(summary["covered_branches"]) / branches
+
+
+def _violations(label: str, summary: dict[str, Any], threshold: float) -> list[str]:
+    lines, branches = _percentages(summary)
+    problems: list[str] = []
+    if lines < threshold:
+        problems.append(f"{label} line coverage {lines:.2f}% < {threshold:.0f}%")
+    if branches is not None and branches < threshold:
+        problems.append(f"{label} branch coverage {branches:.2f}% < {threshold:.0f}%")
+    return problems
+
+
 def check(report: dict[str, Any], core_globs: list[str]) -> list[str]:
     """Return the list of violations (empty when the gate passes)."""
-    problems: list[str] = []
-    total = float(report["totals"]["percent_covered"])
-    if total < GLOBAL_THRESHOLD:
-        problems.append(f"global coverage {total:.2f}% < {GLOBAL_THRESHOLD:.0f}%")
+    problems = _violations("global", report["totals"], GLOBAL_THRESHOLD)
     for name, info in sorted(report["files"].items()):
         normalized = name.replace("\\", "/")
-        if not any(fnmatch.fnmatch(normalized, glob) for glob in core_globs):
-            continue
-        percent = float(info["summary"]["percent_covered"])
-        if percent < CORE_THRESHOLD:
-            problems.append(f"core file {normalized} coverage {percent:.2f}% < {CORE_THRESHOLD:.0f}%")
+        if any(fnmatch.fnmatch(normalized, glob) for glob in core_globs):
+            problems.extend(_violations(f"core file {normalized}", info["summary"], CORE_THRESHOLD))
     return problems
 
 
@@ -54,8 +69,12 @@ def main(argv: list[str] | None = None) -> int:
         sys.stderr.write(f"FAIL: {problem}\n")
     if problems:
         return 1
-    total = float(report["totals"]["percent_covered"])
-    sys.stdout.write(f"coverage OK: global {total:.2f}% (>= {GLOBAL_THRESHOLD:.0f}%), core >= {CORE_THRESHOLD:.0f}%\n")
+    lines, branches = _percentages(report["totals"])
+    branch_text = "n/a" if branches is None else f"{branches:.2f}%"
+    sys.stdout.write(
+        f"coverage OK: global lines {lines:.2f}%, branches {branch_text} "
+        f"(>= {GLOBAL_THRESHOLD:.0f}%), core >= {CORE_THRESHOLD:.0f}%\n"
+    )
     return 0
 
 
