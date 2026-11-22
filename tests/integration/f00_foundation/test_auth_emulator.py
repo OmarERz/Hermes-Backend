@@ -1,0 +1,169 @@
+"""Firebase ID token verification and role enforcement against the real Auth emulator (docs/14 §4.2).
+
+Needs Docker; the emulator image is built from docker/auth-emulator (layers are cached after the first build).
+Tokens are minted through the emulator REST API: sign up, set the custom claim, sign in again.
+"""
+
+from __future__ import annotations
+
+import base64
+import json
+import secrets
+import time
+from collections.abc import Iterator
+from pathlib import Path
+from typing import Any
+
+import httpx
+import pytest
+from firebase_admin import auth, initialize_app
+from testcontainers.core.config import testcontainers_config
+from testcontainers.core.container import DockerContainer
+from testcontainers.core.image import DockerImage
+from testcontainers.core.waiting_utils import wait_for_logs
+
+from api.auth import FirebaseTokenVerifier, TokenError
+
+testcontainers_config.ryuk_disabled = True
+
+pytestmark = pytest.mark.integration
+
+ROOT = Path(__file__).resolve().parents[3]
+PROJECT = "demo-hermes"
+IDP = "identitytoolkit.googleapis.com/v1"
+
+
+@pytest.fixture(scope="module")
+def emulator_host() -> Iterator[str]:
+    with DockerImage(path=str(ROOT / "docker" / "auth-emulator"), tag="hermes-test-auth-emulator") as image:
+        container = DockerContainer(str(image.tag)).with_exposed_ports(9099)
+        with container:
+            wait_for_logs(container, "All emulators ready", timeout=120)
+            yield f"{container.get_container_host_ip()}:{container.get_exposed_port(9099)}"
+
+
+@pytest.fixture(autouse=True)
+def emulator_env(emulator_host: str, monkeypatch: pytest.MonkeyPatch) -> str:
+    monkeypatch.setenv("FIREBASE_AUTH_EMULATOR_HOST", emulator_host)
+    return emulator_host
+
+
+@pytest.fixture(scope="module")
+def admin_app(emulator_host: str) -> Any:
+    mp = pytest.MonkeyPatch()
+    mp.setenv("FIREBASE_AUTH_EMULATOR_HOST", emulator_host)
+    try:
+        yield initialize_app(options={"projectId": PROJECT}, name=f"test-{secrets.token_hex(4)}")
+    finally:
+        mp.undo()
+
+
+def unsigned_jwt(claims: dict[str, Any]) -> str:
+    """Emulator-style unsigned token, built by hand to exercise the issuer and audience checks."""
+
+    def part(data: dict[str, Any]) -> str:
+        return base64.urlsafe_b64encode(json.dumps(data).encode()).rstrip(b"=").decode()
+
+    return f"{part({'alg': 'none', 'typ': 'JWT'})}.{part(claims)}."
+
+
+def mint(host: str, admin_app: Any, role: str | None, email: str | None = None) -> tuple[str, str]:
+    """Create a user, set its role claim and return (uid, fresh ID token carrying the claim)."""
+    email = email or f"{secrets.token_hex(4)}@example.com"
+    password = secrets.token_urlsafe(16)
+    base = f"http://{host}/{IDP}"
+    signup = httpx.post(
+        f"{base}/accounts:signUp?key=fake",
+        json={"email": email, "password": password, "returnSecureToken": True},
+        timeout=30,
+    )
+    signup.raise_for_status()
+    uid = signup.json()["localId"]
+    if role is not None:
+        auth.set_custom_user_claims(uid, {"role": role}, app=admin_app)
+    signin = httpx.post(
+        f"{base}/accounts:signInWithPassword?key=fake",
+        json={"email": email, "password": password, "returnSecureToken": True},
+        timeout=30,
+    )
+    signin.raise_for_status()
+    return uid, str(signin.json()["idToken"])
+
+
+def test_missing_or_unknown_role_claim_is_rejected(emulator_host: str, admin_app: Any) -> None:
+    verifier = FirebaseTokenVerifier(PROJECT)
+    for role in (None, "superuser"):
+        _, token = mint(emulator_host, admin_app, role)
+        with pytest.raises(TokenError) as info:
+            verifier.verify(token)
+        assert info.value.reason == "role_missing"
+
+
+def test_revoked_token_is_rejected(emulator_host: str, admin_app: Any) -> None:
+    verifier = FirebaseTokenVerifier(PROJECT)
+    uid, token = mint(emulator_host, admin_app, "admin")
+    assert verifier.verify(token).uid == uid
+    time.sleep(1.1)  # token iat has one-second resolution
+    auth.revoke_refresh_tokens(uid, app=admin_app)
+    with pytest.raises(TokenError) as info:
+        verifier.verify(token)
+    assert info.value.reason == "token_revoked"
+
+
+def test_disabled_user_is_rejected(emulator_host: str, admin_app: Any) -> None:
+    verifier = FirebaseTokenVerifier(PROJECT)
+    uid, token = mint(emulator_host, admin_app, "reader")
+    auth.update_user(uid, disabled=True, app=admin_app)
+    with pytest.raises(TokenError) as info:
+        verifier.verify(token)
+    assert info.value.reason == "user_disabled"
+
+
+def test_deleted_user_is_rejected(emulator_host: str, admin_app: Any) -> None:
+    verifier = FirebaseTokenVerifier(PROJECT)
+    uid, token = mint(emulator_host, admin_app, "reader")
+    auth.delete_user(uid, app=admin_app)
+    with pytest.raises(TokenError) as info:
+        verifier.verify(token)
+    assert info.value.reason == "user_not_found"
+
+
+@pytest.mark.parametrize(
+    ("aud", "iss"),
+    [
+        ("other-project", f"https://securetoken.google.com/{PROJECT}"),
+        (PROJECT, "https://securetoken.google.com/other-project"),
+    ],
+)
+def test_wrong_audience_or_issuer_is_rejected(emulator_host: str, aud: str, iss: str) -> None:
+    now = int(time.time())
+    claims = {
+        "aud": aud,
+        "iss": iss,
+        "sub": "u1",
+        "iat": now,
+        "exp": now + 3600,
+        "email": "a@example.com",
+        "role": "admin",
+    }
+    token = unsigned_jwt(claims)
+    with pytest.raises(TokenError) as info:
+        FirebaseTokenVerifier(PROJECT).verify(token)
+    assert info.value.reason == "token_invalid"
+
+
+def test_expired_token_is_rejected_although_the_emulator_skips_the_check(emulator_host: str, admin_app: Any) -> None:
+    uid, _ = mint(emulator_host, admin_app, "admin")
+    now = int(time.time())
+    claims = {
+        "aud": PROJECT,
+        "iss": f"https://securetoken.google.com/{PROJECT}",
+        "sub": uid,
+        "iat": now,
+        "exp": now - 10,
+        "email": "a@example.com",
+        "role": "admin",
+    }
+    with pytest.raises(TokenError) as info:
+        FirebaseTokenVerifier(PROJECT).verify(unsigned_jwt(claims))
+    assert info.value.reason == "token_expired"
