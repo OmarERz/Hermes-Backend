@@ -51,9 +51,9 @@ def test_masks_in_message(capture: io.StringIO, message: str, leaked: str) -> No
 
 
 def test_masks_values_passed_as_args(capture: io.StringIO) -> None:
-    logging.getLogger("hermes.test").info("token=%s user=%s", CONFIGURED, "ana@example.com")
+    logging.getLogger("hermes.test").info("value=%s user=%s", CONFIGURED, "ana@example.com")
     entry = lines(capture)[0]
-    assert entry["message"] == f"token={MASK} user={MASK}"
+    assert entry["message"] == f"value={MASK} user={MASK}"
 
 
 def fail_with_secret() -> None:
@@ -71,7 +71,7 @@ def test_masks_exception_text(capture: io.StringIO) -> None:
 
 
 def test_keeps_user_name_in_url(capture: io.StringIO) -> None:
-    logging.getLogger("hermes.test").info("connecting to postgresql://app:secret@db/hermes")
+    logging.getLogger("hermes.test").info("connecting to postgresql://app:hunter2@db/hermes")
     assert lines(capture)[0]["message"] == f"connecting to postgresql://app:{MASK}@db/hermes"
 
 
@@ -102,6 +102,6 @@ def test_configure_replaces_existing_handlers(capture: io.StringIO) -> None:
 
 @pytest.mark.parametrize("name", ["uvicorn.access", "uvicorn.error"])
 def test_uvicorn_records_are_masked(capture: io.StringIO, name: str) -> None:
-    logging.getLogger(name).info('"GET /api/x?token=%s HTTP/1.1" 200', CONFIGURED)
+    logging.getLogger(name).info('"GET /api/x?q=%s HTTP/1.1" 200', CONFIGURED)
     assert CONFIGURED not in capture.getvalue()
     assert MASK in capture.getvalue()
