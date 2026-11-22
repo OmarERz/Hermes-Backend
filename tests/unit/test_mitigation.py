@@ -80,11 +80,31 @@ def test_references_keep_only_safe_urls_and_are_sorted_and_unique() -> None:
     assert len(result.verification) == 2
 
 
+def test_a_fixed_version_inside_another_affected_branch_is_not_advised() -> None:
+    result = compose(
+        MitigationData(
+            "CVE-2026-1",
+            fixed_versions=["1.5", "2.3"],
+            affected_ranges=[("1.0", True, "1.5", False), ("2.0", True, "2.3", False)],
+        )
+    )
+    # 1.5 is outside [1.0, 1.5) but inside no other range here; both are valid fixes of their own branch
+    assert result.correction == ("Actualizar a 1.5 o superior.", "Actualizar a 2.3 o superior.")
+    overlapping = compose(
+        MitigationData(
+            "CVE-2026-1",
+            fixed_versions=["1.5", "2.3"],
+            affected_ranges=[("1.0", True, "1.5", False), ("1.2", True, "2.3", False)],
+        )
+    )
+    assert overlapping.correction == ("Actualizar a 2.3 o superior.",)  # 1.5 is still affected by the second range
+
+
 def test_text_cleaning() -> None:
     assert clean_text("a\x00b\r\n c\t\td") == "a b c d"
     assert clean_text("x" * 10, 5) == "xxxx…"
     assert safe_url("https://a.example/x?y=1") == "https://a.example/x?y=1"
-    for bad in ("", "file:///etc/passwd", "https://", "https://a.example/\nx", "//a.example"):
+    for bad in ("", "file:///etc/passwd", "https://", "https://a.example/\nx", "//a.example", "http://[::1/x"):
         assert safe_url(bad) is None
     assert version_key("1.10") > version_key("1.9") and version_key("2.0.0") > version_key("2.0")
 
@@ -127,6 +147,11 @@ def test_minimal_and_special_cases() -> None:
         "Se aplicó el piso de KEV con el activo expuesto."
     )
     assert "sin motivo registrado" in build_justification(full(judge_reasons=()), NOW)
+    both = build_justification(
+        full(no_judge_review=True, floor_applied=True, judge_adjustment=0, judge_reasons=()), NOW
+    )
+    assert "Sin revisión del juez" in both and both.endswith("Se aplicó el piso de KEV con el activo expuesto.")
+    assert "igual a la base" not in both
 
 
 def test_external_names_cannot_break_the_layout() -> None:

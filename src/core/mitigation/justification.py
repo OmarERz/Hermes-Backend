@@ -17,7 +17,7 @@ from datetime import datetime
 from decimal import Decimal
 from typing import Final
 
-from core.mitigation.text import clean_text
+from core.mitigation.text import escape_markdown
 
 NAME_LIMIT: Final = 80
 CRITICALITY: Final = {
@@ -90,7 +90,7 @@ def _asset_facts(data: JustificationInput) -> list[str]:
 
 def build_justification(data: JustificationInput, now: datetime) -> str:
     """The justification text of one finding's score."""
-    driver = clean_text(data.driving_ci, NAME_LIMIT)
+    driver = escape_markdown(data.driving_ci, NAME_LIMIT)
     head = f"**Base {data.base} → Final {data.final} · impulsada por {driver}.**"
     parts: list[str] = []
     if data.cvss_score is not None:
@@ -98,15 +98,15 @@ def build_justification(data: JustificationInput, now: datetime) -> str:
     if data.in_kev:
         parts.append("en KEV")
     for item in data.news:
-        source = clean_text(item.source, NAME_LIMIT)
-        parts.append(f"{clean_text(item.kind, NAME_LIMIT)} por {source} ({age_text(item.reported_at, now)})")
+        source = escape_markdown(item.source, NAME_LIMIT)
+        parts.append(f"{escape_markdown(item.kind, NAME_LIMIT)} por {source} ({age_text(item.reported_at, now)})")
     parts.extend(_asset_facts(data))
     text = f"{head} {' · '.join(parts)}."
     if data.no_judge_review:
-        return f"{text} **Sin revisión del juez:** la final es igual a la base."
-    if data.judge_adjustment or data.judge_reasons:
+        text += " **Sin revisión del juez:** no hay ajuste."
+    elif data.judge_adjustment or data.judge_reasons:
         reasons = "; ".join(
-            clean_text(r.text, 200) + (f" ({clean_text(r.reference, NAME_LIMIT)})" if r.reference else "")
+            escape_markdown(r.text, 200) + (f" ({escape_markdown(r.reference, NAME_LIMIT)})" if r.reference else "")
             for r in data.judge_reasons
         )
         text += f" **Juez {_signed(data.judge_adjustment)}:** {reasons or 'sin motivo registrado'}."

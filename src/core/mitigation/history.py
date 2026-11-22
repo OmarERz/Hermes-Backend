@@ -13,15 +13,18 @@ from sqlalchemy.orm import Session
 MAX_POINTS = 1000
 
 _HISTORY = text(
-    'SELECT a.id, a.assessed_at, a.finding_group_id, a.formula_version_id, a."trigger", '
+    'SELECT * FROM (SELECT a.id, a.assessed_at, a.finding_group_id, a.formula_version_id, a."trigger", '
     "s.asset_id, s.base, a.judge_adjustment, s.ci_adjustment, s.final, d.level, d.floor_applied, "
     "a.factor_s, a.factor_p, a.factor_t, s.factor_a, s.factor_d, "
-    "a.raw_cvss_score, a.raw_epss, a.raw_in_kev "
+    "a.raw_cvss_score, a.raw_epss, a.raw_in_kev, (a.llm_review_id IS NULL OR r.status = 'no_judge_review') "
     "FROM assessment a JOIN asset_score s ON s.assessment_id = a.id "
     "JOIN asset_score_detail d ON d.assessment_id = a.id AND d.asset_id = s.asset_id "
+    "LEFT JOIN llm_review r ON r.id = a.llm_review_id "
     "WHERE (CAST(:group_id AS uuid) IS NULL OR a.finding_group_id = CAST(:group_id AS uuid)) "
     "AND (CAST(:asset_id AS uuid) IS NULL OR s.asset_id = CAST(:asset_id AS uuid)) "
-    "ORDER BY a.assessed_at, a.id, s.asset_id LIMIT :limit"
+    "AND (CAST(:before AS timestamptz) IS NULL OR a.assessed_at < CAST(:before AS timestamptz)) "
+    "ORDER BY a.assessed_at DESC, a.id DESC, s.asset_id DESC LIMIT :limit) newest "
+    "ORDER BY newest.assessed_at, newest.id, newest.asset_id"
 )
 
 
@@ -43,6 +46,7 @@ class HistoryPoint:
     raw_cvss_score: Decimal | None
     raw_epss: Decimal | None
     raw_in_kev: bool | None
+    no_judge_review: bool  # no judge review backs this score: the final is base plus the CI rules only
 
 
 def score_history(
@@ -51,13 +55,20 @@ def score_history(
     finding_group_id: uuid.UUID | None = None,
     asset_id: uuid.UUID | None = None,
     limit: int = MAX_POINTS,
+    before: datetime | None = None,
 ) -> list[HistoryPoint]:
-    """The history of a vulnerability group, of a CI, or of a CI within a group; at least one filter is required."""
+    """The history of a vulnerability group, of a CI, or of a CI within a group; at least one filter is required.
+
+    Returns the newest `limit` points in chronological order; pass `before` (the oldest `assessed_at` seen) to page
+    back to older ones, so a long history is never cut at the recent end.
+    """
     if finding_group_id is None and asset_id is None:
         raise ValueError("give a finding group, an asset or both")
     if not 1 <= limit <= MAX_POINTS:
         raise ValueError("limit must be between 1 and 1000")
-    rows = session.execute(_HISTORY, {"group_id": finding_group_id, "asset_id": asset_id, "limit": limit})
+    rows = session.execute(
+        _HISTORY, {"group_id": finding_group_id, "asset_id": asset_id, "limit": limit, "before": before}
+    )
     return [
         HistoryPoint(
             assessment_id=r[0],
@@ -76,6 +87,7 @@ def score_history(
             raw_cvss_score=r[17],
             raw_epss=r[18],
             raw_in_kev=r[19],
+            no_judge_review=bool(r[20]),
         )
         for r in rows
     ]

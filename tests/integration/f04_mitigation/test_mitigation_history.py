@@ -76,12 +76,16 @@ def test_fixed_versions_come_from_the_range_that_matches_the_mapping(demo: Engin
         "ON CONFLICT (software_product_id) DO UPDATE SET nvd_vendor = 'acme', nvd_product = 'tool'",
         {"g": gid},
     )
-    for vendor, version, inclusive in (("acme", "2.4.1", False), ("other", "9.9", False), ("acme", "3.0", True)):
+    for vendor, start, end, inclusive in (
+        ("acme", None, "2.4.1", False),
+        ("other", None, "9.9", False),
+        ("acme", "2.5", "3.0", True),
+    ):
         run(
             demo,
-            "INSERT INTO cve_affected_range (cve_id, source, vendor, product, version_end, end_inclusive) "
-            "VALUES (:c, 'nvd_cpe', :v, 'tool', :e, :i)",
-            {"c": cve, "v": vendor, "e": version, "i": inclusive},
+            "INSERT INTO cve_affected_range (cve_id, source, vendor, product, version_start, start_inclusive, "
+            "version_end, end_inclusive) VALUES (:c, 'nvd_cpe', :v, 'tool', :s, :si, :e, :i)",
+            {"c": cve, "v": vendor, "s": start, "si": None if start is None else True, "e": end, "i": inclusive},
         )
     with Session(demo) as session:
         result = build_mitigation(session, gid)
@@ -105,6 +109,20 @@ def test_indicators_linked_to_the_cve_become_detection_steps(demo: Engine) -> No
         {"i": ioc, "s": source},
     )
     run(demo, "INSERT INTO ioc_cve (ioc_id, cve_id) VALUES (:i, :c)", {"i": ioc, "c": cve})
+    other_source, other_ioc = uuid.uuid4(), uuid.uuid4()
+    run(
+        demo,
+        "INSERT INTO source (id, code, name, kind, url, trust_tier, is_structural, is_custom, enabled, created_at) "
+        "VALUES (:s, 'blog', 'Blog', 'rss', 'https://blog.example/feed', 'N4', false, true, true, now())",
+        {"s": other_source},
+    )
+    run(
+        demo,
+        "INSERT INTO ioc (id, ioc_type, value, source_id, first_seen_at, last_seen_at) "
+        "VALUES (:i, 'domain', 'from-a-blog.example', :s, now(), now())",
+        {"i": other_ioc, "s": other_source},
+    )
+    run(demo, "INSERT INTO ioc_cve (ioc_id, cve_id) VALUES (:i, :c)", {"i": other_ioc, "c": cve})
     with Session(demo) as session:
         result = build_mitigation(session, gid)
     assert result is not None
@@ -156,6 +174,12 @@ def test_history_lists_each_assessment_per_ci_oldest_first(demo: Engine) -> None
         assert [p.final for p in by_asset] == [70, 86] and {p.asset_id for p in by_asset} == {assets[0]}
         assert len(score_history(session, finding_group_id=gid, asset_id=assets[1], limit=1)) == 1
         assert score_history(session, finding_group_id=uuid.uuid4()) == []
+        assert all(p.no_judge_review for p in by_group)  # the seeded assessments have no judge review
+        # the newest point survives a small limit; `before` pages back to older ones
+        newest = score_history(session, finding_group_id=gid, asset_id=assets[0], limit=1)
+        assert [p.final for p in newest] == [86]
+        older = score_history(session, finding_group_id=gid, asset_id=assets[0], limit=1, before=newest[0].assessed_at)
+        assert [p.final for p in older] == [70]
 
 
 @pytest.mark.parametrize(
