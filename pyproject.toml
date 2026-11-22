@@ -29,6 +29,7 @@ embeddings = ["sentence-transformers>=5.1.0"]
 
 [dependency-groups]
 dev = [
+    "hypothesis>=6.140",
     "import-linter>=2.17",
     "jsonschema>=4.26.0",
     "mypy",
