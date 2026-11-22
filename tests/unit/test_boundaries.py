@@ -8,8 +8,9 @@ PYPROJECT = Path(__file__).resolve().parents[2] / "pyproject.toml"
 EXPECTED = {
     "notifications_slack": {"core", "api", "workers"},
     "notifications_api": {"api", "core", "workers", "notifications_slack"},
-    "core": {"api", "workers"},
-    "workers": {"api"},
+    "core": {"api", "workers", "notifications_slack"},
+    "workers": {"api", "notifications_slack"},
+    "api": {"workers", "notifications_slack"},
 }
 
 

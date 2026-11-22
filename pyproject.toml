@@ -94,16 +94,22 @@ source_modules = ["notifications_api"]
 forbidden_modules = ["api", "core", "workers", "notifications_slack"]
 
 [[tool.importlinter.contracts]]
-name = "core does not import api or workers"
+name = "core imports only notifications_api"
 type = "forbidden"
 source_modules = ["core"]
-forbidden_modules = ["api", "workers"]
+forbidden_modules = ["api", "workers", "notifications_slack"]
 
 [[tool.importlinter.contracts]]
-name = "workers do not import api"
+name = "workers import only core and notifications_api"
 type = "forbidden"
 source_modules = ["workers"]
-forbidden_modules = ["api"]
+forbidden_modules = ["api", "notifications_slack"]
+
+[[tool.importlinter.contracts]]
+name = "api imports only core and notifications_api"
+type = "forbidden"
+source_modules = ["api"]
+forbidden_modules = ["workers", "notifications_slack"]
 
 [tool.coverage.run]
 branch = true
