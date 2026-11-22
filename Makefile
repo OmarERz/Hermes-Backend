@@ -75,9 +75,13 @@ verify-full: verify ## Full gate before closing a feature: verify + Schemathesis
 	if [ $$rc -eq 5 ]; then echo "SKIPPED: adversarial suite, no test carries the adversarial marker yet (arrives in F6)"; \
 	else exit $$rc; fi
 
-zap: ## OWASP ZAP API scan in Docker against API_URL/api/openapi.json (needs API_URL)
+zap: ## OWASP ZAP API scan in Docker against API_URL/api/openapi.json (needs API_URL and TEST_TOKEN)
 	@test -n "$${API_URL:-}" || { echo "API_URL is not set: ZAP needs the running API (e.g. API_URL=http://localhost:8000)" >&2; exit 2; }
-	docker run --rm --network host $(ZAP_IMAGE) zap-api-scan.py -t "$${API_URL%/}/api/openapi.json" -f openapi
+	@test -n "$${TEST_TOKEN:-}" || { echo "TEST_TOKEN is not set: ZAP needs a Firebase emulator bearer token (docs/14 §4.4)" >&2; exit 2; }
+	docker run --rm --network host $(ZAP_IMAGE) zap-api-scan.py -t "$${API_URL%/}/api/openapi.json" -f openapi \
+	  -z "-config replacer.full_list(0).description=auth -config replacer.full_list(0).enabled=true \
+	  -config replacer.full_list(0).matchtype=REQ_HEADER -config replacer.full_list(0).matchstr=Authorization \
+	  -config replacer.full_list(0).regex=false -config 'replacer.full_list(0).replacement=Bearer $$TEST_TOKEN'"
 
 bruno: ## Bruno API collection (bruno/ folder, environment local)
 	@test -d bruno || { echo "bruno/ folder not found: the Bruno collection is created in F0.7 (D-070)" >&2; exit 2; }
