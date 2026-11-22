@@ -143,6 +143,8 @@ jobs:
         env:
           BASE_SHA: ${{ github.event.pull_request.base.sha }}
           HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+          # Set by GitHub, not by the commit: the Dependabot exception needs the PR to come from the bot.
+          PR_AUTHOR: ${{ github.event.pull_request.user.login }}
         run: |
           # D-045: Conventional Commits, title only, <= 72 chars, no AI-agent marks. The attribution
           # pattern below mirrors the local commit-msg hook (human co-authors are allowed).
@@ -169,7 +171,9 @@ jobs:
             words=$(git rev-list --parents -n 1 "$sha" | wc -w)
             problems=()
             # Title and body rules: not for merges, not for Dependabot (its titles are set in dependabot.yml).
-            if [ "$words" -le 2 ] && [ "$author" != "$dependabot_email" ]; then
+            from_bot=0
+            if [ "$author" = "$dependabot_email" ] && [ "$PR_AUTHOR" = "dependabot[bot]" ]; then from_bot=1; fi
+            if [ "$words" -le 2 ] && [ "$from_bot" -eq 0 ]; then
               [[ "$title" =~ $re ]] || problems+=("title is not a Conventional Commit")
               [ "${#title}" -le 72 ] || problems+=("title is longer than 72 characters (${#title})")
               [ -z "$body" ] || problems+=("commit has a body (title only)")
