@@ -1,5 +1,5 @@
 # Firebase Auth emulator for backend tests only (D-069): issues test ID tokens per role, no network.
-FROM node:22-slim@sha256:e9f565d32859f0cbfb52125eafe8be39390f24dac302dc3cdf566e8ba3ab21ee
+FROM node:26-slim@sha256:e6bedef217677b276c591795e169840edd9096dbf13f29df8ef8d1856b8820bc
 WORKDIR /emulator
 # firebase-tools is pinned in package.json and package-lock.json, so Dependabot can track it.
 COPY package.json package-lock.json ./
