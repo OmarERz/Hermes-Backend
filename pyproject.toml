@@ -15,8 +15,11 @@ dependencies = [
 [dependency-groups]
 dev = [
     "httpx>=0.28.1",
+    "import-linter>=2.17",
+    "jsonschema>=4.26.0",
     "mypy",
     "pytest",
+    "pytest-cov>=7.1.0",
     "ruff",
 ]
 
@@ -64,7 +67,7 @@ plugins = ["pydantic.mypy"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
-pythonpath = ["src"]
+pythonpath = ["src", "scripts"]
 addopts = ["--strict-markers", "--strict-config", "-m", "not slow"]
 markers = [
     "unit: pure functions, no I/O",
@@ -73,4 +76,53 @@ markers = [
     "adversarial: E1-E22 judge suite with recorded responses",
     "e2e: whole stack in Docker Compose",
     "slow: excluded from PR runs (weekly)",
+]
+
+[tool.importlinter]
+root_packages = ["api", "core", "notifications_api", "notifications_slack", "workers"]
+
+[[tool.importlinter.contracts]]
+name = "notifications_slack imports only notifications_api"
+type = "forbidden"
+source_modules = ["notifications_slack"]
+forbidden_modules = ["core", "api", "workers"]
+
+[[tool.importlinter.contracts]]
+name = "notifications_api imports nothing internal"
+type = "forbidden"
+source_modules = ["notifications_api"]
+forbidden_modules = ["api", "core", "workers", "notifications_slack"]
+
+[[tool.importlinter.contracts]]
+name = "core imports only notifications_api"
+type = "forbidden"
+source_modules = ["core"]
+forbidden_modules = ["api", "workers", "notifications_slack"]
+
+[[tool.importlinter.contracts]]
+name = "workers import only core and notifications_api"
+type = "forbidden"
+source_modules = ["workers"]
+forbidden_modules = ["api", "notifications_slack"]
+
+[[tool.importlinter.contracts]]
+name = "api imports only core and notifications_api"
+type = "forbidden"
+source_modules = ["api"]
+forbidden_modules = ["workers", "notifications_slack"]
+
+[tool.coverage.run]
+branch = true
+source = ["src"]
+
+[tool.core_coverage]
+# Core files need >= 95% line+branch coverage (COB-02). Globs on repository-relative paths; absent paths are skipped.
+paths = [
+    "src/core/scoring/*",
+    "src/core/judge/*",
+    "src/core/validation/*",
+    "src/core/itop/outbox*",
+    "src/core/notifications/*",
+    "src/core/feedback/*",
+    "src/api/auth/*",
 ]

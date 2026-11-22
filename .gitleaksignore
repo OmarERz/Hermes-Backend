@@ -1,0 +1,5 @@
+# Approved by the user on 21 nov 2026: fake test tokens of the log-masking tests in an unpublished
+# F0.1 commit. They were removed from the tree (F0.3 builds them at runtime); only these exact
+# fingerprints are ignored, so any other finding still fails.
+34c9d9973d5a9a85e2ef01c75615a2003dc0e8bb:tests/unit/test_logging.py:generic-api-key:35
+34c9d9973d5a9a85e2ef01c75615a2003dc0e8bb:tests/unit/test_logging.py:slack-app-token:34

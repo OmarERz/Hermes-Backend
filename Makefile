@@ -1,14 +1,15 @@
-# Quality gate (docs/14 §2). Minimal version from F0.1 (D-072); F0.3 adds import-linter,
-# Semgrep, Gitleaks, pip-audit, coverage, verify-full, semgrep, zap and bruno.
+# Quality gate (docs/14 §2): F0.1 minimal version (D-072) extended in F0.3 with import-linter, coverage,
+# Semgrep, Gitleaks, pip-audit, verify-full and the zap and bruno placeholders.
 .DEFAULT_GOAL := help
 SHELL := /bin/bash
+.SHELLFLAGS := -eu -o pipefail -c
 
-.PHONY: help verify lint typecheck test review
+.PHONY: help verify lint typecheck boundaries test coverage semgrep secrets audit verify-full zap bruno review
 
 help: ## List the available targets
 	@grep -E '^[a-z-]+:.*## ' $(MAKEFILE_LIST) | awk 'BEGIN {FS = ":.*## "}; {printf "  %-12s %s\n", $$1, $$2}'
 
-verify: lint typecheck test ## Run the quality gate (same command locally and in CI)
+verify: lint typecheck boundaries test coverage semgrep secrets audit ## Run the quality gate (same command locally and in CI)
 
 lint: ## Formatting and lint (ruff)
 	uv run --locked ruff format --check .
@@ -16,9 +17,91 @@ lint: ## Formatting and lint (ruff)
 
 typecheck: ## Strict type checking (mypy)
 	uv run --locked mypy
+	uv run --locked mypy --package-root=. scripts/check_coverage.py
 
-test: ## Unit and integration tests (pytest)
-	uv run --locked pytest
+boundaries: ## Package boundary contracts (import-linter)
+	uv run --locked lint-imports
+
+test: ## Unit and integration tests (pytest), writes coverage.json
+	uv run --locked pytest --cov --cov-report=json --cov-report=term-missing:skip-covered
+
+coverage: test ## Coverage gate: 80% global, 95% core (runs the tests first)
+	uv run --locked python scripts/check_coverage.py
+
+# Semgrep CE in Docker (docs/14 §3.2). Registry packs: python, owasp-top-ten, secrets, fastapi.
+# Mounted read-only; --no-git-ignore keeps it working in git worktrees (the .git file points outside the mount).
+SEMGREP_IMAGE ?= semgrep/semgrep:latest
+GITLEAKS_IMAGE ?= ghcr.io/gitleaks/gitleaks:v8.30.1@sha256:c00b6bd0aeb3071cbcb79009cb16a60dd9e0a7c60e2be9ab65d25e6bc8abbb7f
+
+# Only files git would version (tracked and untracked, minus ignored): local-only material stays out.
+# The NUL-delimited list reaches Semgrep as individual arguments, so odd file names cannot split or inject.
+semgrep: ## Semgrep CE (Docker): registry packs + .semgrep/ project rules, fails on WARNING/ERROR
+	git ls-files -z --cached --others --exclude-standard | xargs -0 -r \
+	  docker run --rm -v "$(CURDIR):/src:ro" -w /src $(SEMGREP_IMAGE) semgrep scan \
+	  --config p/python --config p/owasp-top-ten --config p/secrets --config p/fastapi \
+	  --config /src/.semgrep/ --metrics=off --no-git-ignore \
+	  --error --severity WARNING --severity ERROR --
+
+# Working tree: tracked and untracked files minus ignored ones, streamed as a tar into the container, so
+# caches and virtualenvs are not scanned and no temp dir is needed.
+# History: `gitleaks git` over the commits of the current branch, i.e. those reachable from HEAD and not from
+# GITLEAKS_BASE (develop, D-064); all history with GITLEAKS_FULL_HISTORY=1, and the whole of HEAD when the
+# base ref does not exist (fresh clone). The repository is mounted from the common git dir (read-only), which
+# also works in git worktrees where .git is a file; HEAD is passed as an explicit SHA for the same reason.
+GITLEAKS_BASE ?= develop
+GITLEAKS_FULL_HISTORY ?= 0
+
+secrets: ## Gitleaks (Docker, pinned): working tree + branch history (GITLEAKS_FULL_HISTORY=1 for all history)
+	git ls-files -z --cached --others --exclude-standard | tar --null --ignore-failed-read -T - -cf - | \
+	  docker run --rm -i --entrypoint sh $(GITLEAKS_IMAGE) -c \
+	  'mkdir /work && tar -xf - -C /work && gitleaks dir /work --redact --no-banner -v'
+	@head=$$(git rev-parse HEAD); \
+	if [ "$(GITLEAKS_FULL_HISTORY)" = "1" ]; then revs="--all"; \
+	elif git rev-parse --verify --quiet "$(GITLEAKS_BASE)^{commit}" >/dev/null; then revs="^$(GITLEAKS_BASE) $$head"; \
+	else revs="$$head"; fi; \
+	echo "gitleaks history scan: $$revs"; \
+	docker run --rm -v "$$(git rev-parse --path-format=absolute --git-common-dir):/repo/.git:ro" -w /repo \
+	  -v "$(CURDIR)/.gitleaksignore:/ignore/.gitleaksignore:ro" \
+	  $(GITLEAKS_IMAGE) git /repo --redact --no-banner -v --log-opts="$$revs" \
+	  --gitleaks-ignore-path /ignore/.gitleaksignore
+
+audit: ## pip-audit on the locked dependencies
+	uv export --locked --no-hashes --no-emit-project --format requirements-txt | uvx pip-audit --no-deps --disable-pip -r /dev/stdin
+
+SCHEMATHESIS_VERSION ?= 4.33.4
+BRUNO_CLI_VERSION ?= 4.3.0
+ZAP_IMAGE ?= ghcr.io/zaproxy/zaproxy@sha256:9624669db72f54d86c4b46a7064518bd9bf79d8c61a4c31befa9923489f328af
+OPENAPI_SNAPSHOT ?= openapi/openapi.json
+# Operations with external effects are excluded from fuzzing (docs/14 §4.3). --exclude-path drops every
+# method of the path; later phases extend this list (e.g. SCHEMATHESIS_EXCLUDES += --exclude-path /api/x).
+SCHEMATHESIS_EXCLUDES ?= --exclude-path /api/scans --exclude-path /api/stix/export
+
+# Not part of plain `make verify`. A step is skipped only while the phase that creates its prerequisite
+# has not landed, and says so with an explicit SKIPPED line; once the prerequisite exists it must pass.
+verify-full: verify ## Full gate before closing a feature: verify + Schemathesis + adversarial suite
+	@if [ -f "$(OPENAPI_SNAPSHOT)" ]; then \
+	  test -n "$${API_URL:-}" || { echo "API_URL is not set: Schemathesis needs the running API (e.g. API_URL=http://localhost:8000)" >&2; exit 2; }; \
+	  test -n "$${TEST_TOKEN:-}" || { echo "TEST_TOKEN is not set: Schemathesis needs a Firebase emulator bearer token (docs/14 §4.3)" >&2; exit 2; }; \
+	  uvx schemathesis@$(SCHEMATHESIS_VERSION) run "$(OPENAPI_SNAPSHOT)" --url "$$API_URL" \
+	    -H "Authorization: Bearer $$TEST_TOKEN" $(SCHEMATHESIS_EXCLUDES); \
+	else \
+	  echo "SKIPPED: Schemathesis, $(OPENAPI_SNAPSHOT) does not exist yet (arrives in F0.5)"; \
+	fi
+	@rc=0; uv run --locked pytest -m adversarial -q --no-cov || rc=$$?; \
+	if [ $$rc -eq 5 ]; then echo "SKIPPED: adversarial suite, no test carries the adversarial marker yet (arrives in F6)"; \
+	else exit $$rc; fi
+
+zap: ## OWASP ZAP API scan in Docker against API_URL/api/openapi.json (needs API_URL and TEST_TOKEN)
+	@test -n "$${API_URL:-}" || { echo "API_URL is not set: ZAP needs the running API (e.g. API_URL=http://localhost:8000)" >&2; exit 2; }
+	@test -n "$${TEST_TOKEN:-}" || { echo "TEST_TOKEN is not set: ZAP needs a Firebase emulator bearer token (docs/14 §4.4)" >&2; exit 2; }
+	docker run --rm --network host $(ZAP_IMAGE) zap-api-scan.py -t "$${API_URL%/}/api/openapi.json" -f openapi \
+	  -z "-config replacer.full_list(0).description=auth -config replacer.full_list(0).enabled=true \
+	  -config replacer.full_list(0).matchtype=REQ_HEADER -config replacer.full_list(0).matchstr=Authorization \
+	  -config replacer.full_list(0).regex=false -config 'replacer.full_list(0).replacement=Bearer $$TEST_TOKEN'"
+
+bruno: ## Bruno API collection (bruno/ folder, environment local)
+	@test -d bruno || { echo "bruno/ folder not found: the Bruno collection is created in F0.7 (D-070)" >&2; exit 2; }
+	cd bruno && npx --yes @usebruno/cli@$(BRUNO_CLI_VERSION) run --env local
 
 # TASK and REVIEWER reach the recipe as environment variables, so quotes in the task title stay intact.
 export TASK REVIEWER
