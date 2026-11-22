@@ -79,8 +79,12 @@ class JsonFormatter(logging.Formatter):
         return json.dumps(entry, ensure_ascii=False)
 
 
+# Loggers that install their own handlers and do not propagate to the root (Uvicorn).
+_OWN_HANDLER_LOGGERS = ("uvicorn", "uvicorn.error", "uvicorn.access")
+
+
 def configure_logging(secrets: Iterable[str] = (), level: int = logging.INFO, stream: TextIO | None = None) -> None:
-    """Install a single JSON handler on the root logger with the masking filter."""
+    """Install a single JSON handler with the masking filter on the root logger and on Uvicorn's loggers."""
     handler = logging.StreamHandler(stream or sys.stdout)
     handler.setFormatter(JsonFormatter())
     handler.addFilter(SecretMaskingFilter(secrets))
@@ -89,3 +93,7 @@ def configure_logging(secrets: Iterable[str] = (), level: int = logging.INFO, st
         root.removeHandler(existing)
     root.addHandler(handler)
     root.setLevel(level)
+    for name in _OWN_HANDLER_LOGGERS:
+        own = logging.getLogger(name)
+        own.handlers = []
+        own.propagate = True

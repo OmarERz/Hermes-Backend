@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+from pathlib import Path
+
 import pytest
 from pydantic import ValidationError
 
@@ -98,3 +100,39 @@ def test_missing_reports_unconfigured_connections(monkeypatch: pytest.MonkeyPatc
     assert "ITOP_TOKEN" not in missing
     assert "DEEPSEEK_API_KEY" in missing
     assert "LLM_BASE_URL_ANALYSTS" not in missing  # defaults to the judge URL
+
+
+def test_example_env_file_loads(monkeypatch: pytest.MonkeyPatch) -> None:
+    """The shipped example file starts as-is: blank values fall back to defaults or 'not configured'."""
+    example = Path(__file__).resolve().parents[2] / ".env.example"
+    settings = Settings(_env_file=example)  # type: ignore[call-arg]
+    assert str(settings.llm_base_url_judge) == DEFAULT_LLM_BASE_URL
+    assert settings.itop_token is None
+
+
+def test_blank_judge_url_uses_default(monkeypatch: pytest.MonkeyPatch) -> None:
+    assert str(load(monkeypatch, {"LLM_BASE_URL_JUDGE": ""}).llm_base_url_judge) == DEFAULT_LLM_BASE_URL
+
+
+def test_pgpassword_is_a_masked_secret(monkeypatch: pytest.MonkeyPatch) -> None:
+    settings = load(monkeypatch, {"PGPASSWORD": "pw/with@reserved:chars"})
+    assert "pw/with@reserved:chars" in settings.secret_values()
+    assert "pw/with@reserved:chars" not in repr(settings)
+
+
+def test_validation_error_hides_input(monkeypatch: pytest.MonkeyPatch) -> None:
+    """SEG-21: a rejected value with credentials must not appear in the error text."""
+    with pytest.raises(ValidationError) as error:
+        load(monkeypatch, {"ITOP_URL": "not a url with s3cret-in-it"})
+    assert "s3cret-in-it" not in str(error.value)
+
+
+def test_blank_env_var_does_not_shadow_secret_file(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
+    """D-042: compose exports blank variables; the Docker secret file must still win."""
+    (tmp_path / "itop_token").write_text("from-secret-file")
+    for name, value in REQUIRED.items():
+        monkeypatch.setenv(name, value)
+    monkeypatch.setenv("ITOP_TOKEN", "")
+    settings = Settings(_env_file=None, _secrets_dir=tmp_path)  # type: ignore[call-arg]
+    assert settings.itop_token is not None
+    assert settings.itop_token.get_secret_value() == "from-secret-file"
