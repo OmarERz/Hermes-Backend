@@ -8,6 +8,7 @@ from collections.abc import Iterator
 from pathlib import Path
 
 import pytest
+from testcontainers.core.config import testcontainers_config
 from testcontainers.core.container import DockerContainer
 from testcontainers.core.image import DockerImage
 from testcontainers.core.wait_strategies import LogMessageWaitStrategy
@@ -49,3 +50,8 @@ def test_token_carries_role_and_project(
         claims = payload(capsys.readouterr().out.strip())
         assert claims["role"] == role
         assert claims["aud"] == "demo-hermes"
+
+
+def test_ryuk_is_disabled() -> None:
+    assert testcontainers_config.ryuk_disabled is True
+    assert "@sha256:" in testcontainers_config.ryuk_image
