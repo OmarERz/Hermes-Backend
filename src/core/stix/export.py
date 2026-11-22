@@ -28,10 +28,14 @@ from core.stix.ids import stix_id
 CVE_ID: Final = re.compile(r"^CVE-\d{4}-\d{4,}$")
 LIVE: Final = ("new", "persistent", "reopened", "no_data")
 IOC_SOURCES: Final = ("threatfox", "urlhaus")
-LEVEL: Final = {"public": 0, "unclassified": 0, "classified": 1, "highly_classified": 2}
+# Order of sensitivity. An unclassified CI is "not classified yet", not "public": it fails closed to AMBER, like any
+# value we do not know (P-021 does not cover it; the choice is reported in the PR).
+ORDER: Final = ("public", "unclassified", "classified", "highly_classified")
+TLP_OF_RANK: Final = {0: 0, 1: 1, 2: 1, 3: 2}
+UNKNOWN_RANK: Final = 1
 MARKINGS: Final = {0: ("TLP:CLEAR", stix2.TLP_WHITE), 1: ("TLP:AMBER", stix2.TLP_AMBER), 2: ("TLP:RED", stix2.TLP_RED)}
-LEVEL_NAME: Final = {0: "public", 1: "classified", 2: "highly_classified"}
 AMBER: Final = 1
+HIGHLY_CLASSIFIED: Final = ORDER.index("highly_classified")
 
 
 class StixExportError(Exception):
@@ -116,7 +120,7 @@ def _group_ids(session: Session, scope: ExportScope) -> list[uuid.UUID]:
 @dataclass
 class _Assets:
     count: int = 0
-    level: int = 0
+    rank: int = 0  # position in ORDER of the most sensitive CI
     personal: bool = False
     asset_ids: list[uuid.UUID] = field(default_factory=list)
     products: dict[tuple[str, str | None], tuple[str | None, str | None]] = field(default_factory=dict)
@@ -139,14 +143,14 @@ def _assets(session: Session, group_id: uuid.UUID, options: ExportOptions) -> _A
     result = _Assets()
     seen: set[uuid.UUID] = set()
     for asset_id, confidentiality, personal, product, version, vendor, nvd_product in rows:
-        level = LEVEL.get(confidentiality, 0)
-        if options.exclude_ultra_classified and level == LEVEL["highly_classified"]:
+        rank = ORDER.index(confidentiality) if confidentiality in ORDER else UNKNOWN_RANK
+        if options.exclude_ultra_classified and rank == HIGHLY_CLASSIFIED:
             result.excluded += 1
             continue
         if asset_id not in seen:
             seen.add(asset_id)
             result.asset_ids.append(asset_id)
-            result.level = max(result.level, level)
+            result.rank = max(result.rank, rank)
             result.personal = result.personal or bool(personal)
         result.products[(product, version)] = (vendor, nvd_product)
     result.count = len(seen)
@@ -277,8 +281,47 @@ def _gather(session: Session, group_id: uuid.UUID, options: ExportOptions) -> _G
     )
 
 
+def _merge(groups: list[_GroupData]) -> _GroupData:
+    """One CVE can live in several groups (one per product): the vulnerability object sums them up."""
+    first = groups[0]
+    if len(groups) == 1:
+        return first
+    assets = _Assets()
+    for g in groups:
+        assets.excluded += g.assets.excluded
+        assets.rank = max(assets.rank, g.assets.rank)
+        assets.personal = assets.personal or g.assets.personal
+        assets.asset_ids += g.assets.asset_ids
+        assets.products.update(g.assets.products)
+    assets.asset_ids = sorted(set(assets.asset_ids))
+    assets.count = len(assets.asset_ids)
+    scored = [g.scores for g in groups if g.scores]
+    top = max(scored, key=lambda sc: (sc["final"], sc["base"]), default={})
+    scores = (
+        {
+            "base": max(sc["base"] for sc in scored),
+            "final": max(sc["final"] for sc in scored),
+            "adjustment": top["adjustment"],
+            "reasons": tuple(sorted({r for sc in scored for r in sc["reasons"]})),
+        }
+        if scored
+        else {}
+    )
+    return _GroupData(
+        cve_id=first.cve_id,
+        created=min(g.created for g in groups),
+        modified=max(g.modified for g in groups),
+        description=first.description,
+        assets=assets,
+        scores=scores,
+        tickets=tuple(sorted({t for g in groups for t in g.tickets})),
+        indicators=first.indicators,
+        news=first.news,
+    )
+
+
 def _tlp_level(groups: list[_GroupData]) -> int:
-    level = max((g.assets.level for g in groups), default=0)
+    level = max((TLP_OF_RANK[g.assets.rank] for g in groups), default=0)
     if any(g.assets.personal for g in groups):
         level = max(level, AMBER)
     return level
@@ -300,7 +343,7 @@ def _build_group(group: _GroupData, out: dict[str, Any], marking: str) -> None:
                 final_score=group.scores.get("final"),
                 reasons=group.scores.get("reasons", ()),
                 ticket_status=group.tickets,
-                classification=LEVEL_NAME[group.assets.level] if group.assets.count else None,
+                classification=ORDER[group.assets.rank] if group.assets.count else None,
                 affected_assets=group.assets.count,
             ),
             marking,
@@ -354,8 +397,12 @@ def export_bundle(session: Session, scope: ExportScope, options: ExportOptions |
     """The STIX bundle of the scope. Raises `StixExportError` for bad scope data or a bundle that fails validation."""
     options = options or ExportOptions()
     group_ids = _group_ids(session, scope)
-    gathered = [g for gid in group_ids if (g := _gather(session, gid, options)) is not None]
-    skipped = len(group_ids) - len(gathered)
+    found = [g for gid in group_ids if (g := _gather(session, gid, options)) is not None]
+    skipped = len(group_ids) - len(found)
+    by_cve: dict[str, list[_GroupData]] = {}
+    for item in found:
+        by_cve.setdefault(item.cve_id, []).append(item)
+    gathered = [_merge(by_cve[cve]) for cve in sorted(by_cve)]
     level = _tlp_level(gathered)
     label, marking = MARKINGS[level]
     objects: dict[str, Any] = {}

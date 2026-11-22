@@ -307,3 +307,58 @@ def test_when_the_clock_moves_the_bundle_does_not(world: Engine) -> None:
     before = export(world, BY_CVE).bundle
     assert datetime.now(UTC) > NOW  # the export never reads the clock
     assert json.dumps(before, sort_keys=True) == json.dumps(export(world, BY_CVE).bundle, sort_keys=True)
+
+
+def test_unclassified_assets_fail_closed_to_amber(world: Engine) -> None:
+    run(world, "UPDATE asset SET confidentiality = 'unclassified', personal_data = false")
+    result = export(world, BY_CVE)
+    assert result.tlp == "TLP:AMBER"
+    assert by_type(result.bundle, "vulnerability")[0]["x_classification"] == "unclassified"
+
+
+def test_one_cve_in_two_products_is_one_vulnerability_with_the_totals(world: Engine) -> None:
+    group = rows(world, "SELECT id FROM finding_group")[0][0]
+    run(
+        world,
+        "INSERT INTO asset (itop_ci_id, itop_class, name, criticality, confidentiality, synced_at) "
+        "VALUES ('CI-9', 'Server', 'srv-extra', 'low', 'public', now())",
+    )
+    run(
+        world,
+        "INSERT INTO software_product (itop_name, first_seen_at) VALUES ('nginx', now())",
+    )
+    run(
+        world,
+        "INSERT INTO installed_software (itop_instance_id, asset_id, software_product_id, version, synced_at) "
+        "SELECT 'SI-9', a.id, p.id, '1.0', now() FROM asset a, software_product p WHERE a.itop_ci_id = 'CI-9' "
+        "AND p.itop_name = 'nginx'",
+    )
+    run(
+        world,
+        "INSERT INTO finding_group (cve_id, software_product_id, created_at) "
+        "SELECT :c, id, now() FROM software_product WHERE itop_name = 'nginx'",
+        {"c": CVE},
+    )
+    run(
+        world,
+        "INSERT INTO finding (finding_group_id, installed_software_id, match_source, created_at) "
+        "SELECT g.id, i.id, 'nvd_cpe', now() FROM finding_group g, installed_software i "
+        "WHERE i.itop_instance_id = 'SI-9' AND g.id <> :g",
+        {"g": group},
+    )
+    run(
+        world,
+        "INSERT INTO finding_status_change (finding_id, run_id, status, observed_version, changed_at) "
+        "SELECT f.id, (SELECT id FROM run LIMIT 1), 'new', '1.0', now() FROM finding f "
+        "JOIN installed_software i ON i.id = f.installed_software_id WHERE i.itop_instance_id = 'SI-9'",
+    )
+    bundle = export(world, BY_CVE).bundle
+    vulnerabilities = by_type(bundle, "vulnerability")
+    assert len(vulnerabilities) == 1
+    assert (
+        vulnerabilities[0]["x_affected_assets"] == 3 and vulnerabilities[0]["x_classification"] == "highly_classified"
+    )
+    assert vulnerabilities[0]["x_final_score"] == 86  # the highest of the groups that were assessed
+    assert {s["name"] for s in by_type(bundle, "software")} == {"OpenSSL", "nginx"}
+    again = export(world, BY_CVE).bundle
+    assert json.dumps(bundle, sort_keys=True) == json.dumps(again, sort_keys=True)
