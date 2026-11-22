@@ -8,12 +8,14 @@ requires-python = ">=3.12,<3.13"
 dependencies = [
     "alembic>=1.20.1",
     "fastapi>=0.165.0",
+    "feedparser>=6.0.14",
     "httpx>=0.28.1",
     "pgvector>=0.5.1",
     "psycopg[binary]>=3.3.9",
     "pydantic>=2.14.4",
     "pydantic-settings>=2.16.3",
     "sqlalchemy>=2.1.9",
+    "trafilatura>=2.3.1",
     "uvicorn>=0.54.0",
 ]
 
@@ -74,6 +76,11 @@ mypy_path = "src"
 packages = ["api", "core", "notifications_api", "notifications_slack", "workers"]
 warn_unreachable = true
 plugins = ["pydantic.mypy"]
+
+[[tool.mypy.overrides]]
+# feedparser ships neither stubs nor a py.typed marker.
+module = ["feedparser"]
+ignore_missing_imports = true
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
