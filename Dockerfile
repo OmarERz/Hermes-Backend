@@ -20,7 +20,7 @@ COPY --from=build --chown=root:root /app/.venv /app/.venv
 # Alembic configuration and migrations (the migrate service runs them as the migrator role)
 COPY --chown=root:root alembic.ini ./
 COPY --chown=root:root migrations ./migrations
-# JSON contracts: the LLM client loads its tool definitions from here (SCHEMAS_DIR); an installed package has no schemas/
+# JSON contracts in schemas/: read from SCHEMAS_DIR by the LLM client (tool definitions) and core.validation
 COPY --chown=root:root schemas ./schemas
 ENV PATH="/app/.venv/bin:$PATH" PYTHONDONTWRITEBYTECODE=1 PYTHONUNBUFFERED=1 SCHEMAS_DIR=/app/schemas
 USER hermes

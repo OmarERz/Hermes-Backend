@@ -193,6 +193,16 @@ def test_the_lock_is_held_while_itop_is_read(engine: Engine) -> None:
     assert held and all(held)
 
 
+def test_an_instance_whose_version_goes_blank_is_not_treated_as_uninstalled(engine: Engine) -> None:
+    double = build_double()
+    run_sync(engine, double)
+    double.data["Software"]["200"]["version"] = ""
+    result = run_sync(engine, double, T0 + timedelta(hours=6))
+    assert result.instances.removed == 0
+    state = table_state(engine)
+    assert [row[5] for row in state["installed"] if row[0] == "300"] == [None]
+
+
 def test_disappearing_cis_are_soft_deleted_and_can_return(engine: Engine) -> None:
     double = build_double()
     run_sync(engine, double)
