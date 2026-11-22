@@ -1,0 +1,73 @@
+# Local stack: docker compose up --build
+# Requires POSTGRES_PASSWORD (see the example env file). Ports bind to 127.0.0.1 only.
+name: hermes
+
+x-backend: &backend
+  build: .
+  environment:
+    # The password travels in PGPASSWORD (read by libpq/psycopg), so it never needs URL encoding.
+    DATABASE_URL: postgresql://hermes@db:5432/hermes
+    PGPASSWORD: ${POSTGRES_PASSWORD:?set POSTGRES_PASSWORD}
+    FIREBASE_PROJECT_ID: ${FIREBASE_PROJECT_ID:-demo-hermes}
+    FIREBASE_AUTH_EMULATOR_HOST: auth-emulator:9099
+    FIREBASE_CREDENTIALS_FILE: ${FIREBASE_CREDENTIALS_FILE:-}
+    API_DOCS_ENABLED: ${API_DOCS_ENABLED:-false}
+    # Backend connections of docs/11 §2 (blank means not configured)
+    ITOP_URL: ${ITOP_URL:-}
+    ITOP_TOKEN: ${ITOP_TOKEN:-}
+    ITOP_SYSTEM_USER: ${ITOP_SYSTEM_USER:-}
+    NVD_API_KEY: ${NVD_API_KEY:-}
+    DEEPSEEK_API_KEY: ${DEEPSEEK_API_KEY:-}
+    LLM_BASE_URL_JUDGE: ${LLM_BASE_URL_JUDGE:-}
+    LLM_BASE_URL_ANALYSTS: ${LLM_BASE_URL_ANALYSTS:-}
+    ABUSECH_AUTH_KEY: ${ABUSECH_AUTH_KEY:-}
+    RANSOMWARELIVE_API_KEY: ${RANSOMWARELIVE_API_KEY:-}
+  depends_on:
+    db:
+      condition: service_healthy
+    auth-emulator:
+      condition: service_healthy
+  read_only: true
+  tmpfs:
+    - /tmp
+  cap_drop: [ALL]
+  security_opt: ["no-new-privileges:true"]
+  restart: unless-stopped
+
+services:
+  db:
+    image: pgvector/pgvector:pg18@sha256:38681dc6eaf55308e2a4c6de392d131652dcfac70e1263e35cd9b5ea3fe39782
+    environment:
+      POSTGRES_DB: hermes
+      POSTGRES_USER: hermes
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?set POSTGRES_PASSWORD}
+    volumes:
+      - db_data:/var/lib/postgresql
+    ports:
+      - "127.0.0.1:${DB_PORT:-5432}:5432"
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U hermes -d hermes"]
+      interval: 5s
+      timeout: 3s
+      retries: 20
+    restart: unless-stopped
+
+  auth-emulator:
+    build: docker/auth-emulator
+    ports:
+      - "127.0.0.1:${AUTH_EMULATOR_PORT:-9099}:9099"
+    restart: unless-stopped
+
+  api:
+    <<: *backend
+    ports:
+      - "127.0.0.1:${API_PORT:-8000}:8000"
+
+  workers:
+    <<: *backend
+    command: ["python", "-m", "workers"]
+    healthcheck:
+      disable: true
+
+volumes:
+  db_data:

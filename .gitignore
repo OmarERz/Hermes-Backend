@@ -229,3 +229,6 @@ secrets/
 .ruff_cache/
 .mypy_cache/
 coverage.json
+
+# graphify (local code graph)
+graphify-out/
