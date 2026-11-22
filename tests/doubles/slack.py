@@ -5,7 +5,8 @@ raises to ask for a retry and is idempotent by `event_id` (delivery is at least 
 
 TODO(F0.5): when `notifications_api` defines NotificationEvent and NotificationConsumer, type `process` with
 NotificationEvent and assert in a test that this class satisfies the Protocol. Until then events are duck typed:
-a mapping or an object with `event_id`, `event_type` and `priority` attributes.
+a mapping or an object with `event_id`, `type` and `priority` attributes
+(the field names of notification_event.schema.json).
 """
 
 from __future__ import annotations
@@ -55,7 +56,7 @@ class SimulatedSlack:
         if any(message.event_id == str(event_id) for message in self.sent):
             self.duplicates += 1  # idempotent by event_id: a redelivery sends nothing new
             return
-        self.sent.append(SentMessage(str(event_id), _read(event, "event_type"), _read(event, "priority"), event))
+        self.sent.append(SentMessage(str(event_id), _read(event, "type"), _read(event, "priority"), event))
 
     def of_type(self, event_type: str) -> list[SentMessage]:
         return [m for m in self.sent if m.event_type == event_type]
