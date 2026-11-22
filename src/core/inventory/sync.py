@@ -184,6 +184,7 @@ def _sync_instances(run: _Run, asset_ids: dict[str, uuid.UUID]) -> None:
             session.flush()
         version = normalize_version(software.version or "")
         if version is None:
+            seen.add(item.itop_id)  # still in iTop: an unknown version is no evidence that it was uninstalled
             run.result.warnings.append(f"Software instance {item.itop_id}: no version, skipped (ESC-12)")
             continue
         row = rows.get(item.itop_id)

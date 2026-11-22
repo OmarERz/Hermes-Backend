@@ -28,7 +28,10 @@ from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session, sessionmaker
 
 from core.db import models as m
+from core.inventory.sync import sync_from_itop
+from core.itop.client import ItopReader
 from core.scan.versions import in_range
+from core.vulndata.http import JsonSource
 from core.vulndata.osv import OsvClient
 from core.vulndata.records import CNA_AFFECTED, NVD_CPE
 
@@ -36,6 +39,7 @@ RECENCY_DAYS: Final = 90  # TODO(P-003): recency window of the scan (ESC-10), co
 STALE_AFTER: Final = timedelta(hours=2)
 ACTIVE: Final = frozenset({"new", "persistent", "reopened"})
 ONE_SCAN_INDEX: Final = "run_one_running_scan"
+SCAN_LOCK_KEY: Final = 7_001_002  # session-level advisory lock held by the live scan
 SOURCES: Final = ((NVD_CPE, "nvd_vendor", "nvd_product"), (CNA_AFFECTED, "cna_vendor", "cna_product"))
 
 
@@ -61,7 +65,7 @@ class ScanResult:
 class _Found:
     matches: dict[uuid.UUID, dict[str, str]]  # installed software id -> {cve id: match source}
     evaluable: set[uuid.UUID]  # installs whose product is mapped: only these can be judged fixed
-    uncertain: set[uuid.UUID]  # installs with a version that could not be compared against some range
+    uncertain: set[tuple[uuid.UUID, str]]  # (install, CVE) whose range could not be compared with the version
 
 
 @dataclass
@@ -115,15 +119,24 @@ def _update_run(factory: sessionmaker[Session], run_id: uuid.UUID, **values: Any
 
 
 def fail_stale_scans(session: Session, *, now: datetime | None = None, older_than: timedelta = STALE_AFTER) -> int:
-    """Close scans left `running` by a process that died, so they stop blocking new ones."""
+    """Close scans left `running` by a process that died, so they stop blocking new ones.
+
+    A live scan holds the session-level advisory lock for its whole run, so a row is only closed when the lock
+    is free (nobody is running it) and the row is older than `older_than`.
+    """
     now = now or datetime.now(UTC)
-    closed = session.scalars(
-        update(m.Run)
-        .where(m.Run.kind == "scan", m.Run.status == "running", m.Run.started_at < now - older_than)
-        .values(status="failed", finished_at=now)
-        .returning(m.Run.id)
-    )
-    return len(closed.all())
+    if not session.scalar(select(func.pg_try_advisory_lock(SCAN_LOCK_KEY))):
+        return 0  # a scan is alive
+    try:
+        closed = session.scalars(
+            update(m.Run)
+            .where(m.Run.kind == "scan", m.Run.status == "running", m.Run.started_at < now - older_than)
+            .values(status="failed", finished_at=now)
+            .returning(m.Run.id)
+        )
+        return len(closed.all())
+    finally:
+        session.execute(select(func.pg_advisory_unlock(SCAN_LOCK_KEY)))
 
 
 @dataclass(frozen=True)
@@ -131,24 +144,49 @@ class ScanOptions:
     reason: str = "manual"  # schedule | manual | after_scan | formula_change
     triggered_by: uuid.UUID | None = None
     asset_ids: Collection[uuid.UUID] | None = None  # None = every live CI; the others end up no_data
-    osv: OsvClient | None = None
+    osv: OsvClient | None = None  # default: the real OSV API, asked only for packages with distribution data
     recency_days: int = RECENCY_DAYS
+    reader: ItopReader | None = None  # refresh the inventory from iTop first (ARQ-03)
 
 
 def run_scan(
     factory: sessionmaker[Session], options: ScanOptions | None = None, *, now: datetime | None = None
 ) -> ScanResult:
-    """Run one scan, with its run row, progress and final status."""
+    """Run one scan, with its run row, progress and final status.
+
+    The scan holds a session-level advisory lock on its own connection from start to finish (ARQ-04), so a crash
+    frees it at once; the partial unique index on `run` is the second guard. Findings and the `succeeded` status
+    are committed in one transaction: a scan that did not finish leaves no findings behind.
+    """
     options = options or ScanOptions()
     started = now or datetime.now(UTC)
+    bind = factory.kw["bind"]
+    with bind.connect() as guard:
+        if not guard.execute(select(func.pg_try_advisory_lock(SCAN_LOCK_KEY))).scalar():
+            raise ScanAlreadyRunningError("a scan is already running")
+        try:
+            return _run_locked(factory, options, started)
+        finally:
+            guard.execute(select(func.pg_advisory_unlock(SCAN_LOCK_KEY)))
+
+
+def _run_locked(factory: sessionmaker[Session], options: ScanOptions, started: datetime) -> ScanResult:
     run_id = _create_run(factory, options.reason, options.triggered_by, started)
     result = ScanResult(run_id)
     try:
+        if options.reader is not None:
+            with factory() as session, session.begin():
+                sync_from_itop(session, options.reader, now=started)
+        _update_run(factory, run_id, progress=30)
         with factory() as session, session.begin():
             state = _State(session, run_id, started, result, options.osv, options.recency_days)
             scope = set(options.asset_ids) if options.asset_ids is not None else None
             _evaluate(state, scope)
-        _update_run(factory, run_id, status="succeeded", progress=100, finished_at=datetime.now(UTC))
+            session.execute(
+                update(m.Run)
+                .where(m.Run.id == run_id)
+                .values(status="succeeded", progress=100, finished_at=datetime.now(UTC))
+            )
     except BaseException:
         _update_run(factory, run_id, status="failed", finished_at=datetime.now(UTC))
         raise
@@ -215,15 +253,17 @@ def _candidates(state: _State, scanned: list[m.InstalledSoftware], existing_keys
             if not vendor or not product:
                 continue
             for rng, published in index.get((source, vendor.lower(), product.lower()), []):
+                recent = published is not None and published >= cutoff
+                if not (recent or rng.cve_id in kev or (inst.id, rng.cve_id) in existing_keys):
+                    continue  # outside the recency window and not already tracked
                 inside = in_range(
                     inst.version, rng.version_start, rng.start_inclusive, rng.version_end, rng.end_inclusive
                 )
                 if inside is None:
                     state.result.compare_errors += 1
-                    found.uncertain.add(inst.id)
+                    found.uncertain.add((inst.id, rng.cve_id))
                     continue
-                recent = published is not None and published >= cutoff
-                if not inside or not (recent or rng.cve_id in kev or (inst.id, rng.cve_id) in existing_keys):
+                if not inside:
                     continue
                 matches[rng.cve_id] = _prefer(matches.get(rng.cve_id), source, rng.cve_id in kev)
         kept = {cve: src for cve, src in matches.items() if not _backported(state, inst, cve)}
@@ -242,8 +282,10 @@ def _prefer(current: str | None, source: str, in_kev: bool) -> str:
 
 def _backported(state: _State, inst: m.InstalledSoftware, cve_id: str) -> bool:
     """Ask OSV whether the distribution already fixed this CVE in the installed package version (ESC-11)."""
-    if state.osv is None or not (inst.package_name and inst.package_ecosystem and inst.package_version):
+    if not (inst.package_name and inst.package_ecosystem and inst.package_version):
         return False
+    if state.osv is None:
+        state.osv = OsvClient(JsonSource())  # the real OSV API; tests always inject a double
     key = (cve_id, inst.package_name, inst.package_ecosystem, inst.package_version)
     if key not in state.osv_cache:
         state.osv_cache[key] = state.osv.backport_evidence(*key)
@@ -317,7 +359,7 @@ def _apply_lifecycle(
         was_scanned = in_scope and (inst.id in found.evaluable or inst.removed_at is not None)
         present = group.cve_id in found.matches.get(inst.id, {})
         statuses = history[finding_id]
-        if was_scanned and not present and inst.id in found.uncertain:
+        if was_scanned and not present and (inst.id, group.cve_id) in found.uncertain:
             continue  # a version we could not compare is not evidence that the CVE is gone (ESC-13)
         last_active = next((s for s in reversed(statuses) if s != "no_data"), None)
         new_status = next_status(statuses[-1], last_active, scanned=was_scanned, present=present)

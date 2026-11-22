@@ -27,7 +27,7 @@ class Version(NamedTuple):
 
 
 def parse_version(raw: str) -> Version | None:
-    text = raw.strip().lower().removeprefix("v")
+    text = raw.strip().lower().removeprefix("v").split("+", 1)[0]  # build metadata has no precedence (SemVer)
     if not text or len(text) > MAX_LENGTH or not text[0].isdigit():
         return None
     tokens = [t for part in SEPARATORS.split(text) for t in TOKEN.findall(part)]
@@ -72,7 +72,12 @@ def in_range(
     end: str | None,
     end_inclusive: bool | None,
 ) -> bool | None:
-    """Is `version` inside the range? A range without bounds covers every version. None = cannot tell."""
+    """Is `version` inside the range? A range without bounds covers every version. None = cannot tell.
+
+    A version that cannot be read is None even for a range without bounds: it is never confirmed blind (ESC-12).
+    """
+    if parse_version(version) is None:
+        return None
     if start is not None:
         order = compare_versions(version, start)
         if order is None:
