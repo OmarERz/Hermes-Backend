@@ -4,7 +4,7 @@
 SHELL := /bin/bash
 .SHELLFLAGS := -eu -o pipefail -c
 
-.PHONY: up compose-secrets help verify lint typecheck boundaries test coverage semgrep secrets audit verify-full schemathesis adversarial dynamic zap bruno ci-lint emulator-token itop-up itop-install itop-seed itop-token itop-down review
+.PHONY: up compose-secrets help verify lint typecheck boundaries test coverage semgrep secrets audit verify-full schemathesis adversarial dynamic zap bruno ci-lint seed events emulator-token itop-up itop-install itop-seed itop-token itop-down review
 
 help: ## List the available targets
 	@grep -E '^[a-z-]+:.*## ' $(MAKEFILE_LIST) | awk 'BEGIN {FS = ":.*## "}; {printf "  %-12s %s\n", $$1, $$2}'
@@ -115,6 +115,15 @@ emulator-token: ## Print an emulator ID token: make emulator-token ROLE=admin|an
 	@test -n "$${ROLE:-}" || { echo "Usage: make emulator-token ROLE=admin|analyst|reader" >&2; exit 2; }
 	@FIREBASE_AUTH_EMULATOR_HOST="$${FIREBASE_AUTH_EMULATOR_HOST:-127.0.0.1:9099}" \
 	  uv run --locked python -m core.devtools.emulator token --role "$$ROLE"
+
+# Admin CLI (core.devtools.admin): seed as migrator (MIGRATION_DATABASE_URL), events as app (DATABASE_URL).
+seed: ## Load a seed scenario: make seed SCENARIO=empty|demo|edge
+	@test -n "$${SCENARIO:-}" || { echo "Usage: make seed SCENARIO=empty|demo|edge" >&2; exit 2; }
+	uv run --locked python -m core.devtools.admin seed --scenario "$$SCENARIO"
+
+events: ## List the latest notification events as JSON lines (optional LIMIT, STATUS, TYPE)
+	@uv run --locked python -m core.devtools.admin events --limit "$${LIMIT:-20}" \
+	  $${STATUS:+--status "$$STATUS"} $${TYPE:+--type "$$TYPE"}
 
 # iTop 3.2.2 test instance (compose.itop.yaml, docs/itop-test-instance.md). Needs ITOP_DB_ROOT_PASSWORD,
 # ITOP_DB_PASSWORD and ITOP_ADMIN_PASSWORD in the environment; every compose call below reads them.
