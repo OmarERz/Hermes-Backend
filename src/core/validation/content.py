@@ -17,8 +17,7 @@ CVE_FORMAT = re.compile(r"^CVE-\d{4}-\d{4,7}$")
 CPE_PAIR = re.compile(r"^[a-z0-9._\-~%]+:[a-z0-9._\-~%]+$")
 CVSS_31 = re.compile(r"^CVSS:3\.1/AV:[NALP]/AC:[LH]/PR:[NLH]/UI:[NR]/S:[UC]/C:[NLH]/I:[NLH]/A:[NLH]$")
 CVSS_40 = re.compile(
-    r"^CVSS:4\.0/AV:[NALP]/AC:[LH]/AT:[NP]/PR:[NLH]/UI:[NPA]/VC:[HLN]/VI:[HLN]/VA:[HLN]/SC:[HLN]/SI:[HLN]/SA:[HLN]"
-    r"(?:/[A-Z]{1,3}:[A-Z]{1,2})*$"
+    r"^CVSS:4\.0/AV:[NALP]/AC:[LH]/AT:[NP]/PR:[NLH]/UI:[NPA]/VC:[HLN]/VI:[HLN]/VA:[HLN]/SC:[HLN]/SI:[HLN]/SA:[HLN]$"
 )
 _SPACES = re.compile(r"\s+")
 
@@ -38,14 +37,14 @@ def quote_in_text(quote: str, text: str) -> bool:
 
 def check_quote(quote: object, text: str, path: str) -> list[Violation]:
     if not isinstance(quote, str) or not normalize_text(quote):
-        return [Violation("VAL-03.quote", path, "The claim has no quote")]
+        return [Violation("VAL-03.quote", path, "The claim has no quote", "missing")]
     if not quote_in_text(quote, text):
-        return [Violation("VAL-03.quote", path, "The quote does not appear verbatim in the text")]
+        return [Violation("VAL-03.quote", path, "The quote does not appear verbatim in the text", "not_verbatim")]
     return []
 
 
 def check_cve(value: object, path: str, cve_exists: CveExists) -> list[Violation]:
-    if not isinstance(value, str) or not CVE_FORMAT.match(value):
+    if not isinstance(value, str) or not CVE_FORMAT.fullmatch(value):
         return [Violation("VAL-03.cve_format", path, "Not a valid CVE identifier")]
     if not cve_exists(value):
         return [Violation("VAL-03.cve_exists", path, "The CVE does not exist in NVD or CVE.org")]
@@ -53,10 +52,11 @@ def check_cve(value: object, path: str, cve_exists: CveExists) -> list[Violation
 
 
 def check_cvss_vector(vector: object, path: str) -> list[Violation]:
-    """An empty vector means "not inferred". Otherwise it must be CVSS 3.1 or 4.0 base syntax."""
+    """An empty vector means "not inferred". Otherwise it must be a CVSS 3.1 or 4.0 base vector (the score is
+    computable from base metrics alone; optional metrics are not accepted)."""
     if vector == "":
         return []
-    if isinstance(vector, str) and (CVSS_31.match(vector) or CVSS_40.match(vector)):
+    if isinstance(vector, str) and (CVSS_31.fullmatch(vector) or CVSS_40.fullmatch(vector)):
         return []
     return [Violation("VAL-03.cvss_syntax", path, "Not a valid CVSS 3.1 or 4.0 vector")]
 
@@ -76,11 +76,14 @@ def check_news_analysis(
     if output.get("news_id") != expected_news_id:
         violations.append(Violation("VAL-03.news_id", "news_id", "The output is about another story"))
     for path, item in _each(output.get("cves"), "cves"):
-        violations += check_cve(item.get("cve"), f"{path}.cve", cve_exists)
+        found = check_cve(item.get("cve"), f"{path}.cve", cve_exists)
+        violations += found
+        if not found and str(item["cve"]).upper() not in article_text.upper():
+            violations.append(Violation("VAL-03.cve_in_text", f"{path}.cve", "The CVE does not appear in the article"))
         violations += check_quote(item.get("quote"), article_text, f"{path}.quote")
     for path, item in _each(output.get("products"), "products"):
         cpe = item.get("candidate_cpe")
-        if cpe and not (isinstance(cpe, str) and CPE_PAIR.match(cpe)):
+        if cpe and not (isinstance(cpe, str) and CPE_PAIR.fullmatch(cpe)):
             violations.append(Violation("VAL-03.cpe_format", f"{path}.candidate_cpe", "Expected vendor:product"))
         violations += check_quote(item.get("quote"), article_text, f"{path}.quote")
     for section in ("actors", "victims", "conditions"):

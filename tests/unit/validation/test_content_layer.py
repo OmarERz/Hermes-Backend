@@ -13,6 +13,7 @@ from core.validation.content import (
     normalize_text,
     quote_in_text,
 )
+from core.validation.violations import signature
 
 KNOWN = {"CVE-2026-1111", "CVE-2026-2222"}
 
@@ -95,7 +96,6 @@ def test_empty_candidate_cpe_is_allowed_and_odd_shapes_are_skipped() -> None:
         "",
         "CVSS:3.1/AV:N/AC:L/PR:N/UI:N/S:U/C:H/I:H/A:H",
         "CVSS:4.0/AV:N/AC:L/AT:N/PR:N/UI:N/VC:H/VI:H/VA:H/SC:N/SI:N/SA:N",
-        "CVSS:4.0/AV:N/AC:L/AT:N/PR:N/UI:N/VC:H/VI:H/VA:H/SC:N/SI:N/SA:N/E:P",
     ],
 )
 def test_valid_vectors(vector: str) -> None:
@@ -109,6 +109,8 @@ def test_valid_vectors(vector: str) -> None:
         "CVSS:3.1/AV:X/AC:L/PR:N/UI:N/S:U/C:H/I:H/A:H",
         "CVSS:3.1/AV:N/AC:L/PR:N/UI:N/S:U/C:H/I:H",
         "AV:N/AC:L",
+        "CVSS:4.0/AV:N/AC:L/AT:N/PR:N/UI:N/VC:H/VI:H/VA:H/SC:N/SI:N/SA:N/E:P",
+        "CVSS:3.1/AV:N/AC:L/PR:N/UI:N/S:U/C:H/I:H/A:H" + chr(10),
         None,
         9.8,
     ],
@@ -135,3 +137,28 @@ def test_cve_analysis_rules() -> None:
     assert ("VAL-03.cvss_syntax", "inferred_cvss_vector") not in rules(
         check_cve_analysis(unknown, "CVE-2026-0000", CVE_TEXT, exists)
     )
+
+
+def test_trailing_newlines_do_not_pass_the_format_rules() -> None:
+    output = news()
+    output["cves"][0]["cve"] = "CVE-2026-1111" + chr(10)
+    output["products"][0]["candidate_cpe"] = "acme:firewall" + chr(10)
+    assert rules(check_news_analysis(output, ARTICLE, "story-1", exists)) >= {
+        ("VAL-03.cve_format", "cves[0].cve"),
+        ("VAL-03.cpe_format", "products[0].candidate_cpe"),
+    }
+
+
+def test_missing_and_invented_quotes_are_different_failures() -> None:
+    missing = check_quote("", ARTICLE, "q")[0]
+    invented = check_quote("made up", ARTICLE, "q")[0]
+    assert signature([missing]) != signature([invented])
+
+
+def test_an_existing_cve_that_the_article_never_mentions_is_rejected() -> None:
+    known = KNOWN | {"CVE-2026-3333"}
+    output = news()
+    output["cves"][0]["cve"] = "CVE-2026-3333"  # a real CVE, with the quote of another one
+    assert rules(check_news_analysis(output, ARTICLE, "story-1", known.__contains__)) == {
+        ("VAL-03.cve_in_text", "cves[0].cve")
+    }
