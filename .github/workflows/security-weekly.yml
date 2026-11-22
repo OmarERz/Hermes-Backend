@@ -159,7 +159,8 @@ jobs:
           echo "API_DOCS_ENABLED=true" >> "$GITHUB_ENV"
       - name: Wait for the stack
         if: steps.gate.outputs.enabled == 'true'
-        run: docker compose up --build --wait -d
+        # compose.yaml mounts credentials as Docker secret files (D-042): write them from the masked env first.
+        run: make compose-secrets && docker compose up --build --wait -d
       - name: ZAP API scan
         if: steps.gate.outputs.enabled == 'true'
         run: |
