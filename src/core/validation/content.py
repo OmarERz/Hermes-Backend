@@ -68,6 +68,15 @@ def _each(items: object, path: str) -> Iterable[tuple[str, dict[str, Any]]]:
                 yield f"{path}[{index}]", item
 
 
+_DASHES = {ord(c): "-" for c in "\u2010\u2011\u2012\u2013\u2014\u2212"}
+
+
+def _mentions_cve(text: str, cve: str) -> bool:
+    """The identifier appears in the text as a whole (CVE-2026-1111 is not inside CVE-2026-11112)."""
+    plain = normalize_text(text).translate(_DASHES).upper()
+    return re.search(rf"(?<![0-9]){re.escape(cve.upper())}(?![0-9])", plain) is not None
+
+
 def check_news_analysis(
     output: dict[str, Any], article_text: str, expected_news_id: str, cve_exists: CveExists
 ) -> list[Violation]:
@@ -78,7 +87,7 @@ def check_news_analysis(
     for path, item in _each(output.get("cves"), "cves"):
         found = check_cve(item.get("cve"), f"{path}.cve", cve_exists)
         violations += found
-        if not found and str(item["cve"]).upper() not in article_text.upper():
+        if not found and not _mentions_cve(article_text, str(item["cve"])):
             violations.append(Violation("VAL-03.cve_in_text", f"{path}.cve", "The CVE does not appear in the article"))
         violations += check_quote(item.get("quote"), article_text, f"{path}.quote")
     for path, item in _each(output.get("products"), "products"):

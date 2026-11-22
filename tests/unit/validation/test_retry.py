@@ -169,3 +169,25 @@ def test_signature_and_feedback() -> None:
     assert signature(violations) == {("R1", "a", ""), ("R2", "b", "")}
     assert retry_feedback(violations) == "R1 at a: m1\nR2 at b: m2"
     assert str(Violation("R", "", "m")) == "R at <root>: m"
+
+
+def test_any_repeated_error_stops_the_retries_even_with_a_new_one_beside_it() -> None:
+    h = Harness([{}, {}, {}], [[*bad("A"), *bad("B")], bad("A")])
+    outcome = h.run()
+    assert (outcome.status, outcome.attempts) == ("rejected", 2)
+
+
+def test_retry_after_is_capped_and_non_finite_values_are_ignored() -> None:
+    policy = RetryPolicy(breaker_pause=60.0)
+    assert transport_delay(1, 3600.0, policy, lambda: 0.0) == 60.0
+    assert transport_delay(1, float("inf"), policy, lambda: 0.0) == 0.0
+    assert transport_delay(1, float("nan"), policy, lambda: 0.0) == 0.0
+
+
+def test_no_sleep_after_the_failure_that_opens_the_circuit() -> None:
+    h = Harness([TransportError("x")] * 3)
+    for _ in range(4):
+        h.breaker.record_failure()
+    outcome = h.run()
+    assert (outcome.status, outcome.attempts) == ("provider_down", 1)
+    assert h.sleeps == []

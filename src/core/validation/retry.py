@@ -12,9 +12,10 @@ network and no waiting.
 
 from __future__ import annotations
 
+import math
 from collections.abc import Callable
 from dataclasses import dataclass, field
-from typing import Any
+from typing import Any, Literal
 
 from core.validation.violations import Violation, retry_feedback, signature
 
@@ -67,12 +68,13 @@ class CircuitBreaker:
 def transport_delay(attempt: int, retry_after: float | None, policy: RetryPolicy, rng: Callable[[], float]) -> float:
     """Wait before transport attempt `attempt + 1`: full jitter over an exponential cap, never below Retry-After."""
     cap = min(policy.max_delay, policy.base_delay * 2 ** (attempt - 1))
-    return float(max(rng() * cap, retry_after or 0.0))
+    asked = retry_after if retry_after is not None and math.isfinite(retry_after) else 0.0
+    return float(max(rng() * cap, min(asked, policy.breaker_pause)))
 
 
 @dataclass(frozen=True)
 class Outcome:
-    status: str  # ok | rejected | transport_failed | provider_down
+    status: Literal["ok", "rejected", "transport_failed", "provider_down"]
     output: dict[str, Any] | None
     attempts: int  # calls made to the model
     violations: list[Violation] = field(default_factory=list)
@@ -107,6 +109,8 @@ class _Run:
                 output = self.call(feedback)
             except TransportError as exc:
                 self.breaker.record_failure()
+                if not self.breaker.allow():
+                    return Outcome("provider_down", None, self.attempts, reason="circuit open: provider unavailable")
                 if transport_attempt == self.policy.transport_attempts:
                     return Outcome("transport_failed", None, self.attempts, reason=f"transport: {exc}")
                 self.timing.sleep(transport_delay(transport_attempt, exc.retry_after, self.policy, self.timing.rng))
@@ -138,7 +142,7 @@ def run_validated(
             return Outcome("ok", result, run.attempts)
         failures += 1
         current = signature(violations)
-        if previous == current or failures > policy.format_retries:
+        if (previous is not None and previous & current) or failures > policy.format_retries:
             reason = "; ".join(sorted({v.rule for v in violations}))
             return Outcome("rejected", None, run.attempts, violations, reason)
         previous = current

@@ -162,3 +162,17 @@ def test_an_existing_cve_that_the_article_never_mentions_is_rejected() -> None:
     assert rules(check_news_analysis(output, ARTICLE, "story-1", known.__contains__)) == {
         ("VAL-03.cve_in_text", "cves[0].cve")
     }
+
+
+def test_cve_mention_needs_the_whole_identifier_and_accepts_unicode_dashes() -> None:
+    known = {"CVE-2026-1111"}
+    output = news()
+    output["cves"] = [output["cves"][0]]
+    output["actors"] = output["victims"] = []
+    longer = "Acme Firewall appliances are attacked through CVE-2026-11112 only."
+    assert rules(check_news_analysis(output, longer, "story-1", known.__contains__)) >= {
+        ("VAL-03.cve_in_text", "cves[0].cve")
+    }
+    dashed = "Acme Firewall appliances are attacked through CVE" + chr(0x2011) + "2026" + chr(0x2013) + "1111 today."
+    output["cves"][0]["quote"] = "Acme Firewall appliances"
+    assert check_news_analysis(output, dashed, "story-1", known.__contains__) == []
