@@ -61,7 +61,9 @@ secrets: ## Gitleaks (Docker, pinned): working tree + branch history (GITLEAKS_F
 	else revs="$$head"; fi; \
 	echo "gitleaks history scan: $$revs"; \
 	docker run --rm -v "$$(git rev-parse --path-format=absolute --git-common-dir):/repo/.git:ro" -w /repo \
-	  $(GITLEAKS_IMAGE) git /repo --redact --no-banner -v --log-opts="$$revs"
+	  -v "$(CURDIR)/.gitleaksignore:/ignore/.gitleaksignore:ro" \
+	  $(GITLEAKS_IMAGE) git /repo --redact --no-banner -v --log-opts="$$revs" \
+	  --gitleaks-ignore-path /ignore/.gitleaksignore
 
 audit: ## pip-audit on the locked dependencies
 	uv export --locked --no-hashes --no-emit-project --format requirements-txt | uvx pip-audit --no-deps --disable-pip -r /dev/stdin
