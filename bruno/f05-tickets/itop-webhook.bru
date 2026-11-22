@@ -1,0 +1,28 @@
+meta {
+  name: itop webhook doorbell
+  type: http
+  seq: 2
+}
+
+post {
+  url: {{baseUrl}}/api/itop/webhook
+  body: json
+  auth: bearer
+}
+
+auth:bearer {
+  token: {{itopWebhookToken}}
+}
+
+body:json {
+  {"class": "UserRequest", "id": "1", "ref": "R-000001"}
+}
+
+assert {
+  res.status: in 202,503
+}
+
+docs {
+  With the webhook token configured (set the secret variable itopWebhookToken) the API answers 202 and re-reads
+  ticket 1 from iTop in the background; 503 when ITOP_WEBHOOK_TOKEN or iTop is not configured.
+}

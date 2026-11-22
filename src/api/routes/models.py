@@ -2,18 +2,31 @@
 
 from __future__ import annotations
 
-from datetime import datetime
-from typing import Any, Literal
+from typing import Annotated, Any, Literal, Self
 
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, BeforeValidator, ConfigDict, Field, model_validator
+
+from notifications_api.models import DateTimeString
 
 Level = Literal["critical", "high", "medium", "low"]
 Classification = Literal["public", "classified", "highly_classified", "unclassified"]
 FindingStatus = Literal["new", "persistent", "reopened", "fixed", "no_data"]
 
 
+def _whole_number(value: Any) -> Any:
+    """JSON Schema `integer` also accepts 3.0; booleans, strings and fractions stay rejected by strict mode."""
+    if isinstance(value, float) and value.is_integer():
+        return int(value)
+    return value
+
+
+Version = Annotated[int, Field(ge=1), BeforeValidator(_whole_number)]
+Score = Annotated[int, Field(ge=0, le=100), BeforeValidator(_whole_number)]
+
+
 class _Model(BaseModel):
-    model_config = ConfigDict(extra="forbid")
+    # Strict: a body that violates the published schema (e.g. 0 for a boolean) is rejected, never coerced.
+    model_config = ConfigDict(extra="forbid", strict=True)
 
 
 # --- configuration (API-03, API-05) -------------------------------------------------------------------------
@@ -36,12 +49,12 @@ class ConfigDocument(_Model):
 
 
 class ConfigUpdate(_Model):
-    expected_version: int = Field(ge=1, description="Version the client read; 409 if it changed (API-03)")
+    expected_version: Version = Field(description="Version the client read; 409 if it changed (API-03)")
     changes: dict[str, str] = Field(min_length=1)
 
 
 class RestoreRequest(_Model):
-    expected_version: int = Field(ge=1, description="Current version the client read; 409 if it changed (API-03)")
+    expected_version: Version = Field(description="Current version the client read; 409 if it changed (API-03)")
 
 
 class ConfigVersion(_Model):
@@ -72,7 +85,7 @@ class CompanyProfile(_Model):
 
 
 class ProfileUpdate(_Model):
-    expected_version: int = Field(ge=1)
+    expected_version: Version
     sector: str = Field(min_length=1)
     subsectors: list[str]
     countries: list[str]
@@ -276,11 +289,27 @@ class Recommendation(_Model):
 class FeedbackRequest(_Model):
     """Body of POST /api/feedback. The user and channel come from the token, never from the body."""
 
+    # `wrong_priority` needs a proposed level (NOT-06): stated in the schema so clients and fuzzers see the rule.
+    model_config = ConfigDict(
+        extra="forbid",
+        strict=True,
+        json_schema_extra={
+            "if": {"properties": {"verdict": {"const": "wrong_priority"}}, "required": ["verdict"]},
+            "then": {"required": ["proposed_level"], "properties": {"proposed_level": {"type": "string"}}},
+        },
+    )
+
     assessment_id: str
     verdict: Literal["relevant", "false_positive", "wrong_priority", "investigating", "stop_suggestions"]
     proposed_level: Level | None = None
-    proposed_score: int | None = Field(default=None, ge=0, le=100)
+    proposed_score: Score | None = None
     comment: str | None = Field(default=None, max_length=2000)
+
+    @model_validator(mode="after")
+    def _wrong_priority_needs_a_level(self) -> Self:
+        if self.verdict == "wrong_priority" and self.proposed_level is None:
+            raise ValueError("proposed_level is required when verdict is wrong_priority")
+        return self
 
 
 class FeedbackEntry(_Model):
@@ -338,6 +367,7 @@ class StixExportRequest(_Model):
     run_id: str | None = None
     date_from: str | None = None
     date_to: str | None = None
+    exclude_ultra_classified: bool = False  # leaves highly classified CIs out of the bundle and of its TLP (P-021)
 
 
 class StixBundle(_Model):
@@ -411,7 +441,7 @@ class VulnerabilityFilters(_Model):
     """Common filters of the grouped views (FRO-10). Every one is optional and applies to all views."""
 
     # The same query string also carries `view`, `cursor` and `limit`, read by other parameters.
-    model_config = ConfigDict(extra="ignore")
+    model_config = ConfigDict(extra="ignore", strict=False)  # query strings need coercion
 
     band: Level | None = None
     custodian: str | None = Field(default=None, max_length=100)
@@ -420,5 +450,5 @@ class VulnerabilityFilters(_Model):
     exposed: bool | None = None
     in_kev: bool | None = None
     status: FindingStatus | None = None
-    date_from: datetime | None = Field(default=None, description="Last seen on or after (ISO 8601)")
-    date_to: datetime | None = Field(default=None, description="Last seen on or before (ISO 8601)")
+    date_from: DateTimeString | None = Field(default=None, description="Last seen on or after (RFC 3339)")
+    date_to: DateTimeString | None = Field(default=None, description="Last seen on or before (RFC 3339)")

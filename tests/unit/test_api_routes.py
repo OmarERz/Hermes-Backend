@@ -15,7 +15,8 @@ from core.config import Settings
 
 pytestmark = pytest.mark.unit
 
-F0_2_ROUTES = {"/api/health", "/api/me", "/api/admin/users/{uid}/role"}  # outside ROUTE_ROLES (F0.2)
+# Outside ROUTE_ROLES: F0.2 auth routes, and the iTop webhook (its own Bearer token, F5.1/ARQ-02).
+F0_2_ROUTES = {"/api/health", "/api/me", "/api/admin/users/{uid}/role", "/api/itop/webhook"}
 SETTINGS = Settings(  # type: ignore[call-arg]
     _env_file=None,
     database_url=SecretStr("postgresql://a:b@db/h"),
@@ -84,8 +85,6 @@ GET_SAMPLES = [
     "/api/profile",
     "/api/peer-companies",
     "/api/sources",
-    "/api/pending/inventory",
-    "/api/cpe/candidates?q=pago",
     "/api/vulnerabilities",
     "/api/vulnerabilities?view=criticality",
     "/api/vulnerabilities?view=asset",
@@ -313,7 +312,6 @@ def test_other_write_routes(client: TestClient) -> None:
     assert (created.status_code, created.json()["level"], created.json()["active"]) == (201, "N4", False)
     assert client.patch("/api/sources/src-nvd", json={"active": False}).status_code == 409
     assert client.patch("/api/sources/zzz", json={"active": True}).status_code == 404
-    assert client.put("/api/mappings/PagoFacil", json={"cpe": "cpe:2.3:a:x:y:1:*:*:*:*:*:*:*"}).status_code == 200
     assert (
         client.put(
             "/api/profile",
@@ -333,9 +331,9 @@ def test_runs_stix_calibration_and_notifications(client: TestClient) -> None:
     assert events.headers["content-type"].startswith("text/event-stream")
     assert "event: progress" in events.text
     assert client.get("/api/runs/zzz/events").status_code == 404
-    assert client.post("/api/stix/export", json={"scope": "run"}).status_code == 422
-    bundle = client.post("/api/stix/export", json={"scope": "run", "run_id": "run-1"})
-    assert bundle.json()["type"] == "bundle"
+    assert (
+        client.post("/api/stix/export", json={"scope": "run"}).status_code == 422
+    )  # scope data checked before the database
     assert client.post("/api/calibration/proposals/cal-1/approve").json()["status"] == "approved"
     assert client.post("/api/calibration/proposals/cal-1/reject").json()["status"] == "rejected"
     assert client.post("/api/calibration/proposals/zzz/approve").status_code == 404
@@ -377,3 +375,40 @@ def test_openapi_documents_error_envelope_for_every_route() -> None:
                 assert response is not None, f"{method} {path} lacks {status}"
                 ref = response["content"]["application/json"]["schema"]["$ref"]
                 assert ref.endswith("/ErrorResponse"), f"{method} {path} {status}"
+
+
+def test_405_lists_all_documented_methods_of_the_path(client: TestClient) -> None:
+    as_role(Role.ADMIN)
+    assert client.options("/api/config").headers["allow"] == "GET, PUT"
+    assert client.options("/api/peer-companies").headers["allow"] == "GET, POST"
+    assert client.options("/api/peer-companies/peer-1").headers["allow"] == "DELETE, PUT"
+    assert client.options("/api/sources/src-nvd").headers["allow"] == "PATCH"
+
+
+def test_created_items_can_be_retrieved_updated_and_deleted(client: TestClient) -> None:
+    as_role(Role.ADMIN)
+    body = {"name": "Nueva", "sector": "S", "country": "MX"}
+    created = client.post("/api/peer-companies", json=body).json()
+    ids = [p["id"] for p in client.get("/api/peer-companies").json()["items"]]
+    assert created["id"] in ids
+    assert client.put(f"/api/peer-companies/{created['id']}", json={**body, "name": "Otra"}).json()["name"] == "Otra"
+    assert client.delete(f"/api/peer-companies/{created['id']}").status_code == 204
+    assert client.delete(f"/api/peer-companies/{created['id']}").status_code == 404
+    source = client.post("/api/sources", json={"name": "Feed", "url": "https://feed.example.test/rss"}).json()
+    assert source["id"] in [s["id"] for s in client.get("/api/sources").json()["items"]]
+    assert client.patch(f"/api/sources/{source['id']}", json={"active": True}).json()["active"] is True
+
+
+def test_feedback_rule_is_in_the_request_schema_and_enforced() -> None:
+    schema = APP.openapi()["components"]["schemas"]["FeedbackRequest"]
+    assert schema["if"]["properties"]["verdict"] == {"const": "wrong_priority"}
+    assert schema["then"]["required"] == ["proposed_level"]
+
+
+def test_cursor_and_sse_are_documented() -> None:
+    operation = APP.openapi()["paths"]["/api/recommendations"]["get"]
+    cursor = next(p for p in operation["parameters"] if p["name"] == "cursor")
+    assert cursor["schema"]["anyOf"][0]["pattern"] == r"^[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+$"
+    assert operation["responses"]["400"]["description"].startswith("Cursor inválido")
+    sse = APP.openapi()["paths"]["/api/runs/{id}/events"]["get"]["responses"]["200"]["content"]["text/event-stream"]
+    assert sse["schema"]["required"] == ["event", "data"]

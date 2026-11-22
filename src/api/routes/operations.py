@@ -3,15 +3,17 @@
 from __future__ import annotations
 
 from collections.abc import Iterator
-from typing import Annotated, Literal
+from typing import Literal
 
-from fastapi import APIRouter, Depends, Query, Request
+from fastapi import APIRouter, Query
 from fastapi.responses import StreamingResponse
 
 from api.errors import ApiError, ErrorDetail
-from api.pagination import Page, PageQuery, Signer, paginate
+from api.pagination import PAGINATED_RESPONSES, Page, PageQuery, Signer, paginate
 from api.routes import samples
 from api.routes._auth import guard
+from api.routes._db import SessionDep
+from api.routes._state import RunStore
 from api.routes.models import (
     AuditEntry,
     CalibrationProposal,
@@ -26,17 +28,19 @@ from api.routes.models import (
     StixBundle,
     StixExportRequest,
 )
+from core.stix.export import ExportOptions, ExportScope, StixExportError, export_bundle
 
 router = APIRouter(tags=["operations"])
 
-
-def get_runs(request: Request) -> list[Run]:
-    """The runs of this app instance (sample store seeded in create_app; the real one is the runs table)."""
-    runs: list[Run] = request.app.state.runs
-    return runs
-
-
-RunStore = Annotated[list[Run], Depends(get_runs)]
+# Schema of one parsed event: `event` is the event name and `data` a JSON text {run_id, progress, message}.
+SSE_EVENT_SCHEMA = {
+    "type": "object",
+    "properties": {
+        "event": {"type": "string", "enum": ["progress"]},
+        "data": {"type": "string", "description": "JSON text: run_id, progress (0-100) and message"},
+    },
+    "required": ["event", "data"],
+}
 
 
 @router.post("/api/scans", status_code=202, dependencies=[guard("POST", "/api/scans")])
@@ -49,7 +53,7 @@ def launch_scan(_request: ScanRequest, runs: RunStore) -> Run:
     return run
 
 
-@router.get("/api/runs", dependencies=[guard("GET", "/api/runs")])
+@router.get("/api/runs", dependencies=[guard("GET", "/api/runs")], responses=PAGINATED_RESPONSES)
 def list_runs(params: PageQuery, signer: Signer, runs: RunStore) -> Page[Run]:
     return paginate(runs, params, signer)
 
@@ -59,7 +63,7 @@ def list_runs(params: PageQuery, signer: Signer, runs: RunStore) -> Page[Run]:
     dependencies=[guard("GET", "/api/runs/{id}/events")],
     response_class=StreamingResponse,
     responses={
-        200: {"content": {"text/event-stream": {"schema": {"type": "string"}}}, "description": "Server-sent events"}
+        200: {"content": {"text/event-stream": {"schema": SSE_EVENT_SCHEMA}}, "description": "Server-sent events"}
     },
 )
 def run_events(id: str, runs: RunStore) -> StreamingResponse:  # noqa: A002 - path parameter name of API-06
@@ -79,8 +83,8 @@ def run_events(id: str, runs: RunStore) -> StreamingResponse:  # noqa: A002 - pa
 
 
 @router.post("/api/stix/export", dependencies=[guard("POST", "/api/stix/export")])
-def stix_export(request: StixExportRequest) -> StixBundle:
-    """Exports a STIX 2.1 bundle. The scope needs its matching identifier or range."""
+def stix_export(request: StixExportRequest, session: SessionDep) -> StixBundle:
+    """Exports a STIX 2.1 bundle with TLP marking (STX-03, STX-06). The scope needs its identifier or range."""
     missing = {
         "vulnerability": request.vulnerability_id is None,
         "run": request.run_id is None,
@@ -93,10 +97,30 @@ def stix_export(request: StixExportRequest) -> StixBundle:
             "Faltan datos para el alcance de la exportación.",
             [ErrorDetail(field="body.scope", issue="missing_scope_data")],
         )
-    return StixBundle(**samples.STIX_BUNDLE)
+    scope = ExportScope(
+        request.scope,
+        vulnerability_id=request.vulnerability_id,
+        run_id=request.run_id,
+        date_from=request.date_from,
+        date_to=request.date_to,
+    )
+    try:
+        result = export_bundle(session, scope, ExportOptions(exclude_ultra_classified=request.exclude_ultra_classified))
+    except StixExportError:
+        raise ApiError(
+            422,
+            "validation_error",
+            "No se pudo exportar con los datos del alcance.",
+            [ErrorDetail(field="body.scope", issue="invalid_scope_data")],
+        ) from None
+    return StixBundle.model_validate(result.bundle)
 
 
-@router.get("/api/calibration/proposals", dependencies=[guard("GET", "/api/calibration/proposals")])
+@router.get(
+    "/api/calibration/proposals",
+    dependencies=[guard("GET", "/api/calibration/proposals")],
+    responses=PAGINATED_RESPONSES,
+)
 def list_proposals(params: PageQuery, signer: Signer) -> Page[CalibrationProposal]:
     return paginate(samples.PROPOSALS, params, signer)
 
@@ -129,7 +153,9 @@ def metrics() -> MetricsDashboard:
     return MetricsDashboard(generated_at=samples.NOW, metrics=samples.METRICS)
 
 
-@router.get("/api/notifications/events", dependencies=[guard("GET", "/api/notifications/events")])
+@router.get(
+    "/api/notifications/events", dependencies=[guard("GET", "/api/notifications/events")], responses=PAGINATED_RESPONSES
+)
 def notification_events(
     params: PageQuery, signer: Signer, status: Literal["pending", "delivered", "error"] = "error"
 ) -> Page[NotificationEventRow]:
@@ -174,7 +200,7 @@ def setup_step(n: int, update: SetupStepUpdate) -> SetupStep:
     return step.model_copy(update=update.model_dump())
 
 
-@router.get("/api/audit", dependencies=[guard("GET", "/api/audit")])
+@router.get("/api/audit", dependencies=[guard("GET", "/api/audit")], responses=PAGINATED_RESPONSES)
 def audit(
     params: PageQuery, signer: Signer, actor: str | None = Query(default=None, max_length=100)
 ) -> Page[AuditEntry]:
