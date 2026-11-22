@@ -324,7 +324,6 @@ dependencies = [
 
 [package.dev-dependencies]
 dev = [
-    { name = "httpx" },
     { name = "import-linter" },
     { name = "jsonschema" },
     { name = "mypy" },
@@ -354,7 +353,6 @@ requires-dist = [
 
 [package.metadata.requires-dev]
 dev = [
-    { name = "httpx", specifier = ">=0.28.1" },
     { name = "import-linter", specifier = ">=2.17" },
     { name = "jsonschema", specifier = ">=4.26.0" },
     { name = "mypy" },
