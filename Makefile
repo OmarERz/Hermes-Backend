@@ -4,7 +4,7 @@
 SHELL := /bin/bash
 .SHELLFLAGS := -eu -o pipefail -c
 
-.PHONY: help verify lint typecheck boundaries test coverage semgrep secrets audit verify-full zap bruno emulator-token review
+.PHONY: help verify lint typecheck boundaries test coverage semgrep secrets audit verify-full zap bruno emulator-token itop-up itop-install itop-seed itop-token itop-down review
 
 help: ## List the available targets
 	@grep -E '^[a-z-]+:.*## ' $(MAKEFILE_LIST) | awk 'BEGIN {FS = ":.*## "}; {printf "  %-12s %s\n", $$1, $$2}'
@@ -109,6 +109,27 @@ emulator-token: ## Print an emulator ID token: make emulator-token ROLE=admin|an
 	@test -n "$${ROLE:-}" || { echo "Usage: make emulator-token ROLE=admin|analyst|reader" >&2; exit 2; }
 	@FIREBASE_AUTH_EMULATOR_HOST="$${FIREBASE_AUTH_EMULATOR_HOST:-127.0.0.1:9099}" \
 	  uv run --locked python -m core.devtools.emulator token --role "$$ROLE"
+
+# iTop 3.2.2 test instance (compose.itop.yaml, docs/itop-test-instance.md). Needs ITOP_DB_ROOT_PASSWORD,
+# ITOP_DB_PASSWORD and ITOP_ADMIN_PASSWORD in the environment; every compose call below reads them.
+ITOP_COMPOSE ?= docker compose -f compose.itop.yaml --profile itop
+
+itop-up: ## Start the iTop test instance (Docker)
+	$(ITOP_COMPOSE) up -d --build --wait --wait-timeout 300
+
+itop-install: ## Unattended iTop install, extension and REST users (idempotent)
+	$(ITOP_COMPOSE) exec -T -u www-data itop /opt/hermes-itop/install.sh
+
+itop-seed: ## Load the synthetic stack into iTop (dry run; add APPLY=1 to write)
+	@ITOP_URL="http://127.0.0.1:$${ITOP_PORT:-8080}" \
+	  ITOP_TOKEN="$$($(ITOP_COMPOSE) exec -T itop cat /var/www/html/data/hermes-seed-token)" \
+	  PYTHONPATH=tests uv run --locked python -m harness.itop_seed docker/itop/stack.yaml $(if $(APPLY),--apply)
+
+itop-token: ## Print the least-privilege REST token of the iTop test instance
+	@$(ITOP_COMPOSE) exec -T itop cat /var/www/html/data/hermes-rest-token
+
+itop-down: ## Stop the iTop test instance and delete its data
+	$(ITOP_COMPOSE) down -v --remove-orphans
 
 # TASK and REVIEWER reach the recipe as environment variables, so quotes in the task title stay intact.
 export TASK REVIEWER

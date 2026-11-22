@@ -1,0 +1,109 @@
+"""F0.7 acceptance: the iTop 3.2.2 test instance installs unattended and serves REST with the least-privilege token.
+
+Slow and needs Docker (several minutes the first time: it builds the image): run with `uv run pytest -m e2e`.
+"""
+
+from __future__ import annotations
+
+import json
+import os
+import secrets
+import shutil
+import subprocess
+from collections.abc import Iterator
+from pathlib import Path
+from typing import Any
+
+import httpx
+import pytest
+
+from harness import itop_seed
+
+pytestmark = [pytest.mark.e2e, pytest.mark.slow]
+
+ROOT = Path(__file__).resolve().parents[3]
+PROJECT = "hermes-itop-e2e"
+PORT = "18081"
+REST = f"http://127.0.0.1:{PORT}/webservices/rest.php"
+
+
+def compose(env: dict[str, str], *args: str, timeout: int = 900) -> subprocess.CompletedProcess[str]:
+    docker = shutil.which("docker")
+    assert docker, "docker is required"
+    return subprocess.run(
+        [docker, "compose", "-p", PROJECT, "-f", "compose.itop.yaml", "--profile", "itop", *args],
+        cwd=ROOT,
+        env=env,
+        text=True,
+        capture_output=True,
+        timeout=timeout,
+        check=False,
+    )
+
+
+def read_token(env: dict[str, str], name: str) -> str:
+    done = compose(env, "exec", "-T", "itop", "cat", f"/var/www/html/data/{name}")
+    assert done.returncode == 0, done.stderr[-1000:]
+    return done.stdout.strip()
+
+
+def rest(token: str, operation: dict[str, Any]) -> dict[str, Any]:
+    response = httpx.post(
+        REST,
+        params={"version": "1.3"},
+        headers={"Auth-Token": token},
+        data={"json_data": json.dumps(operation)},
+        timeout=30,
+    )
+    body: dict[str, Any] = response.json()
+    return body
+
+
+@pytest.fixture(scope="module")
+def instance() -> Iterator[dict[str, str]]:
+    env = {
+        **os.environ,
+        "ITOP_PORT": PORT,
+        "ITOP_DB_ROOT_PASSWORD": secrets.token_urlsafe(16),
+        "ITOP_DB_PASSWORD": secrets.token_urlsafe(16),
+        "ITOP_ADMIN_PASSWORD": "Aa1-" + secrets.token_urlsafe(16),
+    }
+    try:
+        up = compose(env, "up", "-d", "--build", "--wait", "--wait-timeout", "300")
+        assert up.returncode == 0, up.stderr[-3000:]
+        install = compose(env, "exec", "-T", "-u", "www-data", "itop", "/opt/hermes-itop/install.sh")
+        assert install.returncode == 0, install.stdout[-2000:] + install.stderr[-2000:]
+        yield env
+    finally:
+        compose(env, "down", "-v", "--remove-orphans", timeout=300)
+
+
+def test_seed_then_read_with_the_rest_user(instance: dict[str, str]) -> None:
+    seed = itop_seed.ItopRest(f"http://127.0.0.1:{PORT}", read_token(instance, "hermes-seed-token"))
+    assert itop_seed.run([str(ROOT / "docker" / "itop" / "stack.yaml"), "--apply"], itop=seed) == 0
+
+    token = read_token(instance, "hermes-rest-token")
+    assert rest(token, {"operation": "list_operations"})["code"] == 0
+
+    found = rest(
+        token,
+        {
+            "operation": "core/get",
+            "class": "FunctionalCI",
+            "key": "SELECT FunctionalCI WHERE internet_exposed = 'yes'",
+            "output_fields": "name,confidentiality,personal_data,owner_id,custodian_id",
+        },
+    )
+    assert found["code"] == 0
+    names = {o["fields"]["name"] for o in found["objects"].values()}
+    assert names == {"web-frontend-01", "web-frontend-02"}
+    web = next(o["fields"] for o in found["objects"].values() if o["fields"]["name"] == "web-frontend-01")
+    assert web["confidentiality"] == "public"
+    assert web["owner_id"] and web["custodian_id"]
+
+
+def test_rest_user_has_least_privilege(instance: dict[str, str]) -> None:
+    token = read_token(instance, "hermes-rest-token")
+    denied = rest(token, {"operation": "core/create", "class": "Server", "fields": {"name": "x"}, "comment": "t"})
+    assert denied["code"] != 0
+    assert rest("not-a-token", {"operation": "list_operations"})["code"] == 1

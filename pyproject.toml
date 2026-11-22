@@ -21,8 +21,10 @@ dev = [
     "openai>=3.57.0",
     "pytest",
     "pytest-cov>=7.1.0",
+    "pyyaml>=6.0.4",
     "ruff",
     "testcontainers>=4.15.0",
+    "types-pyyaml>=6.0.12.20261113",
 ]
 
 [build-system]

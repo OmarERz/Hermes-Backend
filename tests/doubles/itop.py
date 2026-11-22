@@ -38,7 +38,8 @@ ENDPOINT: Final = "/webservices/rest.php"
 CHILDREN: Final[dict[str, tuple[str, ...]]] = {
     "FunctionalCI": ("PhysicalDevice", "VirtualDevice", "SoftwareInstance", "ApplicationSolution"),
     "PhysicalDevice": ("Server",),
-    "VirtualDevice": ("VirtualMachine",),
+    "VirtualDevice": ("VirtualHost", "VirtualMachine"),
+    "VirtualHost": ("Hypervisor", "Farm"),
     "SoftwareInstance": ("DBServer", "WebServer", "Middleware", "OtherSoftware"),
     "Ticket": ("UserRequest",),
 }
