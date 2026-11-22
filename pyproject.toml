@@ -67,7 +67,7 @@ plugins = ["pydantic.mypy"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
-pythonpath = ["src"]
+pythonpath = ["src", "scripts"]
 addopts = ["--strict-markers", "--strict-config", "-m", "not slow"]
 markers = [
     "unit: pure functions, no I/O",
@@ -104,3 +104,19 @@ name = "workers do not import api"
 type = "forbidden"
 source_modules = ["workers"]
 forbidden_modules = ["api"]
+
+[tool.coverage.run]
+branch = true
+source = ["src"]
+
+[tool.core_coverage]
+# Core files need >= 95% line+branch coverage (COB-02). Globs on repository-relative paths; absent paths are skipped.
+paths = [
+    "src/core/scoring/*",
+    "src/core/judge/*",
+    "src/core/validation/*",
+    "src/core/itop/outbox*",
+    "src/core/notifications/*",
+    "src/core/feedback/*",
+    "src/api/auth/*",
+]

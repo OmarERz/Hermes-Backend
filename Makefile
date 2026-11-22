@@ -3,12 +3,12 @@
 .DEFAULT_GOAL := help
 SHELL := /bin/bash
 
-.PHONY: help verify lint typecheck boundaries test review
+.PHONY: help verify lint typecheck boundaries test coverage review
 
 help: ## List the available targets
 	@grep -E '^[a-z-]+:.*## ' $(MAKEFILE_LIST) | awk 'BEGIN {FS = ":.*## "}; {printf "  %-12s %s\n", $$1, $$2}'
 
-verify: lint typecheck boundaries test ## Run the quality gate (same command locally and in CI)
+verify: lint typecheck boundaries test coverage ## Run the quality gate (same command locally and in CI)
 
 lint: ## Formatting and lint (ruff)
 	uv run --locked ruff format --check .
@@ -16,12 +16,16 @@ lint: ## Formatting and lint (ruff)
 
 typecheck: ## Strict type checking (mypy)
 	uv run --locked mypy
+	uv run --locked mypy --package-root=. scripts/check_coverage.py
 
 boundaries: ## Package boundary contracts (import-linter)
 	uv run --locked lint-imports
 
-test: ## Unit and integration tests (pytest)
-	uv run --locked pytest
+test: ## Unit and integration tests (pytest), writes coverage.json
+	uv run --locked pytest --cov --cov-report=json --cov-report=term-missing:skip-covered
+
+coverage: ## Coverage gate: 80% global, 95% core (needs make test first)
+	uv run --locked python scripts/check_coverage.py
 
 # TASK and REVIEWER reach the recipe as environment variables, so quotes in the task title stay intact.
 export TASK REVIEWER
