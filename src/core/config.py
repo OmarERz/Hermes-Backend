@@ -38,10 +38,16 @@ class Settings(BaseSettings):
         secrets_dir=DOCKER_SECRETS_DIR if DOCKER_SECRETS_DIR.is_dir() else None,
         extra="ignore",
         frozen=True,
+        # Validation errors must not echo inputs: a bad URL may contain credentials (SEG-21).
+        hide_input_in_errors=True,
+        # A blank variable (e.g. exported empty by compose) must not shadow a Docker secret file.
+        env_ignore_empty=True,
     )
 
     # Connections required to start
-    database_url: SecretStr = Field(description="PostgreSQL connection URL (contains the password)")
+    database_url: SecretStr = Field(description="PostgreSQL connection URL; the password may come from PGPASSWORD")
+    # libpq/psycopg read PGPASSWORD when the URL has none, so passwords never need URL encoding (compose.yaml)
+    pgpassword: SecretStr | None = None
     firebase_project_id: str = Field(min_length=1, description="Firebase project that issues the ID tokens")
 
     # Firebase Admin SDK service account: the most sensitive secret (SEG-20)
@@ -56,6 +62,9 @@ class Settings(BaseSettings):
     nvd_api_key: SecretStr | None = None
     abusech_auth_key: SecretStr | None = None
     ransomwarelive_api_key: SecretStr | None = None
+
+    # Swagger UI, ReDoc and /openapi.json: off unless explicitly enabled for development (API-01, docs/14 §10.4)
+    api_docs_enabled: bool = False
 
     # LLM endpoints (OpenAI-compatible API, D-029)
     deepseek_api_key: SecretStr | None = None
@@ -74,11 +83,18 @@ class Settings(BaseSettings):
     def _project_id_stripped(cls, value: Any) -> Any:
         return value.strip() if isinstance(value, str) else value
 
-    @field_validator(*_OPTIONAL_FIELDS, mode="before")
+    @field_validator(*_OPTIONAL_FIELDS, "pgpassword", mode="before")
     @classmethod
     def _blank_means_unset(cls, value: Any) -> Any:
         if isinstance(value, str) and not value.strip():
             return None
+        return value
+
+    @field_validator("llm_base_url_judge", mode="before")
+    @classmethod
+    def _blank_judge_url_means_default(cls, value: Any) -> Any:
+        if value is None or (isinstance(value, str) and not value.strip()):
+            return DEFAULT_LLM_BASE_URL
         return value
 
     @model_validator(mode="after")

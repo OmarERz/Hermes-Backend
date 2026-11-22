@@ -26,9 +26,16 @@ def test_health_is_public_and_ok() -> None:
     assert response.json() == {"status": "ok"}
 
 
-def test_openapi_lists_health() -> None:
-    schema = TestClient(create_app(SETTINGS)).get("/openapi.json").json()
-    assert "/api/health" in schema["paths"]
+def test_docs_disabled_by_default() -> None:
+    client = TestClient(create_app(SETTINGS))
+    for path in ("/docs", "/redoc", "/openapi.json", "/api/docs", "/api/openapi.json"):
+        assert client.get(path).status_code == 404
+
+
+def test_docs_only_when_enabled() -> None:
+    client = TestClient(create_app(SETTINGS.model_copy(update={"api_docs_enabled": True})))
+    assert client.get("/api/docs").status_code == 200
+    assert "/api/health" in client.get("/api/openapi.json").json()["paths"]
 
 
 def test_worker_starts_and_stops(monkeypatch: object) -> None:
