@@ -1,0 +1,183 @@
+name: CI
+
+on:
+  push:
+    branches: [develop, main]
+  pull_request:
+    branches: [develop, main]
+
+# Read-only by default; a job asks for more only when it needs it.
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  static:
+    name: static
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+      - uses: astral-sh/setup-uv@1db35dd8eee11c5894872e0b383ae6c406cf738d # v10.4.0
+        with:
+          enable-cache: true
+          python-version-file: .python-version
+      - name: Install dependencies
+        run: uv sync --locked
+      - name: Lint, types and package boundaries
+        run: make lint typecheck boundaries
+      - name: Semgrep
+        run: make semgrep
+      - name: Pick the Gitleaks base ref
+        env:
+          EVENT_NAME: ${{ github.event_name }}
+          BASE_REF: ${{ github.base_ref }}
+          PUSH_BEFORE: ${{ github.event.before }}
+        run: |
+          # Pull requests: the PR base. Pushes: the previous tip of the branch. A ref that does not
+          # exist (new branch, all-zero SHA) makes the Makefile scan the whole of HEAD.
+          if [ "$EVENT_NAME" = "pull_request" ]; then
+            echo "GITLEAKS_BASE=origin/${BASE_REF}" >> "$GITHUB_ENV"
+          else
+            echo "GITLEAKS_BASE=${PUSH_BEFORE}" >> "$GITHUB_ENV"
+          fi
+      - name: Gitleaks (working tree and history)
+        run: make secrets
+      - name: pip-audit
+        run: make audit
+
+  tests:
+    name: tests
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: astral-sh/setup-uv@1db35dd8eee11c5894872e0b383ae6c406cf738d # v10.4.0
+        with:
+          enable-cache: true
+          python-version-file: .python-version
+      - name: Install dependencies
+        run: uv sync --locked
+      # Docker is preinstalled on ubuntu runners (testcontainers, compose tests).
+      - name: Unit and integration tests with coverage gate
+        run: make coverage
+      - name: Upload coverage.xml
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: coverage-xml
+          path: coverage.xml
+          if-no-files-found: error
+          retention-days: 7
+
+  schemathesis:
+    name: schemathesis
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: astral-sh/setup-uv@1db35dd8eee11c5894872e0b383ae6c406cf738d # v10.4.0
+        with:
+          enable-cache: true
+          python-version-file: .python-version
+      - name: Install dependencies
+        run: uv sync --locked
+      - name: Schemathesis against the running API
+        env:
+          API_URL: ${{ vars.CI_API_URL }}
+          TEST_TOKEN: ${{ secrets.CI_TEST_TOKEN }}
+        run: |
+          # Skipped (with a notice) while openapi/openapi.json does not exist (arrives in F0.5).
+          # Once it exists the API must be started with a test token (F0.7); until then the job fails
+          # loudly instead of reporting a false green.
+          if [ ! -f openapi/openapi.json ]; then
+            echo "SKIPPED: Schemathesis, openapi/openapi.json does not exist yet (arrives in F0.5)"
+            exit 0
+          fi
+          if [ -z "${API_URL:-}" ] || [ -z "${TEST_TOKEN:-}" ]; then
+            echo "::error::openapi/openapi.json exists but this job cannot start the API with a test token yet (F0.7)"
+            exit 1
+          fi
+          make verify-full
+
+  commit-messages:
+    name: commit-messages
+    if: github.event_name == 'pull_request'
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+      - name: Validate every commit of the pull request
+        env:
+          BASE_SHA: ${{ github.event.pull_request.base.sha }}
+          HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+        run: |
+          # Conventional Commits, title only (D-045): <= 72 chars, no body, no AI attribution.
+          re='^(feat|fix|test|refactor|docs|build|ci|chore|perf|revert)(\([a-z0-9._/-]+\))?!?: .{1,}'
+          failed=0
+          for sha in $(git rev-list --reverse "${BASE_SHA}..${HEAD_SHA}"); do
+            title=$(git log -1 --format=%s "$sha")
+            if [[ "$title" == Merge\ * ]]; then
+              echo "ok (merge) ${sha:0:9} $title"
+              continue
+            fi
+            body=$(git log -1 --format=%b "$sha" | sed '/^[[:space:]]*$/d')
+            full=$(git log -1 --format=%B "$sha")
+            problems=()
+            [[ "$title" =~ $re ]] || problems+=("title is not a Conventional Commit")
+            [ "${#title}" -le 72 ] || problems+=("title is longer than 72 characters (${#title})")
+            [ -z "$body" ] || problems+=("commit has a body (title only)")
+            if grep -qiE '^co-authored-by:|generated with' <<<"$full"; then
+              problems+=("commit carries an agent attribution mark")
+            fi
+            if [ "${#problems[@]}" -gt 0 ]; then
+              failed=1
+              for p in "${problems[@]}"; do
+                echo "::error title=Commit ${sha:0:9}::${p}: ${title}"
+              done
+            else
+              echo "ok ${sha:0:9} $title"
+            fi
+          done
+          exit "$failed"
+
+  sonarqube:
+    name: sonarqube
+    needs: tests
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    # Runs only when the repository has the SONAR_TOKEN secret (it is empty for fork pull requests).
+    env:
+      SONAR_TOKEN: ${{ secrets.SONAR_TOKEN }}
+    steps:
+      - name: Check for SONAR_TOKEN
+        id: gate
+        run: |
+          if [ -n "$SONAR_TOKEN" ]; then
+            echo "enabled=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "SKIPPED: SonarQube Cloud analysis, the SONAR_TOKEN secret is not set"
+          fi
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        if: steps.gate.outputs.enabled == 'true'
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        if: steps.gate.outputs.enabled == 'true'
+        with:
+          name: coverage-xml
+      - uses: SonarSource/sonarqube-scan-action@59202af334b4ba7b5db01b701b8e79f8b3bef0f4 # v8.5.0
+        if: steps.gate.outputs.enabled == 'true'

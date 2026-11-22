@@ -4,7 +4,7 @@
 SHELL := /bin/bash
 .SHELLFLAGS := -eu -o pipefail -c
 
-.PHONY: help verify lint typecheck boundaries test coverage semgrep secrets audit verify-full zap bruno review
+.PHONY: help verify lint typecheck boundaries test coverage semgrep secrets audit verify-full zap bruno ci-lint review
 
 help: ## List the available targets
 	@grep -E '^[a-z-]+:.*## ' $(MAKEFILE_LIST) | awk 'BEGIN {FS = ":.*## "}; {printf "  %-12s %s\n", $$1, $$2}'
@@ -22,8 +22,8 @@ typecheck: ## Strict type checking (mypy)
 boundaries: ## Package boundary contracts (import-linter)
 	uv run --locked lint-imports
 
-test: ## Unit and integration tests (pytest), writes coverage.json
-	uv run --locked pytest --cov --cov-report=json --cov-report=term-missing:skip-covered
+test: ## Unit and integration tests (pytest), writes coverage.json and coverage.xml
+	uv run --locked pytest --cov --cov-report=json --cov-report=xml --cov-report=term-missing:skip-covered
 
 coverage: test ## Coverage gate: 80% global, 95% core (runs the tests first)
 	uv run --locked python scripts/check_coverage.py
@@ -102,6 +102,11 @@ zap: ## OWASP ZAP API scan in Docker against API_URL/api/openapi.json (needs API
 bruno: ## Bruno API collection (bruno/ folder, environment local)
 	@test -d bruno || { echo "bruno/ folder not found: the Bruno collection is created in F0.7 (D-070)" >&2; exit 2; }
 	cd bruno && npx --yes @usebruno/cli@$(BRUNO_CLI_VERSION) run --env local
+
+ACTIONLINT_VERSION ?= 1.7.12.24
+
+ci-lint: ## Lint the GitHub Actions workflows (actionlint, not part of verify)
+	uvx --from actionlint-py@$(ACTIONLINT_VERSION) actionlint
 
 # TASK and REVIEWER reach the recipe as environment variables, so quotes in the task title stay intact.
 export TASK REVIEWER
