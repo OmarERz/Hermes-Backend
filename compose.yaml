@@ -1,6 +1,6 @@
 # Local stack: docker compose up --build
 # Credentials travel as Docker secret files (D-042): `make compose-secrets` writes them from POSTGRES_PASSWORD,
-# MIGRATOR_DB_PASSWORD, APP_DB_PASSWORD, RETENTION_DB_PASSWORD (required) and ITOP_TOKEN, NVD_API_KEY,
+# MIGRATOR_DB_PASSWORD, APP_DB_PASSWORD, RETENTION_DB_PASSWORD, CURSOR_SIGNING_KEY (required) and ITOP_TOKEN, NVD_API_KEY,
 # DEEPSEEK_API_KEY, ABUSECH_AUTH_KEY, RANSOMWARELIVE_API_KEY (optional, blank means "not configured").
 # Ports bind to 127.0.0.1 only. On every start the provision service (re)applies the idempotent provisioning
 # (extensions, roles, schema owner, role passwords as SCRAM verifiers); the migrate service then runs Alembic as
@@ -16,6 +16,8 @@ secrets:
     file: ${COMPOSE_SECRETS_DIR:-./.compose-secrets}/app_db_password
   retention_db_password:
     file: ${COMPOSE_SECRETS_DIR:-./.compose-secrets}/retention_db_password
+  cursor_signing_key:
+    file: ${COMPOSE_SECRETS_DIR:-./.compose-secrets}/cursor_signing_key
   itop_token:
     file: ${COMPOSE_SECRETS_DIR:-./.compose-secrets}/itop_token
   nvd_api_key:
@@ -52,6 +54,7 @@ x-backend: &backend
   secrets:
     - source: app_db_password
       target: pgpassword
+    - cursor_signing_key
     - itop_token
     - nvd_api_key
     - deepseek_api_key

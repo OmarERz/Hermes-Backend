@@ -1,0 +1,32 @@
+{
+  "event_id": "evt-sample-threat_alert",
+  "contract_version": "1.0",
+  "type": "threat_alert",
+  "priority": "normal",
+  "date": "2026-01-15T10:30:00Z",
+  "ticket": null,
+  "vulnerability": null,
+  "alert": {
+    "relevance": "R2",
+    "inferred": false,
+    "actor": "Synthetic Actor",
+    "victim": "Retail sector",
+    "vector": "Phishing",
+    "relationship": null
+  },
+  "score": null,
+  "assets": [],
+  "justification": "Vulnerabilidad explotada activamente en un activo expuesto (texto sintético de ejemplo).",
+  "mitigation": null,
+  "mitigation_draft": null,
+  "news": [
+    {
+      "title": "Synthetic headline about CVE-2099-0001",
+      "url": "https://news.example.test/story-1",
+      "source": "Example News",
+      "date": "2026-01-14"
+    }
+  ],
+  "assessment_id": null,
+  "frontend_url": null
+}

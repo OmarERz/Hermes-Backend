@@ -1,0 +1,9 @@
+{
+  "assessment_id": "asm-0001",
+  "user_email": "analyst@example.test",
+  "channel": "slack",
+  "verdict": "wrong_priority",
+  "proposed_level": "high",
+  "proposed_score": 75,
+  "comment": "Synthetic comment: the asset is isolated."
+}

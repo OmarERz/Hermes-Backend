@@ -1,0 +1,23 @@
+meta {
+  name: connections-status
+  type: http
+  seq: 12
+}
+
+get {
+  url: {{baseUrl}}/api/connections/status
+  body: none
+  auth: bearer
+}
+
+auth:bearer {
+  token: {{token}}
+}
+
+assert {
+  res.status: eq 200
+}
+
+docs {
+  Never contains a key, not even a partial one (SEG-23); needs an admin token.
+}

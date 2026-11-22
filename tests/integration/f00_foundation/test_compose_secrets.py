@@ -12,7 +12,14 @@ import pytest
 
 pytestmark = pytest.mark.integration
 ROOT = Path(__file__).resolve().parents[3]
-NAMES = ("POSTGRES_PASSWORD", "MIGRATOR_DB_PASSWORD", "APP_DB_PASSWORD", "RETENTION_DB_PASSWORD", "ITOP_TOKEN")
+NAMES = (
+    "POSTGRES_PASSWORD",
+    "MIGRATOR_DB_PASSWORD",
+    "APP_DB_PASSWORD",
+    "RETENTION_DB_PASSWORD",
+    "CURSOR_SIGNING_KEY",
+    "ITOP_TOKEN",
+)
 
 
 def run(tmp_path: Path, env_file_text: str, exported: dict[str, str]) -> subprocess.CompletedProcess[str]:
@@ -34,7 +41,8 @@ def test_reads_the_env_file_without_executing_it(tmp_path: Path) -> None:
     marker = tmp_path / "executed"
     text = (
         'POSTGRES_PASSWORD="p w$(touch ' + str(marker) + ')"\n'
-        "export MIGRATOR_DB_PASSWORD=m1\nAPP_DB_PASSWORD='a 2'\nRETENTION_DB_PASSWORD=r3\nITOP_TOKEN=\n"
+        "export MIGRATOR_DB_PASSWORD=m1\nAPP_DB_PASSWORD='a 2'\nRETENTION_DB_PASSWORD=r3\n"
+        "CURSOR_SIGNING_KEY=c4\nITOP_TOKEN=\n"
     )
     result = run(tmp_path, text, {})
     assert result.returncode == 0, result.stderr
@@ -43,16 +51,27 @@ def test_reads_the_env_file_without_executing_it(tmp_path: Path) -> None:
     assert (out / "migrator_db_password").read_text() == "m1"
     assert (out / "app_db_password").read_text() == "a 2"
     assert (out / "itop_token").read_text() == ""
+    assert (out / "cursor_signing_key").read_text() == "c4"
     assert not marker.exists()
     assert stat.S_IMODE(out.stat().st_mode) == 0o700
     assert stat.S_IMODE((out / "app_db_password").stat().st_mode) == 0o644
 
 
 def test_exported_values_win_over_the_file(tmp_path: Path) -> None:
-    text = "POSTGRES_PASSWORD=file\nMIGRATOR_DB_PASSWORD=m\nAPP_DB_PASSWORD=a\nRETENTION_DB_PASSWORD=r\n"
+    text = (
+        "POSTGRES_PASSWORD=file\nMIGRATOR_DB_PASSWORD=m\nAPP_DB_PASSWORD=a\n"
+        "RETENTION_DB_PASSWORD=r\nCURSOR_SIGNING_KEY=c\n"
+    )
     result = run(tmp_path, text, {"POSTGRES_PASSWORD": "exported"})
     assert result.returncode == 0, result.stderr
     assert (tmp_path / "out" / "postgres_password").read_text() == "exported"
+
+
+def test_missing_cursor_signing_key_fails(tmp_path: Path) -> None:
+    text = "POSTGRES_PASSWORD=p\nMIGRATOR_DB_PASSWORD=m\nAPP_DB_PASSWORD=a\nRETENTION_DB_PASSWORD=r\n"
+    result = run(tmp_path, text, {})
+    assert result.returncode == 2
+    assert "CURSOR_SIGNING_KEY" in result.stderr
 
 
 def test_missing_required_value_fails(tmp_path: Path) -> None:
@@ -68,6 +87,7 @@ def test_accepts_compose_env_file_syntax(tmp_path: Path) -> None:
         'MIGRATOR_DB_PASSWORD="quoted # not a comment"\n'
         "APP_DB_PASSWORD='single'\n"
         "RETENTION_DB_PASSWORD=r3\n"
+        "CURSOR_SIGNING_KEY=c4\n"
     )
     result = run(tmp_path, text, {})
     assert result.returncode == 0, result.stderr

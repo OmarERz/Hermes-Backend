@@ -1,0 +1,23 @@
+meta {
+  name: sources
+  type: http
+  seq: 5
+}
+
+get {
+  url: {{baseUrl}}/api/sources
+  body: none
+  auth: bearer
+}
+
+auth:bearer {
+  token: {{token}}
+}
+
+assert {
+  res.status: eq 200
+}
+
+docs {
+  Sources with level and health (FRO-16).
+}
