@@ -42,12 +42,26 @@ semgrep: ## Semgrep CE (Docker): registry packs + .semgrep/ project rules, fails
 	  --config /src/.semgrep/ --metrics=off --no-git-ignore \
 	  --error --severity WARNING --severity ERROR --
 
-# Scans the working tree (tracked and untracked files, minus ignored ones): the file list is streamed
-# as a tar into the container, so caches and virtualenvs are not scanned and no temp dir is needed.
-secrets: ## Gitleaks (Docker, pinned by tag and digest) on the working tree
+# Working tree: tracked and untracked files minus ignored ones, streamed as a tar into the container, so
+# caches and virtualenvs are not scanned and no temp dir is needed.
+# History: `gitleaks git` over the commits of the current branch, i.e. those reachable from HEAD and not from
+# GITLEAKS_BASE (develop, D-064); all history with GITLEAKS_FULL_HISTORY=1, and the whole of HEAD when the
+# base ref does not exist (fresh clone). The repository is mounted from the common git dir (read-only), which
+# also works in git worktrees where .git is a file; HEAD is passed as an explicit SHA for the same reason.
+GITLEAKS_BASE ?= develop
+GITLEAKS_FULL_HISTORY ?= 0
+
+secrets: ## Gitleaks (Docker, pinned): working tree + branch history (GITLEAKS_FULL_HISTORY=1 for all history)
 	git ls-files -z --cached --others --exclude-standard | tar --null --ignore-failed-read -T - -cf - | \
 	  docker run --rm -i --entrypoint sh $(GITLEAKS_IMAGE) -c \
 	  'mkdir /work && tar -xf - -C /work && gitleaks dir /work --redact --no-banner -v'
+	@head=$$(git rev-parse HEAD); \
+	if [ "$(GITLEAKS_FULL_HISTORY)" = "1" ]; then revs="--all"; \
+	elif git rev-parse --verify --quiet "$(GITLEAKS_BASE)^{commit}" >/dev/null; then revs="^$(GITLEAKS_BASE) $$head"; \
+	else revs="$$head"; fi; \
+	echo "gitleaks history scan: $$revs"; \
+	docker run --rm -v "$$(git rev-parse --path-format=absolute --git-common-dir):/repo/.git:ro" -w /repo \
+	  $(GITLEAKS_IMAGE) git /repo --redact --no-banner -v --log-opts="$$revs"
 
 audit: ## pip-audit on the locked dependencies
 	uv export --locked --no-hashes --no-emit-project --format requirements-txt | uvx pip-audit --no-deps --disable-pip -r /dev/stdin
