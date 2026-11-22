@@ -182,7 +182,10 @@ def test_cpe_candidates_come_from_loaded_data_and_validate_the_query(client: Tes
     found = client.get("/api/cpe/candidates", params={"q": "nginx"}).json()
     assert found == [{"cpe": "cpe:2.3:a:f5:nginx:*:*:*:*:*:*:*:*", "title": "f5 nginx", "score": 0.5}]
     assert client.get("/api/cpe/candidates", params={"q": "x"}).status_code == 422
-    assert client.get("/api/cpe/candidates", params={"q": "ab\x00cd"}).status_code == 422
+    # Control characters are treated as spaces (every schema-valid query gets a 2xx, Schemathesis ST202).
+    control = client.get("/api/cpe/candidates", params={"q": "ngi\x00nx"})
+    assert control.status_code == 200
+    assert client.get("/api/cpe/candidates", params={"q": "\x01\x02\x03"}).json() == []
     assert client.get("/api/cpe/candidates", params={"q": "zzzzzz"}).json() == []
 
 

@@ -134,6 +134,11 @@ def cpe_candidates(
 ) -> list[CpeCandidate]:
     """Candidate CPE vendor and product pairs for a software name: NVD's dictionary plus what is already loaded."""
     dictionary: CpeDictionaryClient | None = request.app.state.cpe_dictionary
+    # Every schema-valid string gets an answer: control characters become spaces and a search text with nothing
+    # printable left simply has no candidates (instead of an undocumented 422).
+    q = " ".join("".join(ch if ch.isprintable() else " " for ch in q).split())
+    if not q:
+        return []
     try:
         local = local_candidates(session, q)
         session.rollback()  # give the connection back before the slow remote search (NVD limits, retries)
