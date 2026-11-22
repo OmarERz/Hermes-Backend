@@ -98,6 +98,70 @@ def add_assessment(session: Session, sc: Scenario, spec: Spec) -> uuid.UUID:
     return assessment.id
 
 
+def add_review(session: Session, *, mitigation: bool = True) -> uuid.UUID:
+    """An applied judge review with one accepted reason (+8) and, when asked, an accepted mitigation draft."""
+    review = m.LlmReview(
+        agent="judge",
+        mode="scoring",
+        model="deepseek-v4-pro",
+        response_model={},
+        prompt_version="judge-mode1-v1",
+        prompt_hash="h",
+        schema_version="1",
+        schema_hash="h",
+        parameters={},
+        input_ref="pkg",
+        calls=[],
+        status="applied",
+        attempts=1,
+        summary="Explotación masiva reportada.",
+        proposed_adjustment=8,
+        mitigation_status="accepted" if mitigation else "absent",
+        tokens_input=100,
+        tokens_cached=0,
+        tokens_output=50,
+        tokens_reasoning=0,
+        cost_usd=Decimal("0.010000"),
+        latency_ms=900,
+        ladder_level=0,
+        created_at=T1,
+    )
+    session.add(review)
+    session.flush()
+    session.add(
+        m.JudgeReason(
+            llm_review_id=review.id,
+            seq=1,
+            reason_code="mass_exploitation",
+            points=8,
+            element_id="news-1",
+            quote="explotación masiva",
+            status="accepted",
+        )
+    )
+    session.add(
+        m.JudgeReason(
+            llm_review_id=review.id,
+            seq=2,
+            reason_code="unverified_poc",
+            points=-5,
+            element_id="news-2",
+            quote="sin verificar",
+            status="rejected",
+            rejection_rule="L6",
+        )
+    )
+    if mitigation:
+        for order, action in enumerate(("Aislar srv-pagos-01.", "Actualizar OpenSSL a 3.0.8."), start=1):
+            session.add(
+                m.MitigationDraftStep(
+                    llm_review_id=review.id, step_order=order, action=action, element_id="cve", quote="3.0.8"
+                )
+            )
+    session.flush()
+    return review.id
+
+
 def _status(session: Session, sc: Scenario, finding: uuid.UUID, status: str, at: datetime) -> None:
     session.add(
         m.FindingStatusChange(
@@ -173,6 +237,7 @@ def build_scenario(session: Session) -> Scenario:
             T1,
             {"CI-1": (82, 0, 90), "CI-2": (62, 0, 62), "CI-4": (99, 0, 99)},
             judge=8,
+            review=add_review(session),
             snapshots={"CI-2": "public"},
         ),
     )

@@ -43,6 +43,7 @@ from api.routes.models import (
     VulnerabilityGroup,
     VulnerabilityList,
 )
+from core.views import comparison, history
 from core.views import groups as views
 from core.views.common import iso, parse_uuid
 from notifications_api import FeedbackResult
@@ -203,42 +204,88 @@ def asset_detail(ci_id: str, session: SessionDep) -> AssetDetail:
 
 
 @router.get("/api/findings/{id}/history", dependencies=[guard("GET", "/api/findings/{id}/history")])
-def finding_history(id: str) -> list[ScoreHistoryPoint]:  # noqa: A002 - path parameter name of API-06
-    if id != "fnd-1":
+def finding_history(id: str, session: SessionDep) -> list[ScoreHistoryPoint]:  # noqa: A002 - path parameter name of API-06
+    """Score of the finding's CI in each assessment of its group, oldest first (EVA-05). The judge adjustment
+    shown is the group's plus the CI's own."""
+    parsed = parse_uuid(id)
+    points = history.finding_history(session, parsed) if parsed is not None else None
+    if points is None:
         raise _not_found("El hallazgo")
     return [
-        ScoreHistoryPoint(date="2026-01-13T00:00:00Z", base=70, judge_adjustment=0, final=70),
-        ScoreHistoryPoint(date="2026-01-15T00:00:00Z", base=82, judge_adjustment=8, final=90),
+        ScoreHistoryPoint(
+            date=iso(p.assessed_at),
+            base=p.base,
+            judge_adjustment=p.judge_adjustment + p.ci_adjustment,
+            final=p.final,
+        )
+        for p in points
     ]
 
 
 @router.get("/api/comparison/summary", dependencies=[guard("GET", "/api/comparison/summary")])
-def comparison_summary() -> ComparisonSummary:
+def comparison_summary(session: SessionDep) -> ComparisonSummary:
+    """Raw vs processed over the current scored findings (D-039, MET-24 to MET-27). The matrix crosses the CVSS
+    level of the raw snapshot (rows) with the final level (columns); findings without CVSS stay out of the matrix
+    and the indicators. `rank_correlation` is Kendall's tau-b, "0.00" when it is undefined."""
+    found = comparison.summary(session)
     return ComparisonSummary(
-        reclassification_matrix={"critical": {"critical": 4, "high": 2}, "high": {"high": 9, "medium": 5}},
-        funnel={"raw": 420, "groups": 130, "with_threat_context": 36, "judge_adjusted": 12, "high_or_critical": 9},
-        reclassified_percent="31.5",
-        hidden_criticals=1,
-        avoided_noise=88,
-        rank_correlation="0.62",
+        reclassification_matrix=found.reclassification_matrix,
+        funnel=found.funnel,
+        reclassified_percent=found.reclassified_percent,
+        hidden_criticals=found.hidden_criticals,
+        avoided_noise=found.avoided_noise,
+        rank_correlation=found.rank_correlation,
     )
 
 
 @router.get(
     "/api/comparison/table", dependencies=[guard("GET", "/api/comparison/table")], responses=PAGINATED_RESPONSES
 )
-def comparison_table(params: PageQuery, signer: Signer) -> Page[ComparisonRow]:
-    return paginate(samples.COMPARISON_ROWS, params, signer)
+def comparison_table(params: PageQuery, signer: Signer, session: SessionDep) -> Page[ComparisonRow]:
+    """One row per current scored finding, largest change against the raw value first (EVA-11, EVA-12)."""
+    after = _score_key(params, "comparison")
+    rows, next_key = views.page_by_score(
+        comparison.comparison_rows(session), lambda r: (abs(r.delta), r.finding_id), after, params.limit
+    )
+    return Page[ComparisonRow](
+        items=[
+            ComparisonRow(
+                cve=r.cve,
+                product=r.product,
+                ci_id=r.ci_id,
+                cvss=str(r.cvss) if r.cvss is not None else None,
+                raw=r.raw,
+                base=r.base,
+                judge_adjustment=r.judge_adjustment,
+                final=r.final,
+                delta=r.delta,
+                main_cause=r.main_cause,
+            )
+            for r in rows
+        ],
+        next_cursor=encode_key(signer, "comparison", next_key),
+    )
 
 
 @router.get("/api/assessments/{id}/breakdown", dependencies=[guard("GET", "/api/assessments/{id}/breakdown")])
-def assessment_breakdown(id: str) -> Breakdown:  # noqa: A002
-    if id != "asm-0001":
+def assessment_breakdown(
+    id: str,  # noqa: A002
+    session: SessionDep,
+    ci_id: Annotated[str | None, Query(max_length=100, description="CI of the waterfall; default the top one")] = None,
+) -> Breakdown:
+    """Waterfall of the change from the raw value to the final for one CI of the assessment (EVA-12)."""
+    parsed = parse_uuid(id)
+    found = None
+    if parsed is not None and (ci_id is None or "\x00" not in ci_id):
+        found = comparison.assessment_breakdown(session, parsed, ci_id)
+    if found is None:
         raise _not_found("La evaluación")
     return Breakdown(
-        assessment_id=id,
-        waterfall={"P": 20, "T": 25, "A": 22, "D": 15, "judge": 8, "floor": 0, "rounding": 0},
-        final=90,
+        assessment_id=str(found.assessment_id),
+        waterfall=found.waterfall,
+        final=found.final,
+        ci_id=found.ci_id,
+        raw=found.raw,
     )
 
 

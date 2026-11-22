@@ -392,15 +392,39 @@
             "title": "Assessment Id",
             "type": "string"
           },
+          "ci_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "CI of the waterfall: the requested one or the top one",
+            "title": "Ci Id"
+          },
           "final": {
             "title": "Final",
             "type": "integer"
+          },
+          "raw": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Raw value 100 x S (EVA-11), where the bars start",
+            "title": "Raw"
           },
           "waterfall": {
             "additionalProperties": {
               "type": "integer"
             },
-            "description": "P, T, A, D, judge, floor and rounding contributions (EVA-12)",
+            "description": "Whole-point bars from the raw value to the final (EVA-12): P, T, A, D, judge, floor and rounding, plus clamp (keeping base + adjustment in 0-100) and version (E of alerts without a finding); raw + every bar = final",
             "title": "Waterfall",
             "type": "object"
           }
@@ -3250,6 +3274,7 @@
     },
     "/api/assessments/{id}/breakdown": {
       "get": {
+        "description": "Waterfall of the change from the raw value to the final for one CI of the assessment (EVA-12).",
         "operationId": "assessment_breakdown_api_assessments__id__breakdown_get",
         "parameters": [
           {
@@ -3259,6 +3284,25 @@
             "schema": {
               "title": "Id",
               "type": "string"
+            }
+          },
+          {
+            "description": "CI of the waterfall; default the top one",
+            "in": "query",
+            "name": "ci_id",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "maxLength": 100,
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "CI of the waterfall; default the top one",
+              "title": "Ci Id"
             }
           }
         ],
@@ -4080,6 +4124,7 @@
     },
     "/api/comparison/summary": {
       "get": {
+        "description": "Raw vs processed over the current scored findings (D-039, MET-24 to MET-27). The matrix crosses the CVSS\nlevel of the raw snapshot (rows) with the final level (columns); findings without CVSS stay out of the matrix\nand the indicators. `rank_correlation` is Kendall's tau-b, \"0.00\" when it is undefined.",
         "operationId": "comparison_summary_api_comparison_summary_get",
         "responses": {
           "200": {
@@ -4196,6 +4241,7 @@
     },
     "/api/comparison/table": {
       "get": {
+        "description": "One row per current scored finding, largest change against the raw value first (EVA-11, EVA-12).",
         "operationId": "comparison_table_api_comparison_table_get",
         "parameters": [
           {
@@ -5511,6 +5557,7 @@
     },
     "/api/findings/{id}/history": {
       "get": {
+        "description": "Score of the finding's CI in each assessment of its group, oldest first (EVA-05). The judge adjustment\nshown is the group's plus the CI's own.",
         "operationId": "finding_history_api_findings__id__history_get",
         "parameters": [
           {

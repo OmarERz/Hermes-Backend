@@ -87,10 +87,6 @@ GET_SAMPLES = [
     "/api/sources",
     "/api/pending/inventory",
     "/api/cpe/candidates?q=pago",
-    "/api/findings/fnd-1/history",
-    "/api/comparison/summary",
-    "/api/comparison/table",
-    "/api/assessments/asm-0001/breakdown",
     "/api/recommendations",
     "/api/recommendations/asm-0001",
     "/api/recommendations/asm-0001/feedback",
@@ -137,10 +133,7 @@ def test_pagination_cursor_flow_and_invalid_cursor(client: TestClient) -> None:
 
 def test_not_found_uses_the_envelope(client: TestClient) -> None:
     as_role(Role.READER)
-    for url in (
-        "/api/recommendations/nope",
-        "/api/findings/x/history",
-    ):
+    for url in ("/api/recommendations/nope",):
         response = client.get(url)
         assert response.status_code == 404
         assert response.json()["error"]["code"] == "not_found"

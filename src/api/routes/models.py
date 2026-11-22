@@ -263,8 +263,14 @@ class ComparisonRow(_Model):
 
 class Breakdown(_Model):
     assessment_id: str
-    waterfall: dict[str, int] = Field(description="P, T, A, D, judge, floor and rounding contributions (EVA-12)")
+    waterfall: dict[str, int] = Field(
+        description="Whole-point bars from the raw value to the final (EVA-12): P, T, A, D, judge, floor and "
+        "rounding, plus clamp (keeping base + adjustment in 0-100) and version (E of alerts without a finding); "
+        "raw + every bar = final"
+    )
     final: int
+    ci_id: str | None = Field(default=None, description="CI of the waterfall: the requested one or the top one")
+    raw: int | None = Field(default=None, description="Raw value 100 x S (EVA-11), where the bars start")
 
 
 # --- recommendations, feedback, tickets, alerts -----------------------------------------------------------------
