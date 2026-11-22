@@ -8,14 +8,21 @@ requires-python = ">=3.12,<3.13"
 dependencies = [
     "alembic>=1.20.1",
     "fastapi>=0.165.0",
+    "feedparser>=6.0.14",
+    "firebase-admin>=7.8.0",
     "httpx>=0.28.1",
     "pgvector>=0.5.1",
     "psycopg[binary]>=3.3.9",
     "pydantic>=2.14.4",
     "pydantic-settings>=2.16.3",
     "sqlalchemy>=2.1.9",
+    "trafilatura>=2.3.1",
     "uvicorn>=0.54.0",
 ]
+
+[project.optional-dependencies]
+# Local embeddings (ING-07, TODO(P-019)): pulls torch, so CI and tests do not install it; the code imports it lazily.
+embeddings = ["sentence-transformers>=5.1.0"]
 
 [dependency-groups]
 dev = [
@@ -74,6 +81,11 @@ mypy_path = "src"
 packages = ["api", "core", "notifications_api", "notifications_slack", "workers"]
 warn_unreachable = true
 plugins = ["pydantic.mypy"]
+
+[[tool.mypy.overrides]]
+# firebase-admin and feedparser ship no type information (no stubs, no py.typed marker).
+module = ["feedparser", "firebase_admin", "firebase_admin.*"]
+ignore_missing_imports = true
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]

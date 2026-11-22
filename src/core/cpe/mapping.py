@@ -13,11 +13,12 @@ from dataclasses import dataclass
 from datetime import UTC, datetime
 from typing import Final
 
+from sqlalchemy.dialects.postgresql import insert
 from sqlalchemy.orm import Session
 
 from core.db import models as m
 
-CPE_NAME: Final = re.compile(r"^[a-z0-9][a-z0-9._~+\-]{0,199}$")
+CPE_NAME: Final = re.compile(r"^[a-z0-9][a-z0-9._~+:\-]{0,199}$")
 MAX_CNA_LENGTH: Final = 200
 FIRST_PRINTABLE: Final = 32
 
@@ -60,7 +61,7 @@ def validate(data: MappingInput) -> MappingInput:
     if nvd_vendor is not None and nvd_product is not None:
         nvd_vendor, nvd_product = nvd_vendor.lower(), nvd_product.lower()
         if not CPE_NAME.match(nvd_vendor) or not CPE_NAME.match(nvd_product):
-            raise MappingError("Los nombres de NVD solo admiten minúsculas, números y . _ ~ + -")
+            raise MappingError("Los nombres de NVD solo admiten minúsculas, números y . _ ~ + : -")
     return MappingInput(nvd_vendor, nvd_product, cna_vendor, cna_product)
 
 
@@ -76,16 +77,28 @@ def set_mapping(
     clean = validate(data)
     if session.get(m.SoftwareProduct, software_product_id) is None:
         raise LookupError("software product not found")
-    row = session.get(m.CpeMapping, software_product_id)
-    if row is None:
-        row = m.CpeMapping(software_product_id=software_product_id)
-        session.add(row)
-    row.nvd_vendor, row.nvd_product = clean.nvd_vendor, clean.nvd_product
-    row.cna_vendor, row.cna_product = clean.cna_vendor, clean.cna_product
-    row.origin, row.confidence = "manual", None
-    row.mapped_by, row.mapped_at = mapped_by, now or datetime.now(UTC)
+    values = {
+        "software_product_id": software_product_id,
+        "nvd_vendor": clean.nvd_vendor,
+        "nvd_product": clean.nvd_product,
+        "cna_vendor": clean.cna_vendor,
+        "cna_product": clean.cna_product,
+        "origin": "manual",
+        "confidence": None,
+        "mapped_by": mapped_by,
+        "mapped_at": now or datetime.now(UTC),
+    }
+    # one atomic statement: two analysts saving the first mapping of a product cannot collide
+    upsert = insert(m.CpeMapping).values(**values)
+    session.execute(
+        upsert.on_conflict_do_update(
+            index_elements=[m.CpeMapping.software_product_id],
+            set_={k: v for k, v in values.items() if k != "software_product_id"},
+        )
+    )
     session.flush()
-    return row
+    session.expire_all()
+    return session.get_one(m.CpeMapping, software_product_id)
 
 
 def remove_mapping(session: Session, software_product_id: uuid.UUID) -> bool:

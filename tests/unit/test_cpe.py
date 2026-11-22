@@ -20,6 +20,7 @@ from core.vulndata.http import JsonSource, SourceUnavailableError
             MappingInput(None, None, "F5 Networks", "NGINX Plus"),
         ),
         (MappingInput("a", "b", "", ""), MappingInput("a", "b")),
+        (MappingInput("vendor:inc", "wid+get"), MappingInput("vendor:inc", "wid+get")),  # what the search proposes
     ],
 )
 def test_valid_mappings_are_normalized(data: MappingInput, expected: MappingInput) -> None:
@@ -33,6 +34,7 @@ def test_valid_mappings_are_normalized(data: MappingInput, expected: MappingInpu
         MappingInput("f5", None),
         MappingInput(None, None, "vendor", None),
         MappingInput("f5 inc", "nginx"),
+        MappingInput("-f5", "nginx"),
         MappingInput("f5", "ngi/nx"),
         MappingInput("f5", "nginx;drop"),
         MappingInput(None, None, "a" * 201, "b"),
@@ -107,3 +109,22 @@ def test_dictionary_incomplete_answer_is_an_error() -> None:
     client, _ = dictionary({"nope": 1})
     with pytest.raises(SourceUnavailableError, match="incomplete"):
         client.search("nginx")
+
+
+def test_dictionary_search_follows_pages_until_the_total() -> None:
+    pages = {
+        "0": {
+            "totalResults": 3,
+            "products": [product("cpe:2.3:a:f5:nginx:1:*:*:*:*:*:*:*"), product("cpe:2.3:a:f5:nginx:2:*:*:*:*:*:*:*")],
+        },
+        "2": {"totalResults": 3, "products": [product("cpe:2.3:a:nginx:nginx:3:*:*:*:*:*:*:*")]},
+    }
+    seen: list[str] = []
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        seen.append(request.url.params["startIndex"])
+        return httpx.Response(200, json=pages[request.url.params["startIndex"]])
+
+    client = CpeDictionaryClient(JsonSource(http=httpx.Client(transport=httpx.MockTransport(handler))))
+    assert [(c.vendor, c.product) for c in client.search("nginx")] == [("f5", "nginx"), ("nginx", "nginx")]
+    assert seen == ["0", "2"]

@@ -11,14 +11,14 @@ from __future__ import annotations
 
 import re
 from dataclasses import dataclass
-from typing import Final
+from typing import Any, Final
 
 from pydantic import SecretStr
 from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
 from core.db import models as m
-from core.vulndata.http import JsonSource, SourceUnavailableError
+from core.vulndata.http import JsonSource, SourceRefusedError, SourceUnavailableError
 from core.vulndata.records import NVD_CPE
 
 CPE_URL: Final = "https://services.nvd.nist.gov/rest/json/cpes/2.0"
@@ -27,6 +27,8 @@ TOKEN: Final = re.compile(r"[a-z0-9]+")
 MAX_QUERY: Final = 100
 FIRST_PRINTABLE: Final = 32
 LIMIT: Final = 20
+PAGE_SIZE: Final = 500
+MAX_PAGES: Final = 4  # versions each take a dictionary record, so one page may hold a single product
 CPE_FIELDS: Final = 6
 
 
@@ -69,22 +71,33 @@ class CpeDictionaryClient:
     api_key: SecretStr | None = None
     url: str = CPE_URL
 
+    @staticmethod
+    def _collect(item: Any, query: str, found: dict[tuple[str, str], Candidate]) -> None:
+        cpe = item.get("cpe") if isinstance(item, dict) else None
+        if not isinstance(cpe, dict) or cpe.get("deprecated") or not isinstance(cpe.get("cpeName"), str):
+            return
+        pair = parse_cpe_name(cpe["cpeName"])
+        if pair is None or pair in found:
+            return
+        titles = [t.get("title") for t in cpe.get("titles") or [] if isinstance(t, dict) and t.get("lang") == "en"]
+        found[pair] = Candidate(*pair, "nvd_dictionary", similarity(query, *pair), titles[0] if titles else None)
+
     def search(self, keyword: str) -> list[Candidate]:
         query = clean_query(keyword)
         headers = {"apiKey": self.api_key.get_secret_value()} if self.api_key else None
-        body = self.source.get(self.url, params={"keywordSearch": query, "resultsPerPage": 50}, headers=headers)
-        if not isinstance(body, dict) or not isinstance(body.get("products"), list):
-            raise SourceUnavailableError("incomplete NVD CPE answer")
         found: dict[tuple[str, str], Candidate] = {}
-        for item in body["products"]:
-            cpe = item.get("cpe") if isinstance(item, dict) else None
-            if not isinstance(cpe, dict) or cpe.get("deprecated") or not isinstance(cpe.get("cpeName"), str):
-                continue
-            pair = parse_cpe_name(cpe["cpeName"])
-            if pair is None or pair in found:
-                continue
-            titles = [t.get("title") for t in cpe.get("titles") or [] if isinstance(t, dict) and t.get("lang") == "en"]
-            found[pair] = Candidate(*pair, "nvd_dictionary", similarity(query, *pair), titles[0] if titles else None)
+        start = 0
+        for _ in range(MAX_PAGES):
+            params: dict[str, str | int] = {"keywordSearch": query, "resultsPerPage": PAGE_SIZE, "startIndex": start}
+            body = self.source.get(self.url, params=params, headers=headers)
+            if not isinstance(body, dict) or not isinstance(body.get("products"), list):
+                raise SourceUnavailableError("incomplete NVD CPE answer")
+            products: list[Any] = body["products"]
+            for item in products:
+                self._collect(item, query, found)
+            start += len(products)
+            if not products or start >= int(body.get("totalResults") or 0) or len(found) >= LIMIT:
+                break
         return list(found.values())
 
 
@@ -119,7 +132,7 @@ def find_candidates(
     if dictionary is not None:
         try:
             remote = dictionary.search(keyword)
-        except SourceUnavailableError:
+        except (SourceUnavailableError, SourceRefusedError):  # a 403 or an outage must not hide local candidates
             remote = []
         for item in remote:
             known = merged.get((item.vendor, item.product))
