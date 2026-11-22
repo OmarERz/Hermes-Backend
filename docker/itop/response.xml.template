@@ -1,0 +1,45 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!-- Unattended install response file for iTop 3.2.2 (test instance). The @NAME@ markers are filled in by
+     install.sh from the container environment; the rendered file holds passwords and is deleted afterwards. -->
+<installation>
+  <mode>install</mode>
+  <preinstall></preinstall>
+  <source_dir>datamodels/2.x/</source_dir>
+  <datamodel_version>3.2.2</datamodel_version>
+  <extensions_dir>extensions</extensions_dir>
+  <target_env>production</target_env>
+  <workspace_dir></workspace_dir>
+  <database>
+    <server>itop-db</server>
+    <user>itop</user>
+    <pwd>@ITOP_DB_PASSWORD@</pwd>
+    <name>itop</name>
+    <db_tls_enabled></db_tls_enabled>
+    <db_tls_ca></db_tls_ca>
+    <prefix></prefix>
+  </database>
+  <url>http://127.0.0.1:@ITOP_PORT@/</url>
+  <graphviz_path>/usr/bin/dot</graphviz_path>
+  <admin_account>
+    <user>admin</user>
+    <pwd>@ITOP_ADMIN_PASSWORD@</pwd>
+    <language>EN US</language>
+  </admin_account>
+  <language>EN US</language>
+  <selected_modules type="array"></selected_modules>
+  <selected_extensions type="array">
+    <item>itop-config-mgmt-core</item>
+    <item>itop-config-mgmt-datacenter</item>
+    <item>itop-config-mgmt-end-user</item>
+    <item>itop-config-mgmt-virtualization</item>
+    <item>itop-service-mgmt-enterprise</item>
+    <item>itop-ticket-mgmt-itil</item>
+    <item>itop-ticket-mgmt-itil-user-request</item>
+    <item>itop-ticket-mgmt-itil-incident</item>
+    <item>itop-change-mgmt-none</item>
+  </selected_extensions>
+  <sample_data>0</sample_data>
+  <old_addon></old_addon>
+  <options type="array"/>
+  <mysql_bindir></mysql_bindir>
+</installation>

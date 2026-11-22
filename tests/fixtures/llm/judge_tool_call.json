@@ -1,0 +1,29 @@
+{
+  "case": "judge_tool_call",
+  "responses": [
+    {
+      "id": "chatcmpl-recorded-1",
+      "object": "chat.completion",
+      "created": 1760000000,
+      "model": "deepseek-v4-pro",
+      "choices": [
+        {
+          "index": 0,
+          "finish_reason": "tool_calls",
+          "message": {
+            "role": "assistant",
+            "content": null,
+            "tool_calls": [
+              {
+                "id": "call_recorded_1",
+                "type": "function",
+                "function": {"name": "submit_verdict", "arguments": "{\"verdict\": \"confirm\", \"confidence\": 0.9}"}
+              }
+            ]
+          }
+        }
+      ],
+      "usage": {"prompt_tokens": 120, "completion_tokens": 30, "total_tokens": 150}
+    }
+  ]
+}

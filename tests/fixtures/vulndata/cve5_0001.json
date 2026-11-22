@@ -1,0 +1,28 @@
+{
+  "dataType": "CVE_RECORD",
+  "dataVersion": "5.1",
+  "cveMetadata": {"cveId": "CVE-2026-0001", "state": "PUBLISHED", "datePublished": "2026-10-01T10:00:00.000Z", "dateUpdated": "2026-10-06T08:00:00.000Z"},
+  "containers": {
+    "cna": {
+      "descriptions": [{"lang": "en", "value": "CNA text: heap overflow in nginx."}],
+      "metrics": [{"cvssV3_1": {"version": "3.1", "vectorString": "CVSS:3.1/AV:N/AC:L/PR:N/UI:N/S:U/C:N/I:N/A:H", "baseScore": 7.5}}],
+      "problemTypes": [{"descriptions": [{"lang": "en", "cweId": "CWE-787", "description": "CWE-787 Out-of-bounds Write"}, {"lang": "en", "description": "no id"}]}],
+      "affected": [
+        {"vendor": "F5", "product": "nginx", "defaultStatus": "unaffected", "versions": [
+          {"version": "1.20.0", "lessThan": "1.25.3", "status": "affected", "versionType": "semver"},
+          {"version": "0", "lessThanOrEqual": "1.18.5", "status": "affected"},
+          {"version": "1.19.0", "status": "affected"},
+          {"version": "1.25.3", "status": "unaffected"},
+          {"version": "abc123", "lessThan": "def456", "status": "affected", "versionType": "git"}
+        ]},
+        {"vendor": "n/a", "product": "thing"},
+        {"vendor": "Acme", "product": "Everything", "defaultStatus": "affected"}
+      ],
+      "references": [
+        {"url": "https://nginx.org/security", "tags": ["vendor-advisory", "patch", "x_transferred"]},
+        {"url": "https://example.test/poc", "tags": ["exploit"]}
+      ],
+      "workarounds": [{"lang": "en", "value": "Disable the affected module."}]
+    }
+  }
+}

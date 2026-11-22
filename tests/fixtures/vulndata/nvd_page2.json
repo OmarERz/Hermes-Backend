@@ -1,0 +1,31 @@
+{
+  "resultsPerPage": 1,
+  "startIndex": 2,
+  "totalResults": 3,
+  "format": "NVD_CVE",
+  "version": "2.0",
+  "timestamp": "2026-11-22T12:00:01.000",
+  "vulnerabilities": [
+    {
+      "cve": {
+        "id": "CVE-2026-0003",
+        "published": "2026-10-03T00:00:00.000",
+        "lastModified": "2026-10-04T00:00:00.000",
+        "descriptions": [{"lang": "en", "value": "Only CNA scored."}],
+        "metrics": {
+          "cvssMetricV40": [
+            {"source": "security@vendor.test", "type": "Secondary",
+             "cvssData": {"version": "4.0", "vectorString": "CVSS:4.0/AV:N/AC:L/AT:N/PR:N/UI:N/VC:H/VI:H/VA:H/SC:N/SI:N/SA:N", "baseScore": 9.3}}
+          ]
+        },
+        "configurations": [
+          {"nodes": [{"operator": "OR", "cpeMatch": [
+            {"vulnerable": true, "criteria": "cpe:2.3:a:vendor\\:inc:wid\\+get:2.1:*:*:*:*:*:*:*", "versionEndIncluding": "2.1"}
+          ]}]}
+        ],
+        "references": [{"url": "https://vendor.test/advisory"}]
+      }
+    },
+    {"cve": {"id": "not-a-cve"}}
+  ]
+}

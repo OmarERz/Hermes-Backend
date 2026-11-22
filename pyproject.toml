@@ -8,25 +8,30 @@ requires-python = ">=3.12,<3.13"
 dependencies = [
     "alembic>=1.20.1",
     "fastapi>=0.165.0",
+    "feedparser>=6.0.14",
     "firebase-admin>=7.8.0",
+    "httpx>=0.28.1",
     "pgvector>=0.5.1",
     "psycopg[binary]>=3.3.9",
     "pydantic>=2.14.4",
     "pydantic-settings>=2.16.3",
     "sqlalchemy>=2.1.9",
+    "trafilatura>=2.3.1",
     "uvicorn>=0.54.0",
 ]
 
 [dependency-groups]
 dev = [
-    "httpx>=0.28.1",
     "import-linter>=2.17",
     "jsonschema>=4.26.0",
     "mypy",
+    "openai>=3.57.0",
     "pytest",
     "pytest-cov>=7.1.0",
+    "pyyaml>=6.0.4",
     "ruff",
     "testcontainers>=4.15.0",
+    "types-pyyaml>=6.0.12.20261113",
 ]
 
 [build-system]
@@ -74,13 +79,13 @@ warn_unreachable = true
 plugins = ["pydantic.mypy"]
 
 [[tool.mypy.overrides]]
-# firebase-admin ships no type information
-module = ["firebase_admin", "firebase_admin.*"]
+# firebase-admin and feedparser ship no type information (no stubs, no py.typed marker).
+module = ["feedparser", "firebase_admin", "firebase_admin.*"]
 ignore_missing_imports = true
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
-pythonpath = ["src", "scripts"]
+pythonpath = ["src", "scripts", "tests"]
 addopts = ["--strict-markers", "--strict-config", "-m", "not slow"]
 markers = [
     "unit: pure functions, no I/O",
