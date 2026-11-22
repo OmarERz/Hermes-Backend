@@ -29,6 +29,7 @@ def build_openapi() -> dict[str, Any]:
         _env_file=None,
         database_url=SecretStr("postgresql://openapi:openapi@localhost/openapi"),
         firebase_project_id="openapi-export",
+        cursor_signing_key=SecretStr("openapi-export-key-not-a-secret-0000"),
         api_docs_enabled=False,
     )
     return create_app(settings).openapi()

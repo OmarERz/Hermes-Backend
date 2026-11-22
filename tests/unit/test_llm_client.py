@@ -223,6 +223,7 @@ def test_from_settings_uses_role_base_url_and_requires_a_key() -> None:
         "_env_file": None,
         "database_url": SecretStr("postgresql://a:b@db/h"),
         "firebase_project_id": "p",
+        "cursor_signing_key": SecretStr("k" * 40),
     }
     with pytest.raises(LlmRequestError, match="not configured"):
         LlmClient.from_settings(Settings(**base), "judge")  # type: ignore[arg-type]

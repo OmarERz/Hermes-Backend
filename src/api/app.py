@@ -5,6 +5,7 @@ from __future__ import annotations
 from fastapi import FastAPI
 
 from api.errors import ERROR_RESPONSES, install_error_handlers
+from api.pagination import CursorSigner
 from core.config import Settings
 from core.logging import configure_logging
 
@@ -23,6 +24,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         responses=ERROR_RESPONSES,
     )
 
+    app.state.cursor_signer = CursorSigner(settings.cursor_signing_key.get_secret_value())
     install_error_handlers(app)
 
     @app.get("/api/health", tags=["operations"])

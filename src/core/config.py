@@ -14,6 +14,7 @@ from pydantic import Field, HttpUrl, SecretStr, field_validator, model_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 DOCKER_SECRETS_DIR = Path("/run/secrets")
+MIN_CURSOR_KEY_LENGTH = 32
 DEFAULT_LLM_BASE_URL = "https://api.deepseek.com/beta"  # strict tool mode (JUE-03) ⚠️ verified in F0.5
 
 _OPTIONAL_FIELDS = (
@@ -49,6 +50,8 @@ class Settings(BaseSettings):
     # libpq/psycopg read PGPASSWORD when the URL has none, so passwords never need URL encoding (compose.yaml)
     pgpassword: SecretStr | None = None
     firebase_project_id: str = Field(min_length=1, description="Firebase project that issues the ID tokens")
+    # HMAC key that signs pagination cursors (API-02); a secret, also readable from a Docker secret file
+    cursor_signing_key: SecretStr = Field(description="Key that signs pagination cursors (at least 32 characters)")
 
     # Firebase Admin SDK service account: the most sensitive secret (SEG-20)
     firebase_credentials_file: Path | None = None
@@ -76,6 +79,13 @@ class Settings(BaseSettings):
     def _database_url_not_blank(cls, value: SecretStr) -> SecretStr:
         if not value.get_secret_value().strip():
             raise ValueError("DATABASE_URL is empty")
+        return value
+
+    @field_validator("cursor_signing_key")
+    @classmethod
+    def _cursor_key_strong_enough(cls, value: SecretStr) -> SecretStr:
+        if len(value.get_secret_value().strip()) < MIN_CURSOR_KEY_LENGTH:
+            raise ValueError(f"CURSOR_SIGNING_KEY must have at least {MIN_CURSOR_KEY_LENGTH} characters")
         return value
 
     @field_validator("firebase_project_id", mode="before")

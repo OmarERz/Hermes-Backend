@@ -40,7 +40,12 @@ def compose(env: dict[str, str], *args: str, timeout: int = 900) -> subprocess.C
 @pytest.fixture(scope="module")
 def stack() -> Iterator[dict[str, str]]:
     # reserved URL characters on purpose: the password must not need encoding
-    env = {**os.environ, **PORTS, "POSTGRES_PASSWORD": "p/w@" + secrets.token_urlsafe(12) + ":x"}
+    env = {
+        **os.environ,
+        **PORTS,
+        "CURSOR_SIGNING_KEY": secrets.token_urlsafe(32),
+        "POSTGRES_PASSWORD": "p/w@" + secrets.token_urlsafe(12) + ":x",
+    }
     up = compose(env, "up", "-d", "--build", "--wait", "--wait-timeout", "300")
     try:
         assert up.returncode == 0, up.stderr[-3000:]
