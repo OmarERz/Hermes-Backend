@@ -9,6 +9,7 @@ dependencies = [
     "alembic>=1.20.1",
     "fastapi>=0.165.0",
     "feedparser>=6.0.14",
+    "firebase-admin>=7.8.0",
     "httpx>=0.28.1",
     "pgvector>=0.5.1",
     "psycopg[binary]>=3.3.9",
@@ -25,7 +26,6 @@ embeddings = ["sentence-transformers>=5.1.0"]
 
 [dependency-groups]
 dev = [
-    "httpx>=0.28.1",
     "import-linter>=2.17",
     "jsonschema>=4.26.0",
     "mypy",
@@ -83,8 +83,8 @@ warn_unreachable = true
 plugins = ["pydantic.mypy"]
 
 [[tool.mypy.overrides]]
-# feedparser ships neither stubs nor a py.typed marker.
-module = ["feedparser"]
+# firebase-admin and feedparser ship no type information (no stubs, no py.typed marker).
+module = ["feedparser", "firebase_admin", "firebase_admin.*"]
 ignore_missing_imports = true
 
 [tool.pytest.ini_options]
