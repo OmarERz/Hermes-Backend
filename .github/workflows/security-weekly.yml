@@ -122,13 +122,19 @@ jobs:
         with:
           enable-cache: true
           python-version-file: .python-version
-      - name: Start the stack with a throwaway database password
+      - name: Start the stack with throwaway passwords
         if: steps.gate.outputs.enabled == 'true'
         run: |
-          pw=$(openssl rand -hex 24)
-          echo "::add-mask::$pw"
-          echo "POSTGRES_PASSWORD=$pw" >> "$GITHUB_ENV"
-          POSTGRES_PASSWORD="$pw" docker compose up --build --wait -d
+          for var in POSTGRES_PASSWORD MIGRATOR_DB_PASSWORD APP_DB_PASSWORD RETENTION_DB_PASSWORD; do
+            value=$(openssl rand -hex 24)
+            echo "::add-mask::$value"
+            echo "$var=$value" >> "$GITHUB_ENV"
+          done
+          # ZAP reads the schema from /api/openapi.json, which is served only with the docs enabled.
+          echo "API_DOCS_ENABLED=true" >> "$GITHUB_ENV"
+      - name: Wait for the stack
+        if: steps.gate.outputs.enabled == 'true'
+        run: docker compose up --build --wait -d
       - name: ZAP API scan
         if: steps.gate.outputs.enabled == 'true'
         run: |
