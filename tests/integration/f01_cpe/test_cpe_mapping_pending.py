@@ -118,6 +118,21 @@ def test_mapping_removes_the_pending_item_and_can_be_replaced_or_removed(engine:
     assert ("software_unmapped", "nginx") in issues(engine)
 
 
+def test_two_analysts_saving_the_first_mapping_do_not_collide(engine: Engine) -> None:
+    ids = seed_inventory(engine)
+    first, second = Session(engine), Session(engine)
+    try:
+        set_mapping(first, ids["nginx"], MappingInput("f5", "nginx"), now=T0)
+        first.commit()
+        set_mapping(second, ids["nginx"], MappingInput("nginx", "nginx"), now=T0)  # sees the row: updates it
+        second.commit()
+    finally:
+        first.close()
+        second.close()
+    with engine.connect() as conn:
+        assert conn.execute(text("SELECT nvd_vendor FROM cpe_mapping")).all() == [("nginx",)]
+
+
 def test_mapping_errors(engine: Engine) -> None:
     ids = seed_inventory(engine)
     with Session(engine) as session:
@@ -155,6 +170,7 @@ def test_find_candidates_merges_and_survives_a_dictionary_outage(engine: Engine)
             ("nginx", "nginx", "nvd_dictionary", None, None),
             ("f5", "nginx", "nvd_dictionary", 2, "F5 NGINX"),
         ]
-        offline = find_candidates(session, "nginx", client(503, {}))
-        assert [(c.vendor, c.source) for c in offline] == [("f5", "local")]
+        for status in (503, 403):  # an outage and a rejected key both keep the local candidates
+            offline = find_candidates(session, "nginx", client(status, {}))
+            assert [(c.vendor, c.source) for c in offline] == [("f5", "local")]
         assert [c.vendor for c in find_candidates(session, "nginx")] == ["f5"]
