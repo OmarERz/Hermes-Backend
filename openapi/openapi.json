@@ -282,6 +282,10 @@
             ],
             "title": "Custodian"
           },
+          "exposed": {
+            "title": "Exposed",
+            "type": "boolean"
+          },
           "findings_by_level": {
             "additionalProperties": {
               "type": "integer"
@@ -292,6 +296,10 @@
           "in_kev": {
             "title": "In Kev",
             "type": "integer"
+          },
+          "last_seen": {
+            "title": "Last Seen",
+            "type": "string"
           },
           "name": {
             "title": "Name",
@@ -314,6 +322,17 @@
             "minimum": 0.0,
             "title": "Risk",
             "type": "integer"
+          },
+          "status": {
+            "enum": [
+              "new",
+              "persistent",
+              "reopened",
+              "fixed",
+              "no_data"
+            ],
+            "title": "Status",
+            "type": "string"
           }
         },
         "required": [
@@ -324,7 +343,10 @@
           "in_kev",
           "classification",
           "owner",
-          "custodian"
+          "custodian",
+          "exposed",
+          "status",
+          "last_seen"
         ],
         "title": "AssetRisk",
         "type": "object"
@@ -1956,6 +1978,22 @@
         "title": "Recommendation",
         "type": "object"
       },
+      "RestoreRequest": {
+        "additionalProperties": false,
+        "properties": {
+          "expected_version": {
+            "description": "Current version the client read; 409 if it changed (API-03)",
+            "minimum": 1.0,
+            "title": "Expected Version",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "expected_version"
+        ],
+        "title": "RestoreRequest",
+        "type": "object"
+      },
       "Role": {
         "enum": [
           "reader",
@@ -2536,6 +2574,17 @@
             "title": "Ci Count",
             "type": "integer"
           },
+          "classification": {
+            "description": "The most restrictive among its assets (FRO-13)",
+            "enum": [
+              "public",
+              "classified",
+              "highly_classified",
+              "unclassified"
+            ],
+            "title": "Classification",
+            "type": "string"
+          },
           "custodians": {
             "items": {
               "type": "string"
@@ -2551,6 +2600,10 @@
             "title": "Description",
             "type": "string"
           },
+          "exposed": {
+            "title": "Exposed",
+            "type": "boolean"
+          },
           "final": {
             "maximum": 100.0,
             "minimum": 0.0,
@@ -2565,6 +2618,10 @@
             "title": "In Kev",
             "type": "boolean"
           },
+          "last_seen": {
+            "title": "Last Seen",
+            "type": "string"
+          },
           "level": {
             "enum": [
               "critical",
@@ -2575,8 +2632,26 @@
             "title": "Level",
             "type": "string"
           },
+          "owners": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Owners",
+            "type": "array"
+          },
           "product": {
             "title": "Product",
+            "type": "string"
+          },
+          "status": {
+            "enum": [
+              "new",
+              "persistent",
+              "reopened",
+              "fixed",
+              "no_data"
+            ],
+            "title": "Status",
             "type": "string"
           },
           "tickets": {
@@ -2597,6 +2672,11 @@
           "final",
           "level",
           "in_kev",
+          "owners",
+          "classification",
+          "exposed",
+          "status",
+          "last_seen",
           "description",
           "assets"
         ],
@@ -2610,6 +2690,17 @@
             "title": "Ci Count",
             "type": "integer"
           },
+          "classification": {
+            "description": "The most restrictive among its assets (FRO-13)",
+            "enum": [
+              "public",
+              "classified",
+              "highly_classified",
+              "unclassified"
+            ],
+            "title": "Classification",
+            "type": "string"
+          },
           "custodians": {
             "items": {
               "type": "string"
@@ -2620,6 +2711,10 @@
           "cve": {
             "title": "Cve",
             "type": "string"
+          },
+          "exposed": {
+            "title": "Exposed",
+            "type": "boolean"
           },
           "final": {
             "maximum": 100.0,
@@ -2635,6 +2730,10 @@
             "title": "In Kev",
             "type": "boolean"
           },
+          "last_seen": {
+            "title": "Last Seen",
+            "type": "string"
+          },
           "level": {
             "enum": [
               "critical",
@@ -2645,8 +2744,26 @@
             "title": "Level",
             "type": "string"
           },
+          "owners": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Owners",
+            "type": "array"
+          },
           "product": {
             "title": "Product",
+            "type": "string"
+          },
+          "status": {
+            "enum": [
+              "new",
+              "persistent",
+              "reopened",
+              "fixed",
+              "no_data"
+            ],
+            "title": "Status",
             "type": "string"
           },
           "tickets": {
@@ -2666,7 +2783,12 @@
           "tickets",
           "final",
           "level",
-          "in_kev"
+          "in_kev",
+          "owners",
+          "classification",
+          "exposed",
+          "status",
+          "last_seen"
         ],
         "title": "VulnerabilityGroup",
         "type": "object"
@@ -4667,7 +4789,7 @@
     },
     "/api/config/versions/{v}/restore": {
       "post": {
-        "description": "Restores a version as a new one and recalculates the bases by code, without calling the judge (FRO-08).",
+        "description": "Restores a version as a new one and recalculates the bases by code, without calling the judge (FRO-08).\n\nLike every configuration write it carries the expected current version (API-03): 409 if it changed.",
         "operationId": "restore_version_api_config_versions__v__restore_post",
         "parameters": [
           {
@@ -4680,6 +4802,16 @@
             }
           }
         ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/RestoreRequest"
+              }
+            }
+          },
+          "required": true
+        },
         "responses": {
           "200": {
             "content": {
@@ -7926,7 +8058,7 @@
     },
     "/api/scans": {
       "post": {
-        "description": "Queues a simulated scan; progress comes from the run events (FRO-19).",
+        "description": "Queues a simulated scan; progress comes from the run events (FRO-19). The run shows up in GET /api/runs.",
         "operationId": "launch_scan_api_scans_post",
         "requestBody": {
           "content": {
@@ -9019,24 +9151,9 @@
     },
     "/api/vulnerabilities": {
       "get": {
-        "description": "Grouped views resolved by the backend (FRO-09); filters of FRO-10.",
+        "description": "Grouped views resolved by the backend (FRO-09). The FRO-10 filters and cursor/limit apply to every view.\n\nIn the `criticality` view the page is cut over the groups ordered by their final; each band reports the\nnumber of groups of the whole filtered result and only the groups that fall in the page.",
         "operationId": "list_vulnerabilities_api_vulnerabilities_get",
         "parameters": [
-          {
-            "in": "query",
-            "name": "view",
-            "required": false,
-            "schema": {
-              "default": "vulnerability",
-              "enum": [
-                "vulnerability",
-                "criticality",
-                "asset"
-              ],
-              "title": "View",
-              "type": "string"
-            }
-          },
           {
             "in": "query",
             "name": "band",
@@ -9061,6 +9178,78 @@
           },
           {
             "in": "query",
+            "name": "custodian",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "maxLength": 100,
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Custodian"
+            }
+          },
+          {
+            "in": "query",
+            "name": "owner",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "maxLength": 100,
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Owner"
+            }
+          },
+          {
+            "in": "query",
+            "name": "classification",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "enum": [
+                    "public",
+                    "classified",
+                    "highly_classified",
+                    "unclassified"
+                  ],
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Classification"
+            }
+          },
+          {
+            "in": "query",
+            "name": "exposed",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "boolean"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Exposed"
+            }
+          },
+          {
+            "in": "query",
             "name": "in_kev",
             "required": false,
             "schema": {
@@ -9073,6 +9262,82 @@
                 }
               ],
               "title": "In Kev"
+            }
+          },
+          {
+            "in": "query",
+            "name": "status",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "enum": [
+                    "new",
+                    "persistent",
+                    "reopened",
+                    "fixed",
+                    "no_data"
+                  ],
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Status"
+            }
+          },
+          {
+            "description": "Last seen on or after (ISO 8601)",
+            "in": "query",
+            "name": "date_from",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "format": "date-time",
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Last seen on or after (ISO 8601)",
+              "title": "Date From"
+            }
+          },
+          {
+            "description": "Last seen on or before (ISO 8601)",
+            "in": "query",
+            "name": "date_to",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "format": "date-time",
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Last seen on or before (ISO 8601)",
+              "title": "Date To"
+            }
+          },
+          {
+            "in": "query",
+            "name": "view",
+            "required": false,
+            "schema": {
+              "default": "vulnerability",
+              "enum": [
+                "vulnerability",
+                "criticality",
+                "asset"
+              ],
+              "title": "View",
+              "type": "string"
             }
           },
           {
