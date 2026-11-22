@@ -190,17 +190,22 @@ jobs:
     needs: tests
     runs-on: ubuntu-latest
     timeout-minutes: 15
-    # Runs only when the repository has the SONAR_TOKEN secret (it is empty for fork pull requests).
+    # The repository variable SONAR_ENABLED=true switches the analysis on once SonarQube Cloud is configured.
+    # From then on a missing SONAR_TOKEN (e.g. a Dependabot PR without the secret) fails the job: no green skip.
     env:
       SONAR_TOKEN: ${{ secrets.SONAR_TOKEN }}
+      SONAR_ENABLED: ${{ vars.SONAR_ENABLED }}
     steps:
-      - name: Check for SONAR_TOKEN
+      - name: Check the SonarQube Cloud switch and token
         id: gate
         run: |
-          if [ -n "$SONAR_TOKEN" ]; then
-            echo "enabled=true" >> "$GITHUB_OUTPUT"
+          if [ "$SONAR_ENABLED" != "true" ]; then
+            echo "SKIPPED: SonarQube Cloud analysis, the repository variable SONAR_ENABLED is not 'true'"
+          elif [ -z "$SONAR_TOKEN" ]; then
+            echo "::error::SONAR_ENABLED is true but SONAR_TOKEN is empty (also add it as a Dependabot secret)"
+            exit 1
           else
-            echo "SKIPPED: SonarQube Cloud analysis, the SONAR_TOKEN secret is not set"
+            echo "enabled=true" >> "$GITHUB_OUTPUT"
           fi
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         if: steps.gate.outputs.enabled == 'true'
