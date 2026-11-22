@@ -1,0 +1,142 @@
+name: Security weekly
+
+on:
+  schedule:
+    - cron: "17 5 * * 1" # Mondays 05:17 UTC
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: security-weekly-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  audit:
+    name: pip-audit
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: astral-sh/setup-uv@1db35dd8eee11c5894872e0b383ae6c406cf738d # v10.4.0
+        with:
+          enable-cache: true
+          python-version-file: .python-version
+      - name: pip-audit on the locked dependencies
+        run: make audit
+
+  gitleaks-history:
+    name: gitleaks-full-history
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+      - name: Gitleaks over all history
+        run: GITLEAKS_FULL_HISTORY=1 make secrets
+
+  slow-tests:
+    name: slow-tests
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: astral-sh/setup-uv@1db35dd8eee11c5894872e0b383ae6c406cf738d # v10.4.0
+        with:
+          enable-cache: true
+          python-version-file: .python-version
+      - name: Install dependencies
+        run: uv sync --locked
+      - name: Slow tests
+        run: |
+          rc=0
+          uv run --locked pytest -m slow --no-cov || rc=$?
+          # Exit code 5 means that no test carries the slow marker yet.
+          if [ "$rc" -eq 5 ]; then
+            echo "SKIPPED: no test carries the slow marker yet"
+          else
+            exit "$rc"
+          fi
+
+  trivy:
+    name: trivy
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - name: Trivy config scan (Dockerfiles and compose)
+        uses: aquasecurity/trivy-action@ed142fd0673e97e23eac54620cfb913e5ce36c25 # v0.36.0
+        with:
+          scan-type: config
+          scan-ref: .
+          severity: HIGH,CRITICAL
+          exit-code: "1"
+      - name: Build the backend image
+        run: docker build -t hermes-backend:scan .
+      - name: Build the auth emulator image
+        run: docker build -t hermes-auth-emulator:scan docker/auth-emulator
+      - name: Trivy image scan (backend)
+        uses: aquasecurity/trivy-action@ed142fd0673e97e23eac54620cfb913e5ce36c25 # v0.36.0
+        with:
+          scan-type: image
+          image-ref: hermes-backend:scan
+          severity: HIGH,CRITICAL
+          ignore-unfixed: true
+          exit-code: "1"
+      - name: Trivy image scan (auth emulator)
+        uses: aquasecurity/trivy-action@ed142fd0673e97e23eac54620cfb913e5ce36c25 # v0.36.0
+        with:
+          scan-type: image
+          image-ref: hermes-auth-emulator:scan
+          severity: HIGH,CRITICAL
+          ignore-unfixed: true
+          exit-code: "1"
+
+  zap:
+    name: zap
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - name: Check ZAP prerequisites
+        id: gate
+        run: |
+          # ZAP needs the running API and a bearer token from the Firebase Auth emulator. F0.7 is expected
+          # to provide the token command as the Makefile target emulator-token; until then ZAP is skipped.
+          if grep -q '^emulator-token:' Makefile; then
+            echo "enabled=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "SKIPPED: OWASP ZAP, no Makefile target emulator-token yet (F0.7 provides the test token)"
+          fi
+      - uses: astral-sh/setup-uv@1db35dd8eee11c5894872e0b383ae6c406cf738d # v10.4.0
+        if: steps.gate.outputs.enabled == 'true'
+        with:
+          enable-cache: true
+          python-version-file: .python-version
+      - name: Start the stack with a throwaway database password
+        if: steps.gate.outputs.enabled == 'true'
+        run: |
+          pw=$(openssl rand -hex 24)
+          echo "::add-mask::$pw"
+          echo "POSTGRES_PASSWORD=$pw" >> "$GITHUB_ENV"
+          POSTGRES_PASSWORD="$pw" docker compose up --build --wait -d
+      - name: ZAP API scan
+        if: steps.gate.outputs.enabled == 'true'
+        run: |
+          TEST_TOKEN=$(make --no-print-directory emulator-token)
+          echo "::add-mask::$TEST_TOKEN"
+          API_URL=http://localhost:8000 TEST_TOKEN="$TEST_TOKEN" make zap
+      - name: Stop the stack
+        if: always() && steps.gate.outputs.enabled == 'true'
+        run: docker compose down -v
