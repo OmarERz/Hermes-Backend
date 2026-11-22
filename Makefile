@@ -56,13 +56,18 @@ SCHEMATHESIS_VERSION ?= 4.33.4
 BRUNO_CLI_VERSION ?= 4.3.0
 ZAP_IMAGE ?= ghcr.io/zaproxy/zaproxy@sha256:9624669db72f54d86c4b46a7064518bd9bf79d8c61a4c31befa9923489f328af
 OPENAPI_SNAPSHOT ?= openapi/openapi.json
+# Operations with external effects are excluded from fuzzing (docs/14 §4.3). --exclude-path drops every
+# method of the path; later phases extend this list (e.g. SCHEMATHESIS_EXCLUDES += --exclude-path /api/x).
+SCHEMATHESIS_EXCLUDES ?= --exclude-path /api/scans --exclude-path /api/stix/export
 
 # Not part of plain `make verify`. A step is skipped only while the phase that creates its prerequisite
 # has not landed, and says so with an explicit SKIPPED line; once the prerequisite exists it must pass.
 verify-full: verify ## Full gate before closing a feature: verify + Schemathesis + adversarial suite
 	@if [ -f "$(OPENAPI_SNAPSHOT)" ]; then \
 	  test -n "$${API_URL:-}" || { echo "API_URL is not set: Schemathesis needs the running API (e.g. API_URL=http://localhost:8000)" >&2; exit 2; }; \
-	  uvx schemathesis@$(SCHEMATHESIS_VERSION) run "$(OPENAPI_SNAPSHOT)" --url "$$API_URL"; \
+	  test -n "$${TEST_TOKEN:-}" || { echo "TEST_TOKEN is not set: Schemathesis needs a Firebase emulator bearer token (docs/14 §4.3)" >&2; exit 2; }; \
+	  uvx schemathesis@$(SCHEMATHESIS_VERSION) run "$(OPENAPI_SNAPSHOT)" --url "$$API_URL" \
+	    -H "Authorization: Bearer $$TEST_TOKEN" $(SCHEMATHESIS_EXCLUDES); \
 	else \
 	  echo "SKIPPED: Schemathesis, $(OPENAPI_SNAPSHOT) does not exist yet (arrives in F0.5)"; \
 	fi
