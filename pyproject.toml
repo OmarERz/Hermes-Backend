@@ -68,7 +68,7 @@ plugins = ["pydantic.mypy"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
-pythonpath = ["src", "scripts"]
+pythonpath = ["src", "scripts", "tests"]
 addopts = ["--strict-markers", "--strict-config", "-m", "not slow"]
 markers = [
     "unit: pure functions, no I/O",
