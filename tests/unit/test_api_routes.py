@@ -87,9 +87,6 @@ GET_SAMPLES = [
     "/api/sources",
     "/api/pending/inventory",
     "/api/cpe/candidates?q=pago",
-    "/api/recommendations",
-    "/api/recommendations/asm-0001",
-    "/api/recommendations/asm-0001/feedback",
     "/api/tickets",
     "/api/alerts",
     "/api/runs",
@@ -119,21 +116,21 @@ def test_connection_status_never_contains_a_key(client: TestClient) -> None:
 
 def test_pagination_cursor_flow_and_invalid_cursor(client: TestClient) -> None:
     as_role(Role.READER)
-    first = client.get("/api/recommendations", params={"limit": 1}).json()
+    first = client.get("/api/runs", params={"limit": 1}).json()
     assert len(first["items"]) == 1
     assert first["next_cursor"]
-    second = client.get("/api/recommendations", params={"limit": 1, "cursor": first["next_cursor"]}).json()
-    assert second["items"][0]["assessment_id"] == "asm-0002"
+    second = client.get("/api/runs", params={"limit": 1, "cursor": first["next_cursor"]}).json()
+    assert second["items"][0]["id"] == "run-2"
     assert second["next_cursor"] is None
-    bad = client.get("/api/recommendations", params={"cursor": "tampered.cursor"})
+    bad = client.get("/api/runs", params={"cursor": "tampered.cursor"})
     assert bad.status_code == 400
     assert bad.json()["error"]["code"] == "invalid_cursor"
-    assert client.get("/api/recommendations", params={"limit": 500}).status_code == 422
+    assert client.get("/api/runs", params={"limit": 500}).status_code == 422
 
 
 def test_not_found_uses_the_envelope(client: TestClient) -> None:
     as_role(Role.READER)
-    for url in ("/api/recommendations/nope",):
+    for url in ("/api/recommendations/nope", "/api/recommendations/nope/feedback", "/api/findings/x/history"):
         response = client.get(url)
         assert response.status_code == 404
         assert response.json()["error"]["code"] == "not_found"
@@ -293,7 +290,6 @@ def test_runs_stix_calibration_and_notifications(client: TestClient) -> None:
     assert client.put("/api/setup/steps/3", json={"done": True}).json()["done"] is True
     assert client.put("/api/setup/steps/99", json={}).status_code == 404
     assert client.get("/api/tickets", params={"urgency": 1}).json()["items"][0]["itop_id"] == "R-000123"
-    assert client.get("/api/recommendations/asm-0002/feedback").json() == []
 
 
 def test_decided_proposal_and_non_error_event_conflict() -> None:

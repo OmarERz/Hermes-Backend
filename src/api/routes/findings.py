@@ -35,6 +35,7 @@ from api.routes.models import (
     FindingStatus,
     Level,
     Recommendation,
+    RecommendationFilters,
     ScoreHistoryPoint,
     Ticket,
     VulnerabilityBand,
@@ -45,6 +46,7 @@ from api.routes.models import (
 )
 from core.views import comparison, history
 from core.views import groups as views
+from core.views import recommendations as recs
 from core.views.common import iso, parse_uuid
 from notifications_api import FeedbackResult
 
@@ -289,17 +291,78 @@ def assessment_breakdown(
     )
 
 
+def _recommendation_model(r: recs.Recommendation) -> Recommendation:
+    a = r.asset
+    return Recommendation(
+        assessment_id=str(r.assessment_id),
+        created_at=iso(r.created_at),
+        cve=r.cve,
+        product=r.product,
+        base=r.base,
+        judge_adjustment=r.judge_adjustment,
+        final=r.final,
+        level=cast(Level, r.level),
+        previous_final=r.previous_final,
+        justification=r.justification,
+        mitigation=r.mitigation,
+        mitigation_draft=r.mitigation_draft,
+        asset=None
+        if a is None
+        else AffectedAsset(
+            ci_id=a.ci_id,
+            name=a.name,
+            itop_url=a.itop_url,
+            owner=a.owner,
+            custodian=a.custodian,
+            criticality=a.criticality,
+            exposed=a.exposed,
+            classification=cast(Classification, a.classification),
+            classification_at_evaluation=cast(Classification, a.classification_at_evaluation),
+            finding_status=cast(FindingStatus, a.finding_status),
+            score=a.score,
+        ),
+        ticket_url=r.ticket_url,
+        feedback_count=r.feedback_count,
+    )
+
+
 @router.get("/api/recommendations", dependencies=[guard("GET", "/api/recommendations")], responses=PAGINATED_RESPONSES)
-def list_recommendations(params: PageQuery, signer: Signer) -> Page[Recommendation]:
-    return paginate(samples.RECOMMENDATIONS, params, signer)
+def list_recommendations(
+    params: PageQuery,
+    signer: Signer,
+    session: SessionDep,
+    itop_url: ItopUrl,
+    filters: Annotated[RecommendationFilters, Query()],
+) -> Page[Recommendation]:
+    """Recommendation feed, newest first (FRO-12); `group_id` or `ci_id` narrow it to one timeline.
+
+    The score is the assessment's highest final (EVA-07); the CI shown is the most restrictive one at evaluation
+    time, with its classification, owner and custodian of that moment (FRO-13).
+    """
+    key = decode_key(params, "recommendations", ("time", "uuid"))
+    group_id, ci_id = filters.group_id, filters.ci_id
+    parsed_group = parse_uuid(group_id) if group_id is not None else None
+    if (group_id is not None and parsed_group is None) or (ci_id is not None and "\x00" in ci_id):
+        return Page[Recommendation](items=[], next_cursor=None)  # no group has that id, no CI has that text
+    found, next_key = recs.list_recommendations(
+        session,
+        recs.Query(group_id=parsed_group, ci_id=ci_id),
+        itop_url,
+        after=None if key is None else (key[0], key[1]),
+        limit=params.limit,
+    )
+    return Page[Recommendation](
+        items=[_recommendation_model(r) for r in found], next_cursor=encode_key(signer, "recommendations", next_key)
+    )
 
 
 @router.get("/api/recommendations/{assessment_id}", dependencies=[guard("GET", "/api/recommendations/{assessment_id}")])
-def get_recommendation(assessment_id: str) -> Recommendation:
-    found = next((r for r in samples.RECOMMENDATIONS if r.assessment_id == assessment_id), None)
+def get_recommendation(assessment_id: str, session: SessionDep, itop_url: ItopUrl) -> Recommendation:
+    parsed = parse_uuid(assessment_id)
+    found = recs.get_recommendation(session, parsed, itop_url) if parsed is not None else None
     if found is None:
         raise _not_found("La recomendación")
-    return found
+    return _recommendation_model(found)
 
 
 @router.post("/api/feedback", status_code=201, dependencies=[guard("POST", "/api/feedback")])
@@ -311,10 +374,27 @@ def post_feedback(feedback: FeedbackRequest) -> FeedbackResult:
 
 
 @router.get("/api/recommendations/{id}/feedback", dependencies=[guard("GET", "/api/recommendations/{id}/feedback")])
-def recommendation_feedback(id: str) -> list[FeedbackEntry]:  # noqa: A002
-    if not any(r.assessment_id == id for r in samples.RECOMMENDATIONS):
+def recommendation_feedback(id: str, session: SessionDep) -> list[FeedbackEntry]:  # noqa: A002
+    """Feedback received on one assessment, from Slack and the front, newest first, superseded ones included
+    (FRO-15). `on_older_version`: a newer assessment of the same group changed the score."""
+    parsed = parse_uuid(id)
+    found = recs.feedback_of(session, parsed) if parsed is not None else None
+    if found is None:
         raise _not_found("La recomendación")
-    return samples.FEEDBACK if id == "asm-0001" else []
+    return [
+        FeedbackEntry(
+            user=f.user,
+            channel=cast(Literal["frontend", "slack"], f.channel),
+            verdict=f.verdict,
+            proposed_level=cast(Level | None, f.proposed_level),
+            proposed_score=f.proposed_score,
+            comment=f.comment,
+            created_at=iso(f.created_at),
+            active=f.active,
+            on_older_version=f.on_older_version,
+        )
+        for f in found
+    ]
 
 
 @router.get("/api/tickets", dependencies=[guard("GET", "/api/tickets")], responses=PAGINATED_RESPONSES)

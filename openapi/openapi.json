@@ -7644,8 +7644,47 @@
     },
     "/api/recommendations": {
       "get": {
+        "description": "Recommendation feed, newest first (FRO-12); `group_id` or `ci_id` narrow it to one timeline.\n\nThe score is the assessment's highest final (EVA-07); the CI shown is the most restrictive one at evaluation\ntime, with its classification, owner and custodian of that moment (FRO-13).",
         "operationId": "list_recommendations_api_recommendations_get",
         "parameters": [
+          {
+            "description": "Timeline of one vulnerability group",
+            "in": "query",
+            "name": "group_id",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "maxLength": 100,
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Timeline of one vulnerability group",
+              "title": "Group Id"
+            }
+          },
+          {
+            "description": "Timeline of one CI (iTop id)",
+            "in": "query",
+            "name": "ci_id",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "maxLength": 100,
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Timeline of one CI (iTop id)",
+              "title": "Ci Id"
+            }
+          },
           {
             "description": "Opaque cursor from `next_cursor`: base64url(payload).base64url(signature). A cursor that is not ours or was altered is answered with 400 `invalid_cursor`.",
             "in": "query",
@@ -7923,6 +7962,7 @@
     },
     "/api/recommendations/{id}/feedback": {
       "get": {
+        "description": "Feedback received on one assessment, from Slack and the front, newest first, superseded ones included\n(FRO-15). `on_older_version`: a newer assessment of the same group changed the score.",
         "operationId": "recommendation_feedback_api_recommendations__id__feedback_get",
         "parameters": [
           {

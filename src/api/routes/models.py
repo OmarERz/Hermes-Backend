@@ -457,3 +457,13 @@ class VulnerabilityFilters(_Model):
     status: FindingStatus | None = None
     date_from: DateTimeString | None = Field(default=None, description="Last seen on or after (RFC 3339)")
     date_to: DateTimeString | None = Field(default=None, description="Last seen on or before (RFC 3339)")
+
+
+class RecommendationFilters(_Model):
+    """Optional narrowing of the recommendation feed to one timeline (FRO-12)."""
+
+    # The same query string also carries `cursor` and `limit`, read by other parameters.
+    model_config = ConfigDict(extra="ignore", strict=False)
+
+    group_id: str | None = Field(default=None, max_length=100, description="Timeline of one vulnerability group")
+    ci_id: str | None = Field(default=None, max_length=100, description="Timeline of one CI (iTop id)")

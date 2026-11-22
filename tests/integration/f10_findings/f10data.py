@@ -277,7 +277,60 @@ def build_scenario(session: Session) -> Scenario:
     for ci in ("CI-1", "CI-2"):
         session.add(m.TicketFinding(ticket_id=ticket.id, finding_id=sc.findings[("G1", ci)], added_at=T1))
     session.flush()
+    _add_feedback(session, sc)
     return sc
+
+
+def _add_feedback(session: Session, sc: Scenario) -> None:
+    """On A1: Ana's first verdict (superseded), her current one and Luis's from Slack. On A2: one from Ana."""
+    ana = m.AppUser(
+        firebase_uid="u-ana",
+        email="ana@example.test",
+        display_name="Ana Analista",
+        role="analyst",
+        active=True,
+        created_at=T0,
+    )
+    luis = m.AppUser(firebase_uid="u-luis", email="luis@example.test", role="analyst", active=True, created_at=T0)
+    session.add_all([ana, luis])
+    session.flush()
+    hour = timedelta(hours=1)
+    session.add_all(
+        [
+            m.Feedback(
+                assessment_id=sc.assessments["A1"],
+                app_user_id=ana.id,
+                channel="frontend",
+                verdict="wrong_priority",
+                proposed_level="high",
+                created_at=T0 + hour,
+                superseded_at=T1 + hour,
+            ),
+            m.Feedback(
+                assessment_id=sc.assessments["A1"],
+                app_user_id=ana.id,
+                channel="frontend",
+                verdict="relevant",
+                comment="Confirmado.",
+                created_at=T1 + hour,
+            ),
+            m.Feedback(
+                assessment_id=sc.assessments["A1"],
+                app_user_id=luis.id,
+                channel="slack",
+                verdict="false_positive",
+                created_at=T1 + 2 * hour,
+            ),
+            m.Feedback(
+                assessment_id=sc.assessments["A2"],
+                app_user_id=ana.id,
+                channel="frontend",
+                verdict="investigating",
+                created_at=T2,
+            ),
+        ]
+    )
+    session.flush()
 
 
 def _seeded_findings(session: Session) -> dict[tuple[str, str], uuid.UUID]:
