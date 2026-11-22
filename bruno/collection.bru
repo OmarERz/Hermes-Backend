@@ -2,6 +2,7 @@ docs {
   Hermes API collection (one folder per feature, D-070).
 
   Local run: start the stack (docker compose up) and, for authenticated requests, get a test token:
-    TEST_TOKEN=$(make emulator-token ROLE=analyst) make bruno
+    TEST_TOKEN=$(make emulator-token ROLE=admin) make bruno
+  An admin token reaches every route (the f00-5-contracts folder includes admin-only ones).
   In the Bruno app, paste the same token into the `token` secret of the `local` environment.
 }
