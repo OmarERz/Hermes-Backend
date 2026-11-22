@@ -416,3 +416,25 @@ def test_a_decommissioned_ci_leaves_the_ticket(session: Session) -> None:
         sc.assets["web-01"].itop_ci_id
     ]
     assert "El CI web-02 se dio de baja en iTop." in actions[2][1]["text"]
+
+
+def test_ci_changes_before_itop_created_the_ticket_are_queued_behind_the_create(session: Session) -> None:
+    sc = Scenario(session)
+    ops, data = sc.team("Ops"), sc.team("Data")
+    sc.ci("web-01", ops)
+    sc.ci("web-02", ops)
+    run = sc.scan({"web-01": "new", "web-02": "new"})
+    lifecycle(sc).apply(session, sc.assess({"web-01": 60, "web-02": 70}, run).id)
+    old = tickets(session, sc)[0]  # still pending_creation: iTop has not answered the create yet
+    sc.assets["web-02"].custodian_team_id = data.id
+    sc.later(days=1)
+
+    run = sc.scan({"web-01": "persistent", "web-02": "persistent"})
+    lifecycle(sc).apply(session, sc.assess({"web-01": 60, "web-02": 70}, run).id)
+
+    old_writes = writes(session, old)
+    assert [a for a, _ in old_writes] == ["create", "comment", "comment"]
+    assert [c["functionalci_id"] for c in old_writes[1][1]["fields"]["functionalcis_list"]] == [
+        sc.assets["web-01"].itop_ci_id
+    ]
+    assert "El CI web-02 pasó al equipo Data." in old_writes[2][1]["text"]

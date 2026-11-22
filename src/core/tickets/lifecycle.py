@@ -285,9 +285,13 @@ class _Pass:
             self._reopen(ticket, context, previous)
             if ticket.status == "pending_creation":
                 return
-        if ticket.status == "pending_creation":
-            return  # its create is still queued and carries the latest decision
         notes: list[str] = []
+        if ticket.status == "pending_creation":
+            # The queued create was built earlier: CI changes since then go as writes queued behind it.
+            self._ci_changes(ticket, context, plan, notes)
+            if notes:
+                self._write(ticket, "comment", comment_payload("\n".join(notes)))
+            return
         events: list[TicketEventType] = []
         self._ci_changes(ticket, context, plan, notes)
         self._fixes(ticket, context, notes, events)
