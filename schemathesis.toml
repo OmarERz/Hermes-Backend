@@ -52,3 +52,10 @@ checks.positive_data_acceptance.expected-statuses = ["2xx", "3xx", "400", "401",
 [[operations]]
 include-name = "GET /api/vulnerabilities"
 checks.positive_data_acceptance.expected-statuses = ["2xx", "3xx", "400", "401", "403", "404", "409", "429", "5xx"]
+
+# The iTop webhook (ARQ-02, F5.1) fails closed: without ITOP_WEBHOOK_TOKEN and iTop configured it answers the
+# documented 503 `webhook_disabled`. The CI stack has no iTop, so that 503 is the designed behavior there, not a
+# server error. Only this operation skips the server-error check.
+[[operations]]
+include-name = "POST /api/itop/webhook"
+checks.not_a_server_error.enabled = false
