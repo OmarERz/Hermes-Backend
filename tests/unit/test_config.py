@@ -118,3 +118,21 @@ def test_pgpassword_is_a_masked_secret(monkeypatch: pytest.MonkeyPatch) -> None:
     settings = load(monkeypatch, {"PGPASSWORD": "pw/with@reserved:chars"})
     assert "pw/with@reserved:chars" in settings.secret_values()
     assert "pw/with@reserved:chars" not in repr(settings)
+
+
+def test_validation_error_hides_input(monkeypatch: pytest.MonkeyPatch) -> None:
+    """SEG-21: a rejected value with credentials must not appear in the error text."""
+    with pytest.raises(ValidationError) as error:
+        load(monkeypatch, {"ITOP_URL": "not a url with s3cret-in-it"})
+    assert "s3cret-in-it" not in str(error.value)
+
+
+def test_blank_env_var_does_not_shadow_secret_file(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
+    """D-042: compose exports blank variables; the Docker secret file must still win."""
+    (tmp_path / "itop_token").write_text("from-secret-file")
+    for name, value in REQUIRED.items():
+        monkeypatch.setenv(name, value)
+    monkeypatch.setenv("ITOP_TOKEN", "")
+    settings = Settings(_env_file=None, _secrets_dir=tmp_path)  # type: ignore[call-arg]
+    assert settings.itop_token is not None
+    assert settings.itop_token.get_secret_value() == "from-secret-file"

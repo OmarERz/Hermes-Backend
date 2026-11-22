@@ -38,6 +38,10 @@ class Settings(BaseSettings):
         secrets_dir=DOCKER_SECRETS_DIR if DOCKER_SECRETS_DIR.is_dir() else None,
         extra="ignore",
         frozen=True,
+        # Validation errors must not echo inputs: a bad URL may contain credentials (SEG-21).
+        hide_input_in_errors=True,
+        # A blank variable (e.g. exported empty by compose) must not shadow a Docker secret file.
+        env_ignore_empty=True,
     )
 
     # Connections required to start
@@ -58,6 +62,9 @@ class Settings(BaseSettings):
     nvd_api_key: SecretStr | None = None
     abusech_auth_key: SecretStr | None = None
     ransomwarelive_api_key: SecretStr | None = None
+
+    # Swagger UI, ReDoc and /openapi.json: off unless explicitly enabled for development (API-01, docs/14 §10.4)
+    api_docs_enabled: bool = False
 
     # LLM endpoints (OpenAI-compatible API, D-029)
     deepseek_api_key: SecretStr | None = None
