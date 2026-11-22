@@ -1,0 +1,27 @@
+meta {
+  name: stix-export-bad-scope
+  type: http
+  seq: 4
+}
+
+post {
+  url: {{baseUrl}}/api/stix/export
+  body: json
+  auth: bearer
+}
+
+auth:bearer {
+  token: {{token}}
+}
+
+body:json {
+  {"scope": "run"}
+}
+
+assert {
+  res.status: eq 422
+}
+
+docs {
+  A scope without its identifier is refused with 422. Manual flow: vulnerability_id with a CVE id returns the bundle; exclude_ultra_classified lowers the TLP.
+}

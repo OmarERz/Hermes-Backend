@@ -118,6 +118,43 @@ def test_mapping_a_product_removes_it_from_the_pending_list(client: TestClient, 
     again = client.put(f"/api/mappings/{product}", json={"cpe": "cpe:2.3:a:nginx:nginx:*:*:*:*:*:*:*:*"})
     assert again.status_code == 200
     assert rows(engine, "SELECT nvd_vendor FROM cpe_mapping") == [("nginx",)]
+    audit = rows(
+        engine,
+        "SELECT action, entity_id, before ->> 'nvd_vendor', after ->> 'nvd_vendor' FROM audit_log ORDER BY created_at",
+    )
+    assert audit == [
+        ("cpe_mapping_set", str(product), None, "f5"),
+        ("cpe_mapping_set", str(product), "f5", "nginx"),
+    ]
+
+
+def test_editing_the_cpe_keeps_the_cna_names(client: TestClient, engine: Engine) -> None:
+    product = seed_inventory(engine)
+    run(
+        engine,
+        "INSERT INTO cpe_mapping (software_product_id, nvd_vendor, nvd_product, cna_vendor, cna_product, "
+        "origin, mapped_at) VALUES (:p, 'f5', 'nginx', 'F5 Networks', 'NGINX Plus', 'manual', now())",
+        {"p": product},
+    )
+    as_role(client, Role.ANALYST)
+    assert (
+        client.put(f"/api/mappings/{product}", json={"cpe": "cpe:2.3:a:nginx:nginx:*:*:*:*:*:*:*:*"}).status_code == 200
+    )
+    assert rows(engine, "SELECT nvd_vendor, cna_vendor, cna_product FROM cpe_mapping") == [
+        ("nginx", "F5 Networks", "NGINX Plus")
+    ]
+
+
+def test_the_nvd_dictionary_is_only_queried_when_a_key_is_configured() -> None:
+    assert create_app(make_settings()).state.cpe_dictionary is None
+    keyed = Settings(
+        _env_file=None,
+        database_url=SecretStr("postgresql://a:b@db/h"),
+        firebase_project_id="p",
+        cursor_signing_key=SecretStr("k" * 40),
+        nvd_api_key=SecretStr("key"),
+    )
+    assert create_app(keyed).state.cpe_dictionary is not None
 
 
 def test_mapping_errors(client: TestClient, engine: Engine) -> None:

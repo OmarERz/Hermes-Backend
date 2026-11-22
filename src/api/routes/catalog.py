@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import uuid
+from datetime import UTC, datetime
 from typing import Annotated
 
 from fastapi import APIRouter, Depends, Query, Request
@@ -24,10 +25,17 @@ from api.routes.models import (
     SourceCreate,
     SourcePatch,
 )
-from core.cpe.candidates import CpeDictionaryClient, cpe_uri, find_candidates, parse_cpe_name
+from core.cpe.candidates import (
+    CpeDictionaryClient,
+    cpe_uri,
+    local_candidates,
+    merge_candidates,
+    parse_cpe_name,
+    search_dictionary,
+)
 from core.cpe.mapping import MappingError, set_mapping
 from core.cpe.mapping import MappingInput as MappingData
-from core.db.models import AppUser
+from core.db.models import AppUser, AuditLog, CpeMapping
 from core.inventory.pending import MAX_PAGE, PendingItem, list_pending
 
 router = APIRouter(tags=["sources and inventory"])
@@ -127,7 +135,9 @@ def cpe_candidates(
     """Candidate CPE vendor and product pairs for a software name: NVD's dictionary plus what is already loaded."""
     dictionary: CpeDictionaryClient | None = request.app.state.cpe_dictionary
     try:
-        found = find_candidates(session, q, dictionary)
+        local = local_candidates(session, q)
+        session.rollback()  # give the connection back before the slow remote search (NVD limits, retries)
+        found = merge_candidates(local, search_dictionary(dictionary, q))
     except ValueError:
         raise ApiError(
             422,
@@ -159,12 +169,45 @@ def put_mapping(software: str, mapping: MappingInput, session: SessionDep, user:
             [ErrorDetail(field="body.cpe", issue="invalid_cpe")],
         )
     app_user = session.scalar(select(AppUser.id).where(AppUser.firebase_uid == user.uid))
+    current = session.get(CpeMapping, product_id)
+    # Editing the NVD pair keeps the CNA pair of an existing mapping: CVE.org matches must not disappear.
+    data = MappingData(
+        nvd_vendor=pair[0],
+        nvd_product=pair[1],
+        cna_vendor=current.cna_vendor if current else None,
+        cna_product=current.cna_product if current else None,
+    )
+    before = _mapping_snapshot(current)
     try:
-        set_mapping(session, product_id, MappingData(nvd_vendor=pair[0], nvd_product=pair[1]), mapped_by=app_user)
+        saved = set_mapping(session, product_id, data, mapped_by=app_user)
     except MappingError as error:
         raise ApiError(
             422, "validation_error", str(error), [ErrorDetail(field="body.cpe", issue="invalid_mapping")]
         ) from None
     except LookupError:
         raise ApiError(404, "not_found", "El software no existe.") from None
+    session.add(
+        AuditLog(
+            app_user_id=app_user,
+            action="cpe_mapping_set",
+            entity_type="cpe_mapping",
+            entity_id=str(product_id),
+            before=before,
+            after=_mapping_snapshot(saved),
+            created_at=datetime.now(UTC),
+        )
+    )
+    session.commit()  # before answering: the client must not see a success that was not saved
     return Mapping(software=str(product_id), cpe=mapping.cpe)
+
+
+def _mapping_snapshot(row: CpeMapping | None) -> dict[str, str | None] | None:
+    if row is None:
+        return None
+    return {
+        "nvd_vendor": row.nvd_vendor,
+        "nvd_product": row.nvd_product,
+        "cna_vendor": row.cna_vendor,
+        "cna_product": row.cna_product,
+        "origin": row.origin,
+    }

@@ -1,0 +1,23 @@
+meta {
+  name: pending-inventory
+  type: http
+  seq: 1
+}
+
+get {
+  url: {{baseUrl}}/api/pending/inventory
+  body: none
+  auth: bearer
+}
+
+auth:bearer {
+  token: {{token}}
+}
+
+assert {
+  res.status: eq 200
+}
+
+docs {
+  Pending inventory items by kind (FRO-17).
+}

@@ -1,4 +1,6 @@
-"""Database session per request: commits when the handler returns, rolls back when it raises."""
+"""Database session per request. Reads need nothing more; a handler that writes calls `session.commit()` itself
+before it returns, so the client never gets a success for a change that was not saved. An unfinished transaction is
+rolled back when the session closes."""
 
 from __future__ import annotations
 
@@ -11,7 +13,7 @@ from sqlalchemy.orm import Session, sessionmaker
 
 def get_session(request: Request) -> Iterator[Session]:
     factory: sessionmaker[Session] = request.app.state.session_factory
-    with factory() as session, session.begin():
+    with factory() as session:
         yield session
 
 

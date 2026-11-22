@@ -130,24 +130,34 @@ def local_candidates(session: Session, keyword: str, limit: int = LIMIT) -> list
     return sorted(found, key=lambda c: (-c.score, c.vendor, c.product))[:limit]
 
 
+def merge_candidates(local: list[Candidate], remote: list[Candidate], limit: int = LIMIT) -> list[Candidate]:
+    """Local and dictionary candidates merged by (vendor, product), best match first (the CVE count is kept)."""
+    merged = {(c.vendor, c.product): c for c in local}
+    for item in remote:
+        known = merged.get((item.vendor, item.product))
+        merged[(item.vendor, item.product)] = (
+            item
+            if known is None
+            else Candidate(item.vendor, item.product, "nvd_dictionary", item.score, item.title, known.cve_count)
+        )
+    return sorted(merged.values(), key=lambda c: (-c.score, c.vendor, c.product))[:limit]
+
+
+def search_dictionary(dictionary: CpeDictionaryClient | None, keyword: str) -> list[Candidate]:
+    """The dictionary's candidates; an outage or a refusal (a 403 for a bad key) gives none instead of failing."""
+    if dictionary is None:
+        return []
+    try:
+        return dictionary.search(keyword)
+    except (SourceUnavailableError, SourceRefusedError):
+        return []
+
+
 def find_candidates(
     session: Session, keyword: str, dictionary: CpeDictionaryClient | None = None, limit: int = LIMIT
 ) -> list[Candidate]:
-    """Local and dictionary candidates merged by (vendor, product), best match first.
+    """Local and dictionary candidates merged, best match first.
 
     A dictionary outage does not hide the local candidates: the analyst still gets what we know.
     """
-    merged = {(c.vendor, c.product): c for c in local_candidates(session, keyword, limit)}
-    if dictionary is not None:
-        try:
-            remote = dictionary.search(keyword)
-        except (SourceUnavailableError, SourceRefusedError):  # a 403 or an outage must not hide local candidates
-            remote = []
-        for item in remote:
-            known = merged.get((item.vendor, item.product))
-            merged[(item.vendor, item.product)] = (
-                item
-                if known is None
-                else Candidate(item.vendor, item.product, "nvd_dictionary", item.score, item.title, known.cve_count)
-            )
-    return sorted(merged.values(), key=lambda c: (-c.score, c.vendor, c.product))[:limit]
+    return merge_candidates(local_candidates(session, keyword, limit), search_dictionary(dictionary, keyword), limit)
