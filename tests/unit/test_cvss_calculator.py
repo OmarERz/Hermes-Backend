@@ -53,3 +53,14 @@ def test_roundup_follows_the_specification() -> None:
     assert roundup(Decimal("4.000001")) == Decimal("4.0")  # the specification's float-noise guard
     assert roundup(Decimal("0.1")) == Decimal("0.1")
     assert roundup(Decimal("9.91")) == Decimal("10.0")
+
+
+def test_scores_always_carry_one_decimal() -> None:
+    assert str(base_score("CVSS:3.1/AV:N/AC:L/PR:N/UI:N/S:C/C:H/I:H/A:H")) == "10.0"
+    assert str(base_score("CVSS:3.1/AV:N/AC:L/PR:N/UI:N/S:U/C:H/I:H/A:H")) == "9.8"
+    assert str(base_score("CVSS:3.1/AV:N/AC:L/PR:N/UI:N/S:U/C:N/I:N/A:N")) == "0.0"
+    assert str(roundup(Decimal("4.00"))) == "4.0"
+
+
+def test_roundup_rounds_half_up_at_the_sixth_decimal() -> None:
+    assert roundup(Decimal("4.0000050")) == Decimal("4.1")  # 400000.5 scaled rounds up, then up to one decimal

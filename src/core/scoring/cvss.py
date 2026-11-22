@@ -6,7 +6,7 @@ engine treats as "no estimate" (S falls back to the conservative default, marked
 
 from __future__ import annotations
 
-from decimal import ROUND_FLOOR, Decimal
+from decimal import ROUND_FLOOR, ROUND_HALF_UP, Decimal
 
 _AV = {"N": Decimal("0.85"), "A": Decimal("0.62"), "L": Decimal("0.55"), "P": Decimal("0.2")}
 _AC = {"L": Decimal("0.77"), "H": Decimal("0.44")}
@@ -16,6 +16,7 @@ _UI = {"N": Decimal("0.85"), "R": Decimal("0.62")}
 _CIA = {"H": Decimal("0.56"), "L": Decimal("0.22"), "N": Decimal(0)}
 _METRICS = ("AV", "AC", "PR", "UI", "S", "C", "I", "A")
 _TEN = Decimal(10)
+_ONE_DECIMAL = Decimal("0.1")
 
 
 def parse_cvss31(vector: str) -> dict[str, str] | None:
@@ -39,10 +40,12 @@ def parse_cvss31(vector: str) -> dict[str, str] | None:
 
 def roundup(value: Decimal) -> Decimal:
     """CVSS 3.1 Roundup (appendix A): the smallest number with one decimal that is >= value, immune to float noise."""
-    scaled = int((value * 100000).to_integral_value())
+    scaled = int((value * 100000).to_integral_value(rounding=ROUND_HALF_UP))
     if scaled % 10000 == 0:
-        return Decimal(scaled) / 100000
-    return (Decimal(scaled) / 10000).to_integral_value(rounding=ROUND_FLOOR) / 10 + Decimal("0.1")
+        return (Decimal(scaled) / 100000).quantize(_ONE_DECIMAL)
+    return ((Decimal(scaled) / 10000).to_integral_value(rounding=ROUND_FLOOR) / 10 + Decimal("0.1")).quantize(
+        _ONE_DECIMAL
+    )
 
 
 def base_score(vector: str) -> Decimal | None:

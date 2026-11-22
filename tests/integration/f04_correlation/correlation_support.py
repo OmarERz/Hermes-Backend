@@ -147,3 +147,35 @@ def add_story(session: Session, **fields: Any) -> m.Story:
 
 def demo_group(session: Session) -> uuid.UUID:
     return session.scalars(select(m.FindingGroup.id)).one()
+
+
+def add_group(session: Session, cve_id: str) -> m.FindingGroup:
+    """Another active group on the demo product, with a finding on its first CI."""
+    session.add(m.Cve(id=cve_id, description="Otra", cvss_score=Decimal("7.5"), cvss_version="3.1", fetched_at=NOW))
+    session.flush()
+    first = session.scalars(select(m.FindingGroup)).first()
+    assert first is not None
+    group = m.FindingGroup(id=new_id(), cve_id=cve_id, software_product_id=first.software_product_id, created_at=NOW)
+    session.add(group)
+    session.flush()
+    inst = session.scalars(select(m.InstalledSoftware).order_by(m.InstalledSoftware.itop_instance_id)).first()
+    run = session.scalars(select(m.Run).where(m.Run.kind == "scan")).first()
+    assert inst is not None
+    assert run is not None
+    finding = m.Finding(
+        id=new_id(), finding_group_id=group.id, installed_software_id=inst.id, match_source="nvd_cpe", created_at=NOW
+    )
+    session.add(finding)
+    session.flush()
+    session.add(
+        m.FindingStatusChange(
+            id=new_id(),
+            finding_id=finding.id,
+            run_id=run.id,
+            status="new",
+            observed_version=inst.version,
+            changed_at=NOW,
+        )
+    )
+    session.flush()
+    return group
