@@ -44,6 +44,7 @@ def stack() -> Iterator[dict[str, str]]:
     env = {
         **os.environ,
         **PORTS,
+        "CURSOR_SIGNING_KEY": secrets.token_urlsafe(32),
         "POSTGRES_PASSWORD": "p/w@" + secrets.token_urlsafe(12) + ":x",
         "MIGRATOR_DB_PASSWORD": secrets.token_urlsafe(16),
         "APP_DB_PASSWORD": "a@p/" + secrets.token_urlsafe(12),

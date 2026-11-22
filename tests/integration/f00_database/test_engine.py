@@ -79,7 +79,10 @@ def test_remote_hostaddr_with_plaintext_rejected() -> None:
 
 def test_session_factory_queries_the_database(postgres_url: str) -> None:
     settings = Settings(  # type: ignore[call-arg]
-        _env_file=None, database_url=SecretStr(postgres_url), firebase_project_id="demo-hermes"
+        _env_file=None,
+        database_url=SecretStr(postgres_url),
+        firebase_project_id="demo-hermes",
+        cursor_signing_key=SecretStr("k" * 40),
     )
     factory = make_session_factory(settings)
     with factory() as session:

@@ -1,0 +1,24 @@
+meta {
+  name: vulnerabilities-by-criticality
+  type: http
+  seq: 6
+}
+
+get {
+  url: {{baseUrl}}/api/vulnerabilities?view=criticality&limit=2&exposed=true
+  body: none
+  auth: bearer
+}
+
+auth:bearer {
+  token: {{token}}
+}
+
+assert {
+  res.status: eq 200
+  res.body.bands.length: eq 4
+}
+
+docs {
+  Grouped view with FRO-10 filters and cursor.
+}
