@@ -17,6 +17,9 @@ FROM python:3.12.16-slim-bookworm@sha256:935c3c5b12357a7e10caa9c1e6ca5692344d97c
 RUN groupadd --system --gid 10001 hermes && useradd --system --uid 10001 --gid hermes --no-create-home hermes
 WORKDIR /app
 COPY --from=build --chown=root:root /app/.venv /app/.venv
+# Alembic configuration and migrations (the migrate service runs them as the migrator role)
+COPY --chown=root:root alembic.ini ./
+COPY --chown=root:root migrations ./migrations
 ENV PATH="/app/.venv/bin:$PATH" PYTHONDONTWRITEBYTECODE=1 PYTHONUNBUFFERED=1
 USER hermes
 EXPOSE 8000
