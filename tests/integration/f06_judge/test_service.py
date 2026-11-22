@@ -129,7 +129,15 @@ def test_single_review_without_double_review(engine: Engine) -> None:
 
 
 def test_a_failed_second_review_queues_the_package(engine: Engine) -> None:
-    responses = [tool_call_completion("propose_reason", MASS, call_id="a"), finalize()]  # nothing for the second
+    step = {
+        "order": 1,
+        "ci_id": "",
+        "action": "Actualizar Example HTTP Server a 2.4.60 o posterior.",
+        "element_id": "cve-1",
+        "quote": "A heap overflow in Example HTTP Server before 2.4.60 allows remote attackers",
+    }
+    drafted = tool_call_completion("finalize_review", {"summary": "Resumen.", "mitigation_steps": [step]})
+    responses = [tool_call_completion("propose_reason", MASS, call_id="a"), drafted]  # nothing for the second
     content = finding_package()
     with Session(engine) as session, session.begin():
         group_id = session.scalars(select(m.FindingGroup.id).limit(1)).one()
@@ -151,4 +159,6 @@ def test_a_failed_second_review_queues_the_package(engine: Engine) -> None:
         first = session.get_one(m.LlmReview, stored.review_id)
         assert first.status == "no_judge_review"
         assert first.parameters["failure"] == "transport"  # the cause is on the main L13 record too
+        assert first.mitigation_status == "absent"  # JUE-MIT-09: no drafted mitigation without the judge
+        assert session.scalars(select(m.MitigationDraftStep)).all() == []
         assert session.scalars(select(m.ErrorQueue.status)).all() == ["pending"]

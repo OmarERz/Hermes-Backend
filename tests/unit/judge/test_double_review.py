@@ -252,3 +252,14 @@ def test_a_partial_review_that_applies_has_no_fallback_failure() -> None:
     assert result.status is ReviewStatus.PARTIAL_REVIEW
     assert result.first.failure is Failure.LIMIT
     assert result.failure is None
+
+
+def test_crossing_critical_on_an_alert_package_uses_the_package_base() -> None:
+    content = finding_package(type="alert", group=None, cve_data=None)
+    content["base"]["score"] = 85
+    outcome = replace(base_outcome(), adjustment=8)
+    assert needs_double_review(outcome, package(content), JudgeSettings())  # 85 -> 93
+    content["base"]["score"] = 93
+    assert needs_double_review(replace(outcome, adjustment=-6), package(content), JudgeSettings())  # 93 -> 87
+    content["base"]["score"] = 60
+    assert not needs_double_review(outcome, package(content), JudgeSettings())

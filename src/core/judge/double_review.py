@@ -39,9 +39,12 @@ def needs_double_review(outcome: ReviewOutcome, package: ReviewPackage, settings
     if any(abs(delta) >= threshold for delta in deltas):
         return True
     line = settings.critical_line
-    for ci in package.cis:
-        before = ci.base_score
-        after = _clamp(before + outcome.adjustment + outcome.ci_adjustments.get(ci.ci_id, 0))
+    # per CI for findings; an alert package has no CIs, so its package-level base is checked
+    bases = [(ci.base_score, outcome.ci_adjustments.get(ci.ci_id, 0)) for ci in package.cis] or [
+        (package.base_score, 0)
+    ]
+    for before, ci_adjustment in bases:
+        after = _clamp(before + outcome.adjustment + ci_adjustment)
         if (before < line) != (after < line):
             return True
     return False

@@ -15,6 +15,7 @@ from dataclasses import dataclass, replace
 from sqlalchemy.orm import Session
 
 from core.judge.double_review import combine_outcomes, needs_double_review
+from core.judge.mitigation import MitigationResult
 from core.judge.package import ReviewPackage
 from core.judge.session import Failure, JudgeEnvironment, JudgeSession, ReviewOutcome, ReviewStatus, ToolCaller
 from core.judge.store import ReviewTarget, save_review, sync_error_queue
@@ -85,8 +86,9 @@ class JudgeService:
         package is queued for a later run when the result fell back to the base (PRE-01)."""
         result = self.evaluate(package)
         first = result.first
-        if result.failure is not None and first.failure is None:  # the blind review failed: record the cause
-            first = replace(first, failure=result.failure)
+        if result.status is ReviewStatus.NO_JUDGE_REVIEW and first.adjustment is not None:
+            # the blind review failed: final = base, so no drafted mitigation is kept (JUE-MIT-09); record the cause
+            first = replace(first, failure=result.failure, mitigation=MitigationResult.absent())
         first_id = save_review(session, first, target, status=result.status)
         second_id: uuid.UUID | None = None
         if result.second is not None:
