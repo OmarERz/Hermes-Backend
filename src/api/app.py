@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from fastapi import FastAPI
 
+from api.errors import install_error_handlers
 from core.config import Settings
 from core.logging import configure_logging
 
@@ -20,6 +21,8 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         redoc_url=None,
         openapi_url="/api/openapi.json" if docs else None,
     )
+
+    install_error_handlers(app)
 
     @app.get("/api/health", tags=["operations"])
     def health() -> dict[str, str]:
