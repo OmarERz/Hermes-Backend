@@ -139,3 +139,21 @@ def test_a_schema_is_frozen_at_load_time() -> None:
     schema.parameters["required"] = []
     assert schema.hash == before
     assert validate_schema({}, schema)  # still rejects an output without its required fields
+
+
+def test_several_missing_fields_make_one_violation() -> None:
+    output = news()
+    del output["summary"]
+    del output["confidence"]
+    violations = validate_schema(output, NEWS_SCHEMA)
+    assert len(violations) == 1
+    assert violations[0].message == "Missing required field(s): confidence,summary"
+
+
+def test_hostile_field_names_are_capped_and_masked_in_the_code() -> None:
+    output = news(**{"bad" + chr(10) + "key": 1, "k" * 5000: 2, "fine_name": 3})
+    (violation,) = validate_schema(output, NEWS_SCHEMA)
+    assert violation.code.startswith("additionalProperties:")
+    assert len(violation.code) < 250
+    assert chr(10) not in violation.code
+    assert "<key>" in violation.code

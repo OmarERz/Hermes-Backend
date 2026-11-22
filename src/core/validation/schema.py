@@ -12,14 +12,16 @@ import os
 import re
 from collections.abc import Iterable
 from dataclasses import dataclass, field
+from functools import cached_property
 from pathlib import Path
-from typing import Any
+from typing import Any, cast
 
 from jsonschema import Draft202012Validator, ValidationError
 
 from core.validation.violations import Violation
 
 SCHEMAS_DIR_ENV = "SCHEMAS_DIR"
+MAX_CODE_CHARS = 200
 MAX_DEPTH = 8  # the tool schemas nest 4 levels; anything deeper is not walked
 UNIT_RANGE_FIELDS = frozenset({"confidence", "cvss_confidence"})  # schemas state 0 to 1 only in prose
 DEFAULT_MAX_ITEMS = 200  # a weekly roundup lists 20 CVEs; 200 is generous and still bounded
@@ -48,6 +50,10 @@ class ToolSchema:
     version: str
     hash: str
     parameters_json: str
+
+    @cached_property
+    def validator(self) -> Draft202012Validator:
+        return Draft202012Validator(self.parameters)
 
     @property
     def parameters(self) -> dict[str, Any]:
@@ -94,18 +100,17 @@ class _Walk:
     limits: Limits
     out: list[Violation]
 
-    def check(self, value: Any, path: str, key: str, depth: int = 0) -> None:
-        if depth > MAX_DEPTH:
-            self.out.append(Violation("VAL-02.limits", path, "The output is nested too deeply", "depth"))
-        elif isinstance(value, dict):
+    def check(self, value: Any, path: str, key: str) -> None:
+        """Depth is already bounded by `_too_deep`, which `validate_schema` runs first."""
+        if isinstance(value, dict):
             for child_key, child in value.items():
-                self.check(child, _path(path, child_key), child_key, depth + 1)
+                self.check(child, _path(path, child_key), child_key)
         elif isinstance(value, list):
             cap = self.limits.max_items.get(key, self.limits.default_items)
             if len(value) > cap:
                 self.out.append(Violation("VAL-02.limits", path, f"{len(value)} items, at most {cap}", "max_items"))
             for index, child in enumerate(value):
-                self.check(child, _path(path, index), key, depth + 1)
+                self.check(child, _path(path, index), key)
         elif isinstance(value, str):
             cap = self.limits.max_chars.get(key, self.limits.default_chars)
             if len(value) > cap:
@@ -113,20 +118,24 @@ class _Walk:
                 self.out.append(Violation("VAL-02.limits", path, message, "max_chars"))
 
 
+def _names(names: list[str]) -> str:
+    """Field names for the retry text and the code: plain names as they are, anything else as `<key>`, capped."""
+    shown = [n if _SAFE_KEY.match(n) else "<key>" for n in names]
+    return ",".join(shown)[:MAX_CODE_CHARS]
+
+
 def _describe(error: ValidationError) -> tuple[str, str]:
     """A diagnostic and a constraint code that never copy the rejected value (it could be long or hostile)."""
     kind = str(error.validator)
     instance = error.instance
     if kind == "required" and isinstance(instance, dict):
-        required = error.validator_value if isinstance(error.validator_value, list) else []
-        missing = sorted(str(f) for f in required if f not in instance)
-        names = ", ".join(name for name in missing if _SAFE_KEY.match(name))
-        return f"Missing required field(s): {names}", f"required:{','.join(missing)}"
+        required = [str(f) for f in cast(list[str], error.validator_value)]
+        missing = _names(sorted(f for f in required if f not in instance))
+        return f"Missing required field(s): {missing}", f"required:{missing}"
     if kind == "additionalProperties" and isinstance(instance, dict):
-        allowed = dict(error.schema).get("properties", {}) if isinstance(error.schema, dict) else {}
-        extra = sorted(str(k) for k in instance if k not in allowed)
-        names = ", ".join(name for name in extra if _SAFE_KEY.match(name))
-        return f"Unexpected field(s) in this object: {names}", f"additionalProperties:{','.join(extra)}"
+        allowed = cast(dict[str, Any], error.schema)["properties"]
+        extra = _names(sorted(str(k) for k in instance if k not in allowed))
+        return f"Unexpected field(s) in this object: {extra}", f"additionalProperties:{extra}"
     if kind == "type":
         return f"Expected type {error.validator_value}", "type"
     if kind == "enum":
@@ -134,15 +143,13 @@ def _describe(error: ValidationError) -> tuple[str, str]:
     return f"Violates the '{kind}' constraint", kind
 
 
-def _check_ranges(value: Any, path: str, key: str, out: list[Violation], depth: int = 0) -> None:
-    if depth > MAX_DEPTH:
-        return
+def _check_ranges(value: Any, path: str, key: str, out: list[Violation]) -> None:
     if isinstance(value, dict):
         for child_key, child in value.items():
-            _check_ranges(child, _path(path, child_key), child_key, out, depth + 1)
+            _check_ranges(child, _path(path, child_key), child_key, out)
     elif isinstance(value, list):
         for index, child in enumerate(value):
-            _check_ranges(child, _path(path, index), key, out, depth + 1)
+            _check_ranges(child, _path(path, index), key, out)
     elif (
         key in UNIT_RANGE_FIELDS
         and isinstance(value, int | float)
@@ -170,13 +177,13 @@ def validate_schema(output: Any, schema: ToolSchema, limits: Limits | None = Non
     """Violations of the tool schema (types, enums, required, no extra fields) and of the size limits."""
     if _too_deep(output):
         return [Violation("VAL-02.limits", "", "The output is nested too deeply", "depth")]
-    errors = sorted(
-        Draft202012Validator(schema.parameters).iter_errors(output), key=lambda e: [str(p) for p in e.absolute_path]
-    )
+    errors = sorted(schema.validator.iter_errors(output), key=lambda e: [str(p) for p in e.absolute_path])
     violations: list[Violation] = []
     for error in errors:
         message, code = _describe(error)
-        violations.append(Violation("VAL-02.schema", _dotted(error.absolute_path), message, code))
+        violation = Violation("VAL-02.schema", _dotted(error.absolute_path), message, code)
+        if violation not in violations:  # `required` yields one error per missing field, all with the same text
+            violations.append(violation)
     if isinstance(output, dict):
         _Walk(limits or Limits(), violations).check(output, "", "")
         _check_ranges(output, "", "", violations)
