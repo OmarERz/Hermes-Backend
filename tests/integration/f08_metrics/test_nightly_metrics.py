@@ -34,7 +34,7 @@ def seed_day(session: Session) -> None:
     d.review(session, "judge_disagreement", attempts=2)
     disagreeing = session.scalars(select(m.LlmReview).where(m.LlmReview.status == "judge_disagreement")).one()
     d.review(session, "applied", second_review_of_id=disagreeing.id)
-    d.review(session, "rejected", attempts=3)
+    d.review(session, "no_judge_review", attempts=3, parameters={"failure": "format"})
     d.review(session, "no_judge_review")
     d.review(session, "applied", agent="news_analyst")
     d.review(session, "applied", at=d.NOON - timedelta(days=1))  # another day: ignored
@@ -105,7 +105,7 @@ def test_the_nightly_job_stores_every_metric_with_data(factory: sessionmaker[Ses
     assert q(values[("double_review_rate", "")]) == q(Decimal("0.25"))
     assert q(values[("double_review_disagreement", "")]) == q(1)
     assert q(values[("validation_failure_rate", "")]) == q(Decimal("0.2"))
-    assert q(values[("fallback_rate", "")]) == q(Decimal("0.2"))
+    assert q(values[("fallback_rate", "")]) == q(Decimal("0.4"))
     assert q(values[("judge_adjustment_avg", "")]) == q(Decimal("4.1666666666666667"))
     assert q(values[("judge_adjustment_up", "")]) == q(Decimal(2) / 6)
     assert q(values[("judge_adjustment_large", "")]) == q(Decimal(1) / 6)

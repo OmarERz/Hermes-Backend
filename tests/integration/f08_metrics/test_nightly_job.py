@@ -15,8 +15,9 @@ pytestmark = pytest.mark.integration
 
 def test_the_nightly_job_aggregates_yesterday_and_moves_the_ladder(factory: sessionmaker[Session]) -> None:
     with factory() as session, session.begin():
-        for status in ("rejected", "rejected", "applied"):
-            d.review(session, status)  # 2 of 3 judge answers fail validation on 2026-11-21
+        d.review(session, "no_judge_review", parameters={"failure": "format"})  # what the F6 judge writes
+        d.review(session, "no_judge_review", parameters={"failure": "format"})
+        d.review(session, "applied")  # 2 of 3 judge answers fail validation on 2026-11-21
 
     NightlyJob(factory, clock=lambda: d.NOW)()
 

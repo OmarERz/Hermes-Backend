@@ -111,11 +111,12 @@ QUERIES: Final[dict[str, TextClause]] = {
         NULLIF(count(*), 0) AS value FROM llm_review WHERE agent = 'judge' AND created_at >= :start AND
         created_at < :end"""
     ),
-    # Ladder signal: judge answers that did not pass validation (docs/07 §8, > 10 %).
+    # Ladder signal: judge answers that did not pass validation (docs/07 §8, > 10 %). The F6 judge closes them as
+    # no_judge_review with parameters.failure = 'format' (docs/02, F6.1); 'rejected' is kept for the schema enum.
     "validation_failure_rate": text(
-        """SELECT '' AS dimension, (count(*) FILTER (WHERE status = 'rejected'))::numeric / NULLIF(count(*), 0)
-        AS value FROM llm_review WHERE agent = 'judge' AND status <> 'queued' AND created_at >= :start AND
-        created_at < :end"""
+        """SELECT '' AS dimension, (count(*) FILTER (WHERE parameters ->> 'failure' = 'format' OR status =
+        'rejected'))::numeric / NULLIF(count(*), 0) AS value FROM llm_review WHERE agent = 'judge' AND status <>
+        'queued' AND created_at >= :start AND created_at < :end"""
     ),
     # MET-15 · Validation at the first attempt, per LLM piece.
     "first_pass_validation": text(

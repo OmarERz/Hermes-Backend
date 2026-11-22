@@ -54,7 +54,7 @@ def review(
         prompt_hash="h",
         schema_version="1",
         schema_hash="h",
-        parameters={},
+        parameters=kw.pop("parameters", {}),
         input_ref="pkg",
         calls=[],
         status=status,
