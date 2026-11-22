@@ -16,6 +16,8 @@ dependencies = [
     "pydantic>=2.14.4",
     "pydantic-settings>=2.16.3",
     "sqlalchemy>=2.1.9",
+    "stix2>=3.0.1",
+    "stix2-validator>=3.2.0",
     "trafilatura>=2.3.1",
     "uvicorn>=0.54.0",
 ]
@@ -83,8 +85,8 @@ warn_unreachable = true
 plugins = ["pydantic.mypy"]
 
 [[tool.mypy.overrides]]
-# firebase-admin and feedparser ship no type information (no stubs, no py.typed marker).
-module = ["feedparser", "firebase_admin", "firebase_admin.*"]
+# firebase-admin, feedparser, stix2 and stix2-validator ship no type information (no stubs, no py.typed marker).
+module = ["feedparser", "firebase_admin", "firebase_admin.*", "stix2", "stix2.*", "stix2validator", "stix2validator.*"]
 ignore_missing_imports = true
 
 [tool.pytest.ini_options]
