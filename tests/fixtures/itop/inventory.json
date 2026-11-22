@@ -1,0 +1,51 @@
+{
+  "Organization": [
+    {"id": 1, "name": "Demo-Lab"}
+  ],
+  "Team": [
+    {"id": 10, "name": "Platform Ops", "org_id": "1"},
+    {"id": 11, "name": "Data Custody", "org_id": "1"}
+  ],
+  "Person": [
+    {"id": 20, "name": "Ana Rivera", "first_name": "Ana", "email": "ana.rivera@example.test", "org_id": "1"},
+    {"id": 21, "name": "Luis Soto", "first_name": "Luis", "email": "luis.soto@example.test", "org_id": "1"},
+    {"id": 22, "name": "Hermes System", "first_name": "Hermes", "email": "hermes@example.test", "org_id": "1"}
+  ],
+  "lnkPersonToTeam": [
+    {"id": 30, "person_id": "20", "team_id": "10"},
+    {"id": 31, "person_id": "21", "team_id": "11"}
+  ],
+  "Server": [
+    {"id": 100, "name": "web-frontend-01", "org_id": "1", "status": "production", "business_criticity": "medium",
+     "managementip": "10.0.0.11", "internet_exposed": "yes", "confidentiality": "public", "personal_data": "no",
+     "owner_id": "20", "custodian_id": "10"},
+    {"id": 101, "name": "k8s-node-01", "org_id": "1", "status": "production", "business_criticity": "high",
+     "managementip": "10.0.0.12", "internet_exposed": "no", "confidentiality": "classified", "personal_data": "unknown",
+     "owner_id": "20", "custodian_id": "10"},
+    {"id": 102, "name": "db-host-01", "org_id": "1", "status": "production", "business_criticity": "high",
+     "managementip": "10.0.0.13", "internet_exposed": "no", "confidentiality": "highly_classified",
+     "personal_data": "yes", "owner_id": "21", "custodian_id": "11"}
+  ],
+  "VirtualMachine": [
+    {"id": 110, "name": "vm-legacy-01", "org_id": "1", "status": "production", "business_criticity": "low",
+     "internet_exposed": "no", "confidentiality": "unclassified", "personal_data": "unknown",
+     "owner_id": "", "custodian_id": ""}
+  ],
+  "Software": [
+    {"id": 200, "name": "nginx", "vendor": "F5", "version": "1.24.0", "type": "WebServer"},
+    {"id": 201, "name": "PostgreSQL", "vendor": "PostgreSQL", "version": "15.4", "type": "DBServer"},
+    {"id": 202, "name": "OpenSSL", "vendor": "OpenSSL", "version": "3.0.2", "type": "OtherSoftware"}
+  ],
+  "WebServer": [
+    {"id": 300, "name": "nginx 1.24.0 @ web-frontend-01", "org_id": "1", "system_id": "100", "software_id": "200",
+     "status": "active"}
+  ],
+  "DBServer": [
+    {"id": 301, "name": "PostgreSQL 15.4 @ db-host-01", "org_id": "1", "system_id": "102", "software_id": "201",
+     "status": "active"}
+  ],
+  "OtherSoftware": [
+    {"id": 302, "name": "OpenSSL 3.0.2 @ k8s-node-01", "org_id": "1", "system_id": "101", "software_id": "202",
+     "status": "active"}
+  ]
+}

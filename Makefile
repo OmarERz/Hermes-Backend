@@ -4,7 +4,7 @@
 SHELL := /bin/bash
 .SHELLFLAGS := -eu -o pipefail -c
 
-.PHONY: up compose-secrets help verify lint typecheck boundaries test coverage semgrep secrets audit verify-full schemathesis adversarial dynamic zap bruno ci-lint review
+.PHONY: up compose-secrets help verify lint typecheck boundaries test coverage semgrep secrets audit verify-full schemathesis adversarial dynamic zap bruno ci-lint seed events emulator-token itop-up itop-install itop-seed itop-token itop-down review
 
 help: ## List the available targets
 	@grep -E '^[a-z-]+:.*## ' $(MAKEFILE_LIST) | awk 'BEGIN {FS = ":.*## "}; {printf "  %-12s %s\n", $$1, $$2}'
@@ -107,7 +107,44 @@ zap: ## OWASP ZAP API scan in Docker against API_URL/api/openapi.json (needs API
 
 bruno: ## Bruno API collection (bruno/ folder, environment local)
 	@test -d bruno || { echo "bruno/ folder not found: the Bruno collection is created in F0.7 (D-070)" >&2; exit 2; }
-	cd bruno && npx --yes @usebruno/cli@$(BRUNO_CLI_VERSION) run --env local
+	cd bruno && npx --yes @usebruno/cli@$(BRUNO_CLI_VERSION) run --env local $${TEST_TOKEN:+--env-var token="$$TEST_TOKEN"}
+
+# Prints one Firebase Auth emulator ID token (D-069); the emulator comes from `docker compose up auth-emulator`.
+# Defaults to the emulator published on localhost; the tool itself refuses to run without an emulator host.
+emulator-token: ## Print an emulator ID token: make emulator-token ROLE=admin|analyst|reader
+	@test -n "$${ROLE:-}" || { echo "Usage: make emulator-token ROLE=admin|analyst|reader" >&2; exit 2; }
+	@FIREBASE_AUTH_EMULATOR_HOST="$${FIREBASE_AUTH_EMULATOR_HOST:-127.0.0.1:9099}" \
+	  uv run --locked python -m core.devtools.emulator token --role "$$ROLE"
+
+# Admin CLI (core.devtools.admin): seed as migrator (MIGRATION_DATABASE_URL), events as app (DATABASE_URL).
+seed: ## Load a seed scenario: make seed SCENARIO=empty|demo|edge
+	@test -n "$${SCENARIO:-}" || { echo "Usage: make seed SCENARIO=empty|demo|edge" >&2; exit 2; }
+	uv run --locked python -m core.devtools.admin seed --scenario "$$SCENARIO"
+
+events: ## List the latest notification events as JSON lines (optional LIMIT, STATUS, TYPE)
+	@uv run --locked python -m core.devtools.admin events --limit "$${LIMIT:-20}" \
+	  $${STATUS:+--status "$$STATUS"} $${TYPE:+--type "$$TYPE"}
+
+# iTop 3.2.2 test instance (compose.itop.yaml, docs/itop-test-instance.md). Needs ITOP_DB_ROOT_PASSWORD,
+# ITOP_DB_PASSWORD and ITOP_ADMIN_PASSWORD in the environment; every compose call below reads them.
+ITOP_COMPOSE ?= docker compose -f compose.itop.yaml --profile itop
+
+itop-up: ## Start the iTop test instance (Docker)
+	$(ITOP_COMPOSE) up -d --build --wait --wait-timeout 300
+
+itop-install: ## Unattended iTop install, extension and REST users (idempotent)
+	$(ITOP_COMPOSE) exec -T -u www-data itop /opt/hermes-itop/install.sh
+
+itop-seed: ## Load the synthetic stack into iTop (dry run; add APPLY=1 to write)
+	@ITOP_URL="http://127.0.0.1:$${ITOP_PORT:-8080}" \
+	  ITOP_TOKEN="$$($(ITOP_COMPOSE) exec -T itop cat /var/www/html/data/hermes-seed-token)" \
+	  PYTHONPATH=tests uv run --locked python -m harness.itop_seed docker/itop/stack.yaml $(if $(APPLY),--apply)
+
+itop-token: ## Print the least-privilege REST token of the iTop test instance
+	@$(ITOP_COMPOSE) exec -T itop cat /var/www/html/data/hermes-rest-token
+
+itop-down: ## Stop the iTop test instance and delete its data
+	$(ITOP_COMPOSE) down -v --remove-orphans
 
 ACTIONLINT_VERSION ?= 1.7.12.24
 
