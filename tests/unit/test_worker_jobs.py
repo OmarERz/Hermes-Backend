@@ -10,12 +10,14 @@ from pydantic import SecretStr
 
 from core.config import Settings
 from workers.jobs import (
+    DISPATCH_SECONDS,
     ITOP_OUTBOX_SECONDS,
     NIGHTLY_SECONDS,
     TICKET_SYNC_SECONDS,
     PeriodicJob,
     build_jobs,
     run_jobs,
+    run_jobs_in_threads,
 )
 
 pytestmark = pytest.mark.unit
@@ -75,10 +77,11 @@ def test_a_stop_during_a_round_skips_the_remaining_jobs() -> None:
     assert runs == ["a"]
 
 
-def test_without_itop_only_the_nightly_metrics_and_the_calibration_run() -> None:
-    assert [(job.name, job.interval) for job in build_jobs(SETTINGS, MagicMock())] == [
-        ("nightly_metrics", NIGHTLY_SECONDS),
-        ("weekly_calibration", NIGHTLY_SECONDS),
+def test_without_itop_the_dispatcher_metrics_and_calibration_run() -> None:
+    assert [(job.name, job.interval, job.lane) for job in build_jobs(SETTINGS, MagicMock())] == [
+        ("notification_dispatch", DISPATCH_SECONDS, "notifications"),
+        ("nightly_metrics", NIGHTLY_SECONDS, "nightly"),
+        ("weekly_calibration", NIGHTLY_SECONDS, "nightly"),
     ]
 
 
@@ -86,8 +89,46 @@ def test_with_itop_the_outbox_and_the_sync_run() -> None:
     settings = SETTINGS.model_copy(update={"itop_url": "http://localhost:8080", "itop_token": SecretStr("tok")})
     jobs = build_jobs(settings, MagicMock())
     assert [(job.name, job.interval) for job in jobs] == [
+        ("notification_dispatch", DISPATCH_SECONDS),
         ("nightly_metrics", NIGHTLY_SECONDS),
         ("weekly_calibration", NIGHTLY_SECONDS),
         ("itop_outbox", ITOP_OUTBOX_SECONDS),
         ("ticket_sync", TICKET_SYNC_SECONDS),
     ]
+
+
+def test_lanes_run_in_parallel_and_jobs_of_a_lane_in_turn() -> None:
+    stop = threading.Event()
+    seen: list[tuple[str, str]] = []
+    started = threading.Barrier(2, timeout=5)
+
+    def slow() -> None:
+        started.wait()
+        seen.append(("slow", threading.current_thread().name))
+        stop.wait(5)
+
+    def same_lane() -> None:
+        seen.append(("same_lane", threading.current_thread().name))
+
+    def fast() -> None:
+        started.wait()  # only passes if the slow lane is not blocking this one
+        seen.append(("fast", threading.current_thread().name))
+        stop.set()
+
+    jobs = [
+        PeriodicJob("slow", 60, slow, lane="itop"),
+        PeriodicJob("same_lane", 60, same_lane, lane="itop"),
+        PeriodicJob("fast", 60, fast, lane="notifications"),
+    ]
+    run_jobs_in_threads(stop, jobs, tick=0.01)
+
+    assert ("slow", "lane-itop") in seen
+    assert ("fast", "lane-notifications") in seen
+    assert ("same_lane", "lane-itop") not in seen  # it waits behind the slow job of its lane
+
+
+def test_registered_consumers_are_used_by_name() -> None:
+    consumer = MagicMock()
+    job = build_jobs(SETTINGS, MagicMock(), {"slack": consumer})[0]
+    assert job.lane == "notifications"
+    assert job.run.consumers == {"slack": consumer}
