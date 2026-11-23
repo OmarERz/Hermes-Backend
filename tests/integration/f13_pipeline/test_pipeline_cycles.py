@@ -207,7 +207,7 @@ def test_the_refresh_cycle_and_a_missing_news_step(factory: sessionmaker[Session
     assert len(refreshed) == 1
     assert Pipeline(factory, Steps(news=None)).refresh_cycle().notes == ["vulnerability refresh is not configured"]
     report = Pipeline(factory, Steps(news=None)).news_cycle()
-    assert (report.ran, report.notes) == (False, ["news ingestion is not available (embeddings extra not installed)"])
+    assert (report.ran, report.notes) == (False, ["news ingestion is not available (EMBEDDINGS_URL is not configured)"])
 
 
 def test_the_scan_cycle_runs_the_cve_analyst_before_scoring(factory: sessionmaker[Session]) -> None:

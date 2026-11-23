@@ -1,7 +1,8 @@
 version: 2
 updates:
   - package-ecosystem: "uv"
-    directory: "/"
+    # The backend and the embeddings service image (docker/embeddings has its own uv.lock, CPU-only torch).
+    directories: ["/", "/docker/embeddings"]
     target-branch: "develop"
     commit-message:
       prefix: "build(deps)"
@@ -12,7 +13,7 @@ updates:
         update-types: ["minor", "patch"]
 
   - package-ecosystem: "docker"
-    directories: ["/", "/docker/auth-emulator", "/docker/db"]
+    directories: ["/", "/docker/auth-emulator", "/docker/db", "/docker/embeddings"]
     target-branch: "develop"
     commit-message:
       prefix: "build(deps)"
