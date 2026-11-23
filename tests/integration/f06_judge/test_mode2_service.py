@@ -26,7 +26,13 @@ from core.judge.catalog import JudgeSettings, ReasonCatalog, SensitivityProfile,
 from core.judge.package import ReviewPackage
 from core.judge.service import DismissalService
 from core.judge.session import JudgeEnvironment, ReviewStatus
-from core.judge.store import DbInventory, ReviewTarget, load_judge_settings, refuted_relationships
+from core.judge.store import (
+    DbInventory,
+    ReviewTarget,
+    SnapshotInventory,
+    load_judge_settings,
+    refuted_relationships,
+)
 from doubles.llm import LlmDouble, tool_call_completion
 from harness.judge import dismissal_package, double_llm_client
 
@@ -252,8 +258,15 @@ def test_refuted_relationships_and_inventory_come_from_the_database(engine: Engi
         assert payments is not None
         assert [name for _id, name in inventory.products(payments)] == ["OpenSSL"]
         assert inventory.find_asset("CI-404") is None
+        snapshot = SnapshotInventory.load(session)  # read before the model call: the same answers (F12.2 #105)
+        for ci in ("CI-1", str(payments), "CI-404", str(uuid.uuid4()), ""):
+            assert snapshot.find_asset(ci) == inventory.find_asset(ci)
+        assert snapshot.products(payments) == inventory.products(payments)
         session.execute(text("UPDATE asset SET decommissioned_at = now() WHERE itop_ci_id = 'CI-1'"))
         assert DbInventory(session).find_asset("CI-1") is None
+        assert snapshot.find_asset("CI-1") == payments  # a snapshot does not move: the write step re-checks
+        assert SnapshotInventory.load(session).find_asset("CI-1") is None
+        assert SnapshotInventory.load(session).find_asset(str(payments)) is None
 
 
 def test_explicit_mode2_minimum_confidence_setting(engine: Engine) -> None:
@@ -380,3 +393,43 @@ def test_a_candidate_without_a_stored_package_can_be_reviewed(engine: Engine) ->
             session, ReviewPackage.from_content(content), ReviewTarget(None, "inline", NOW)
         )
     assert (stored.status, stored.queued) == (ReviewStatus.APPLIED, False)
+
+
+def test_an_alert_whose_ci_was_retired_while_the_model_answered_is_not_raised(engine: Engine) -> None:
+    """F12.2 #105: validated against the snapshot, re-checked when stored; the paid review is kept and queued."""
+    with Session(engine) as session, session.begin():
+        story_id = make_story(session)
+        content = candidate(story_id)
+        package_id = package_row(session, content)
+    double = LlmDouble()
+    double.add_case("case", [tool_call_completion("propose_alert", {**ALERT, "ci_id": "CI-1"})])
+    double.use("case")
+
+    def retire() -> None:
+        with Session(engine) as other, other.begin():
+            other.execute(text("UPDATE asset SET decommissioned_at = now() WHERE itop_ci_id = 'CI-1'"))
+
+    double.on_request = retire
+    env = JudgeEnvironment(
+        catalog=ReasonCatalog.default(),
+        profile=SensitivityProfile.named("normal"),
+        settings=JudgeSettings(),
+        today=date(2026, 11, 22),
+        daily_budget=UnlimitedDailyBudget(),
+        price=FREE,
+    )
+    svc = DismissalService(double_llm_client(double), env)
+    parsed = ReviewPackage.from_content(content)
+    with Session(engine) as session:
+        context = svc.context(session, parsed)
+        session.commit()
+        result = svc.evaluate(parsed, context)
+        assert result.alert is not None  # the snapshot still had CI-1
+        stored = svc.store(session, parsed, ReviewTarget(package_id, "r", NOW), result)
+        session.commit()
+    assert (stored.status, stored.alert_id, stored.queued) == (ReviewStatus.NO_JUDGE_REVIEW, None, True)
+    with Session(engine) as session:
+        review = session.get_one(m.LlmReview, stored.review_id)
+        assert (review.status, review.parameters["failure"]) == ("no_judge_review", "stale")
+        assert session.scalars(select(m.Alert)).all() == []
+        assert session.scalars(select(m.ErrorQueue.reason)).all() == ["judge stale"]

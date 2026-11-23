@@ -12,7 +12,7 @@ from __future__ import annotations
 
 import logging
 import uuid
-from collections.abc import Callable, Iterable, Mapping
+from collections.abc import Callable, Iterable, Mapping, Sequence
 from dataclasses import dataclass, replace
 from datetime import date, datetime
 from decimal import Decimal
@@ -47,7 +47,10 @@ logger = logging.getLogger(__name__)
 AGENT = "judge"
 # LIMIT reaches the queue only from mode 2, where hitting the limits means no decision; a mode 1 review that hit
 # them still answered (partial_review with its accepted reasons) and its callers pass no failure.
-QUEUED_FAILURES = frozenset({Failure.TRANSPORT, Failure.REQUEST, Failure.FORMAT, Failure.BUDGET, Failure.LIMIT})
+# STALE: a mode 2 alert whose inventory facts changed while the model answered is not raised and waits for a retry.
+QUEUED_FAILURES = frozenset(
+    {Failure.TRANSPORT, Failure.REQUEST, Failure.FORMAT, Failure.BUDGET, Failure.LIMIT, Failure.STALE}
+)
 QUEUE_RETRIES = 2  # PRE-01: retried in the next 2 runs, then pending in the front
 MODE2_MIN_CONFIDENCE = "mode2.min_confidence"
 _SETTING_KEYS = (
@@ -300,6 +303,52 @@ class DbInventory:
             .order_by(SoftwareProduct.itop_name)
         ).all()
         return [(software_id, name) for software_id, name in rows]
+
+
+class SnapshotInventory:
+    """The mode 2 `Inventory` read once, before the model is called (F12.2 #105), so no query runs while it answers.
+    It answers as `DbInventory` did when it was loaded: by iTop CI ID or asset UUID, never a decommissioned asset,
+    and what each asset currently runs, by product name."""
+
+    def __init__(
+        self,
+        assets: Sequence[tuple[uuid.UUID, str | None, datetime | None]],
+        installed: Sequence[tuple[uuid.UUID, uuid.UUID, str]],
+    ) -> None:
+        self._by_itop = {itop: asset_id for asset_id, itop, _retired in assets if itop is not None}
+        self._ids = {asset_id for asset_id, _itop, _retired in assets}
+        self._retired = {asset_id for asset_id, _itop, retired in assets if retired is not None}
+        self._products: dict[uuid.UUID, list[tuple[uuid.UUID, str]]] = {}
+        for asset_id, software_id, name in installed:
+            self._products.setdefault(asset_id, []).append((software_id, name))
+
+    @classmethod
+    def load(cls, session: Session) -> SnapshotInventory:
+        assets = [
+            (asset_id, itop, retired)
+            for asset_id, itop, retired in session.execute(select(Asset.id, Asset.itop_ci_id, Asset.decommissioned_at))
+        ]
+        installed = [
+            (asset_id, software_id, name)
+            for asset_id, software_id, name in session.execute(
+                select(InstalledSoftware.asset_id, InstalledSoftware.id, SoftwareProduct.itop_name)
+                .join(SoftwareProduct, SoftwareProduct.id == InstalledSoftware.software_product_id)
+                .where(InstalledSoftware.removed_at.is_(None))
+                .order_by(InstalledSoftware.asset_id, SoftwareProduct.itop_name)
+            )
+        ]
+        return cls(assets, installed)
+
+    def find_asset(self, ci_id: str) -> uuid.UUID | None:
+        if not ci_id:
+            return None
+        asset_id = self._by_itop.get(ci_id)
+        if asset_id is None and (candidate := _uuid(ci_id)) in self._ids:
+            asset_id = candidate
+        return asset_id if asset_id is not None and asset_id not in self._retired else None
+
+    def products(self, asset_id: uuid.UUID) -> list[tuple[uuid.UUID, str]]:
+        return list(self._products.get(asset_id, ()))
 
 
 def refuted_relationships(session: Session) -> Callable[[str, str, str], bool]:

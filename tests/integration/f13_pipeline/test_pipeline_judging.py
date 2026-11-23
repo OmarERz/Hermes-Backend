@@ -4,13 +4,14 @@ from __future__ import annotations
 
 import pytest
 from pipeline_support import NOW, judge_caller, make_story, one_reason_review
-from sqlalchemy import select
+from sqlalchemy import Engine, select
 from sqlalchemy.orm import Session, sessionmaker
 
 from core.db import models as m
 from core.pipeline.judging import dismiss_story, judge_for
 from doubles.llm import tool_call_completion
 from harness.judge import dismissal_package, finding_package
+from harness.transactions import open_transactions
 
 pytestmark = pytest.mark.integration
 
@@ -46,13 +47,23 @@ def test_a_judge_turned_off_by_the_ladder_is_not_offered(factory: sessionmaker[S
     double.assert_calls(0)
 
 
-def test_mode2_reviews_a_dismissal_candidate(factory: sessionmaker[Session]) -> None:
-    caller, _ = judge_caller(tool_call_completion("dismiss_news", {"news_id": "N1", "reason": "No usamos OpenSSL 3."}))
+def test_mode2_reviews_a_dismissal_candidate_with_no_transaction_open(
+    factory: sessionmaker[Session], engine: Engine
+) -> None:
+    caller, double = judge_caller(
+        tool_call_completion("dismiss_news", {"news_id": "N1", "reason": "No usamos OpenSSL 3."})
+    )
+    seen: list[list[tuple[int, str, int]]] = []
+    double.on_request = lambda: seen.append(open_transactions(engine))
     with factory() as session, session.begin():
         story_id = make_story(session)
-        content = dismissal_package(package_id=str(story_id))
-        content["news"][0]["story_id"] = str(story_id)
+    content = dismissal_package(package_id=str(story_id))
+    content["news"][0]["story_id"] = str(story_id)
+    with factory() as session:
         stored = dismiss_story(session, caller, content, NOW)
-        assert stored is not None
-        assert stored.alert_id is None
+        session.commit()
+    assert seen == [[]]  # F12.2 #105: the read step was committed before the model answered
+    assert stored is not None
+    assert stored.alert_id is None
+    with factory() as session:
         assert session.get_one(m.LlmReview, stored.review_id).summary == "No usamos OpenSSL 3."

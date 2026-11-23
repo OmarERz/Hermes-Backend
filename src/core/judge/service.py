@@ -19,12 +19,13 @@ from core.db.models import ReviewPackage as ReviewPackageRow
 from core.judge.budget import OffsetDailyBudget
 from core.judge.double_review import combine_outcomes, needs_double_review
 from core.judge.mitigation import MitigationResult
-from core.judge.mode2 import Mode2Context, mode2_min_confidence, review_candidate
+from core.judge.mode2 import Mode2Context, Mode2Result, mode2_min_confidence, review_candidate, still_holds
 from core.judge.package import ReviewPackage
 from core.judge.session import Failure, JudgeEnvironment, JudgeSession, ReviewOutcome, ReviewStatus, ToolCaller
 from core.judge.store import (
     DbInventory,
     ReviewTarget,
+    SnapshotInventory,
     refuted_relationships,
     save_alert,
     save_review,
@@ -126,7 +127,11 @@ class StoredDismissalReview:
 
 
 class DismissalService:
-    """Mode 2 (docs/15 F-10): review a dismissal candidate, store the review(s) and the alert it validated."""
+    """Mode 2 (docs/15 F-10): review a dismissal candidate, store the review(s) and the alert it validated.
+
+    Three steps, so the pipeline keeps no transaction open while the model answers (F12.2 #105): `context` reads
+    what the validation needs (inventory snapshot, refuted relationships), `evaluate` runs the model, and `store`
+    re-checks what an accepted alert rests on and writes everything."""
 
     def __init__(
         self, caller: ToolCaller, env: JudgeEnvironment, tools: Mapping[str, ToolDefinition] | None = None
@@ -136,9 +141,36 @@ class DismissalService:
         self._tools = tools
 
     def review(self, session: Session, package: ReviewPackage, target: ReviewTarget) -> StoredDismissalReview:
-        _check_candidate(session, package, target)
-        context = Mode2Context(mode2_min_confidence(self._env), DbInventory(session), refuted_relationships(session))
-        result = review_candidate(self._caller, package, self._env, context, self._tools)
+        """The three steps in the caller's session (tools and tests)."""
+        _check_candidate(session, package, target.review_package_id)
+        return self.store(session, package, target, self.evaluate(package, self.context(session, package)))
+
+    def context(self, session: Session, package: ReviewPackage) -> Mode2Context:
+        """The read step: the candidate's own checks, then everything code validates the proposals against."""
+        _check_candidate(session, package, None)
+        return Mode2Context(
+            mode2_min_confidence(self._env), SnapshotInventory.load(session), refuted_relationships(session)
+        )
+
+    def _live(self, session: Session) -> Mode2Context:
+        """The inventory and refutations as they are now, in the write transaction."""
+        return Mode2Context(mode2_min_confidence(self._env), DbInventory(session), refuted_relationships(session))
+
+    def evaluate(self, package: ReviewPackage, context: Mode2Context) -> Mode2Result:
+        """The model's review(s) of the candidate; no database access."""
+        return review_candidate(self._caller, package, self._env, context, self._tools)
+
+    def store(
+        self, session: Session, package: ReviewPackage, target: ReviewTarget, result: Mode2Result
+    ) -> StoredDismissalReview:
+        """The write step: an alert whose inventory facts changed meanwhile is not raised (`Failure.STALE`, queued
+        for a retry); the reviews are stored either way (their tokens were paid)."""
+        _check_candidate(session, package, target.review_package_id)
+        stale = result.alert is not None and not still_holds(result.alert, self._live(session))
+        if stale:
+            result = Mode2Result(
+                ReviewStatus.NO_JUDGE_REVIEW, replace(result.first, failure=Failure.STALE), result.second
+            )
         first = result.first
         if result.status is not first.status:  # the blind review disagreed or failed: nothing is raised
             failure = result.second.failure if result.second is not None else None
@@ -149,13 +181,13 @@ class DismissalService:
             second_id = save_review(session, result.second, target, second_review_of=review_id)
         alert_id = save_alert(session, result.alert, review_id, target.now) if result.alert is not None else None
         undecided = result.status in (ReviewStatus.NO_JUDGE_REVIEW, ReviewStatus.PARTIAL_REVIEW)
-        failure = (result.second or result.first).failure if undecided else None
+        failure = Failure.STALE if stale else ((result.second or result.first).failure if undecided else None)
         # no decision (provider failure, budget or limits): the candidate is retried later (PRE-01)
         queued = sync_error_queue(session, target.review_package_id, failure, target.now)
         return StoredDismissalReview(result.status, review_id, second_id, alert_id, queued)
 
 
-def _check_candidate(session: Session, package: ReviewPackage, target: ReviewTarget) -> None:
+def _check_candidate(session: Session, package: ReviewPackage, review_package_id: uuid.UUID | None) -> None:
     """Before asking the judge (F-10): the candidate has exactly one news item, its story is a UUID, and the stored
     package row (when given) is that story's dismissal package with this very content (L13: the audit points at
     exactly what the judge read)."""
@@ -166,8 +198,8 @@ def _check_candidate(session: Session, package: ReviewPackage, target: ReviewTar
         story_id = uuid.UUID(news[0].story_id)
     except ValueError:
         raise ValueError("the news item of a dismissal candidate needs its story UUID") from None
-    if target.review_package_id is not None:
-        stored = session.get(ReviewPackageRow, target.review_package_id)
+    if review_package_id is not None:
+        stored = session.get(ReviewPackageRow, review_package_id)
         same = stored is not None and stored.kind == "dismissal" and stored.story_id == story_id
         if not same or stored is None or ReviewPackage.from_content(stored.content).content != package.content:
             raise ValueError("the stored package is not this dismissal candidate")

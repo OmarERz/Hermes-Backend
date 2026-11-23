@@ -5,7 +5,7 @@
   (`store_package`, COR-06), the review(s) and the error queue in the caller's transaction and answers the group
   adjustment (None = no judge review, final = base) with the review id. `evaluate_group` commits its read
   transaction before `assess`, so no transaction is open while the model answers.
-* Mode 2: `dismiss_story` runs `DismissalService.review` on a dismissal candidate's package.
+* Mode 2: `dismiss_story` runs `DismissalService` on a dismissal candidate's package in the same three steps.
 * The environment comes from `judge_environment` with the current ladder level (L14) and the shared daily budget
   (L12, F3.1): when the ladder turned the judge off, `judge_for` returns None and the score is the base.
 No LLM ever writes anything here: the services validate and store; the backend decides.
@@ -75,9 +75,19 @@ def judge_for(session: Session, caller: ToolCaller, now: datetime) -> PipelineJu
 def dismiss_story(
     session: Session, caller: ToolCaller, package: dict[str, Any], now: datetime
 ) -> StoredDismissalReview | None:
-    """Mode 2 on one dismissal candidate; None when the ladder turned the judge off."""
+    """Mode 2 on one dismissal candidate; None when the ladder turned the judge off.
+
+    Three steps (F12.2 #105): the read transaction (environment, the candidate's checks, the inventory snapshot and
+    the refuted relationships) is committed with anything the session held; the model reviews the candidate with no
+    transaction open; a new transaction stores the package, the review(s), the alert (re-checked against the
+    inventory) and the error queue, and the caller commits it."""
     env = environment(session, now)
     if env is None:
         return None
+    service = DismissalService(caller, env)
+    parsed = ReviewPackage.from_content(package)
+    context = service.context(session, parsed)
+    session.commit()  # no transaction stays open while the model answers
+    result = service.evaluate(parsed, context)
     parsed, target = _target(session, package, now)
-    return DismissalService(caller, env).review(session, parsed, target)
+    return service.store(session, parsed, target, result)
