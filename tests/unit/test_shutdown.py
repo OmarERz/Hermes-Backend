@@ -189,6 +189,34 @@ def test_the_runner_returns_like_subprocess_run() -> None:
     assert (done.returncode, done.stdout.strip(), done.stderr.strip()) == (0, "HOLA", "e")
 
 
+SLOW_READER = [
+    sys.executable,
+    "-c",
+    "import sys, time; time.sleep(1); data = sys.stdin.read(); print(len(data))",
+]
+
+
+def test_the_runner_writes_a_prompt_larger_than_the_pipe_to_a_slow_reader() -> None:
+    # The CLI starts slowly and the judge resends the whole conversation: the prompt must be written whole and stdin
+    # closed even when the first writes block for longer than one poll (feature review P1).
+    prompt = "x" * 300_000
+    done = stoppable_runner(StopSignal(), poll_seconds=0.02)(
+        SLOW_READER, input=prompt, capture_output=True, text=True, encoding="utf-8", timeout=30
+    )
+    assert (done.returncode, done.stdout.strip()) == (0, str(len(prompt)))
+
+
+def test_the_runner_stops_while_a_large_prompt_is_still_being_written() -> None:
+    signal = StopSignal()
+    set_after(signal, 0.2)  # the child is still asleep: the parent is blocked writing the prompt
+    started = time.monotonic()
+    with pytest.raises(ShutdownRequested):
+        stoppable_runner(signal, poll_seconds=0.02)(
+            SLOW_READER, input="x" * 300_000, capture_output=True, text=True, timeout=30
+        )
+    assert time.monotonic() - started < FAST
+
+
 def test_the_runner_kills_the_cli_when_the_worker_stops() -> None:
     signal = StopSignal()
     run = stoppable_runner(signal, poll_seconds=0.02)

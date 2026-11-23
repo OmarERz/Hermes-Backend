@@ -2,14 +2,15 @@
 
 An analyst call or a judge turn can take a minute. `StoppableCaller` checks the signal before every call, so a cycle
 that analyses one story or group after another stops at the next call. `stoppable_runner` replaces `subprocess.run`
-for `ClaudeCodeClient`: it polls the signal while the CLI runs and kills the CLI when the worker is asked to stop,
-so the worker neither waits for the answer nor leaves the CLI running (and spending the subscription) after it exits.
+for `ClaudeCodeClient`: a watcher thread polls the signal while the CLI runs and kills the CLI when the worker is
+asked to stop, so the worker neither waits for the answer nor leaves the CLI running (and spending the subscription)
+after it exits.
 """
 
 from __future__ import annotations
 
 import subprocess
-import time
+import threading
 from collections.abc import Callable, Mapping, Sequence
 from dataclasses import dataclass
 from typing import Any
@@ -41,12 +42,15 @@ class StoppableCaller:
 
 
 def stoppable_runner(
-    stop: StopSignal, *, poll_seconds: float = POLL_SECONDS, clock: Callable[[], float] = time.monotonic
+    stop: StopSignal, *, poll_seconds: float = POLL_SECONDS
 ) -> Callable[..., subprocess.CompletedProcess[str]]:
     """A `subprocess.run` replacement (the keywords `ClaudeCodeClient` passes) that kills the child on stop.
 
-    Raises ShutdownRequested when the signal is set before or while the child runs, and `subprocess.TimeoutExpired`
-    when `timeout` passes, like `subprocess.run`; the child is killed and reaped in both cases.
+    The child is driven by one `communicate(input, timeout)` call, exactly like `subprocess.run`, so a prompt larger
+    than the pipe buffer is written whole and stdin is closed (a second `communicate` call cannot resume writing the
+    input). A watcher thread polls the signal and kills the child when the worker is asked to stop. Raises
+    ShutdownRequested when the signal is set before or while the child runs, and `subprocess.TimeoutExpired` when
+    `timeout` passes; the child is killed and reaped in both cases.
     """
 
     def run(
@@ -61,27 +65,29 @@ def stoppable_runner(
         del check  # the client reads the exit code itself
         stop.check()
         pipes: dict[str, Any] = {"stdout": subprocess.PIPE, "stderr": subprocess.PIPE} if capture_output else {}
-        deadline = None if timeout is None else clock() + timeout
         with subprocess.Popen(list(argv), stdin=subprocess.PIPE, **pipes, **popen) as process:  # noqa: S603
-            pending = input
-            while True:
-                wait = poll_seconds if deadline is None else max(0.0, min(poll_seconds, deadline - clock()))
-                try:
-                    stdout, stderr = process.communicate(pending, timeout=wait)
-                    break
-                except subprocess.TimeoutExpired:
-                    pending = None  # already handed over: communicate() resumes the same exchange
+            done, stopped = threading.Event(), threading.Event()
+
+            def watch() -> None:
+                while not done.wait(poll_seconds):
                     if stop.event.is_set():
-                        _kill(process)
-                        raise ShutdownRequested("the worker is stopping") from None
-                    if deadline is not None and clock() >= deadline:
-                        _kill(process)
-                        raise subprocess.TimeoutExpired(list(argv), timeout or 0.0) from None
+                        stopped.set()
+                        process.kill()  # communicate() below then returns: the pipes close with the child
+                        return
+
+            watcher = threading.Thread(target=watch, name="claude-cli-stop", daemon=True)
+            watcher.start()
+            try:
+                stdout, stderr = process.communicate(input, timeout=timeout)
+            except subprocess.TimeoutExpired:
+                process.kill()
+                process.communicate()
+                raise
+            finally:
+                done.set()
+                watcher.join()
+            if stopped.is_set():
+                raise ShutdownRequested("the worker is stopping")
         return subprocess.CompletedProcess(list(argv), process.returncode, stdout, stderr)
 
     return run
-
-
-def _kill(process: subprocess.Popen[Any]) -> None:
-    process.kill()
-    process.communicate()
