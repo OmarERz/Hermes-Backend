@@ -54,6 +54,8 @@ x-backend: &backend
     ITOP_CALLER_ID: ${ITOP_CALLER_ID:-}
     ITOP_SERVICE_ID: ${ITOP_SERVICE_ID:-}
     SCAN_INTERVAL_HOURS: ${SCAN_INTERVAL_HOURS:-0}
+    # Embeddings service of the news cycle (internal network only); set it blank to turn the news cycle off
+    EMBEDDINGS_URL: ${EMBEDDINGS_URL-http://embeddings:8080}
     LLM_BASE_URL_JUDGE: ${LLM_BASE_URL_JUDGE:-}
     LLM_BASE_URL_ANALYSTS: ${LLM_BASE_URL_ANALYSTS:-}
   secrets:
@@ -199,12 +201,42 @@ services:
   workers:
     <<: *backend
     command: ["python", "-m", "workers"]
+    depends_on:
+      bootstrap:
+        condition: service_completed_successfully
+      auth-emulator:
+        condition: service_healthy
+      # Started, not healthy: a broken embeddings service must not stop scans and the other jobs; the news cycle
+      # fails closed on its own (the articles wait for the next cycle).
+      embeddings:
+        condition: service_started
+    # The only service on the embeddings network besides the service itself.
+    networks: [default, embeddings]
     healthcheck:
       # The worker has no port yet: healthy while its main process (PID 1) is alive.
       test: ["CMD", "python", "-c", "import os; os.kill(1, 0)"]
       interval: 10s
       timeout: 3s
       retries: 3
+
+  embeddings:
+    # sentence-transformers on CPU (ING-07, docs/02 §4 22 nov 2026): the backend image carries no torch. No published
+    # port: only the worker reaches it on the Compose network. The model is baked into the image (offline at run time).
+    <<: *hardening
+    build: docker/embeddings
+    # Its own internal network (no route out, no published port): only the worker reaches it; the model is offline.
+    networks: [embeddings]
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request,sys; sys.exit(urllib.request.urlopen('http://127.0.0.1:8080/health', timeout=2).status != 200)"]
+      interval: 10s
+      timeout: 3s
+      start_period: 60s
+      retries: 5
+    restart: unless-stopped
+
+networks:
+  embeddings:
+    internal: true
 
 volumes:
   db_data:

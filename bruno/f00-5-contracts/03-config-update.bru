@@ -14,18 +14,31 @@ auth:bearer {
   token: {{token}}
 }
 
+script:pre-request {
+  // Reads the current version first, so the request works on any installation (API-03 expects the current one).
+  const current = await bru.sendRequest({
+    method: "GET",
+    url: `${bru.getEnvVar("baseUrl")}/api/config`,
+    headers: { Authorization: `Bearer ${bru.getEnvVar("token")}` },
+  });
+  bru.setVar("configVersion", current.data.version);
+  bru.setVar("nextConfigVersion", current.data.version + 1);
+  // A real change (an unchanged value creates no version): alternate between 6 and 7 hours.
+  bru.setVar("sourceHealthHours", String(current.data.values.source_health_hours) === "6" ? "7" : "6");
+}
+
 body:json {
   {
-    "expected_version": 3,
-    "changes": {"ui.language": "en"}
+    "expected_version": {{configVersion}},
+    "changes": {"source_health_hours": "{{sourceHealthHours}}"}
   }
 }
 
 assert {
   res.status: eq 200
-  res.body.version: eq 4
+  res.body.version: eq {{nextConfigVersion}}
 }
 
 docs {
-  Optimistic concurrency (API-03) and per-parameter roles; needs an admin token.
+  Optimistic concurrency (API-03): the current version plus one change gives a new version. Needs an admin token.
 }

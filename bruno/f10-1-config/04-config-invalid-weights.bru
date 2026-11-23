@@ -14,8 +14,18 @@ auth:bearer {
   token: {{token}}
 }
 
+script:pre-request {
+  // The current version, so the weights rule (422) is reached instead of the version check (409, API-03).
+  const current = await bru.sendRequest({
+    method: "GET",
+    url: `${bru.getEnvVar("baseUrl")}/api/config`,
+    headers: { Authorization: `Bearer ${bru.getEnvVar("token")}` },
+  });
+  bru.setVar("configVersion", current.data.version);
+}
+
 body:json {
-  {"expected_version": 1, "changes": {"weights.S": "0.99"}}
+  {"expected_version": {{configVersion}}, "changes": {"weights.S": "0.99"}}
 }
 
 assert {
@@ -23,5 +33,5 @@ assert {
 }
 
 docs {
-  Weights that do not sum to 1.0 answer 422 weights_sum_to_one (FRO-05). Needs the version of the instance.
+  Weights that do not sum to 1.0 answer 422 weights_sum_to_one (FRO-05). Reads the current version first.
 }
