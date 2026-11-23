@@ -12,7 +12,7 @@ from typing import Any
 
 from core.validation.violations import Violation
 
-CVE_FORMAT = re.compile(r"^CVE-\d{4}-\d{4,7}$")
+CVE_FORMAT = re.compile(r"^CVE-[0-9]{4}-[0-9]{4,7}$")  # `\d` would also accept digits of other scripts
 CPE_PAIR = re.compile(r"^[a-z0-9._\-~%]+:[a-z0-9._\-~%]+$")
 CVSS_31_METRICS = {
     "AV": "NALP",
