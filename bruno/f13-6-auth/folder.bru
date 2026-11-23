@@ -1,0 +1,9 @@
+meta {
+  name: f13-6-auth
+  seq: 15
+}
+
+docs {
+  401 without a token and 403 for a role below the route's minimum (API-06). Needs `readerToken` and
+  `analystToken` (make bruno passes READER_TOKEN and ANALYST_TOKEN).
+}

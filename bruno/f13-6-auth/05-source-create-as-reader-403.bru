@@ -1,0 +1,30 @@
+meta {
+  name: source-create-as-reader-403
+  type: http
+  seq: 5
+}
+
+post {
+  url: {{baseUrl}}/api/sources
+  body: json
+  auth: bearer
+}
+
+auth:bearer {
+  token: {{readerToken}}
+}
+
+body:json {
+  {"name": "Bruno reader source", "url": "https://feed.example.test/reader.xml", "kind": "rss"}
+}
+
+assert {
+  res.status: eq 403
+  res.body.error.code: eq forbidden
+}
+
+docs {
+  A reader cannot add a news source.
+
+  operationId: create_source
+}

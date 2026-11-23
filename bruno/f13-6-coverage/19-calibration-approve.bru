@@ -1,0 +1,59 @@
+meta {
+  name: calibration-approve
+  type: http
+  seq: 19
+}
+
+post {
+  url: {{baseUrl}}/api/calibration/proposals/{{proposalId}}/approve
+  body: none
+  auth: bearer
+}
+
+auth:bearer {
+  token: {{token}}
+}
+
+script:pre-request {
+  if (String(bru.getEnvVar("stateChanging") || "0") !== "1") {
+    bru.runner.skipRequest();  // changes data a person owns: only with stateChanging=1 on a test installation
+    return;
+  }
+  async function api(method, path, token, data) {
+    const response = await bru.sendRequest({
+      method,
+      url: `${bru.getEnvVar("baseUrl")}${path}`,
+      headers: { Authorization: `Bearer ${bru.getEnvVar(token || "token")}`, "Content-Type": "application/json" },
+      data,
+    });
+    return response.data;
+  }
+  const proposals = await api("GET", "/api/calibration/proposals?limit=50");
+  const config = await api("GET", "/api/config");
+  // Only proposals the API can still apply: a supported kind whose previous value is still the current one.
+  const current = (p) => {
+    if (p.kind === "formula_weight") {
+      return Object.entries(p.previous_value || {}).every(([key, value]) => String(config.values[key]) === String(value));
+    }
+    return p.kind === "source_level";  // the source list does not expose codes; a stale one answers 409
+  };
+  const proposed = proposals.items.filter((p) => p.status === "pending" && current(p));
+  const pick = proposed[0];
+  if (!pick) {
+    bru.runner.skipRequest();  // proposals come from the weekly calibration job, never from the API
+    return;
+  }
+  bru.setVar("proposalId", pick.id);
+}
+
+assert {
+  res.status: eq 200
+  res.body.status: eq approved
+}
+
+docs {
+  Approves the first open, still current calibration proposal, which applies it (Mode 4 is supervised,
+  D-020). Opt-in (stateChanging=1) and skipped when there is none: proposals come from the weekly job.
+
+  operationId: approve_calibration_proposal
+}

@@ -1,0 +1,26 @@
+meta {
+  name: comparison-table
+  type: http
+  seq: 11
+}
+
+get {
+  url: {{baseUrl}}/api/comparison/table?limit=5
+  body: none
+  auth: bearer
+}
+
+auth:bearer {
+  token: {{token}}
+}
+
+assert {
+  res.status: eq 200
+  res.body.items: isArray
+}
+
+docs {
+  Raw vs final per finding (FRO-11).
+
+  operationId: list_comparison_rows
+}

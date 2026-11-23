@@ -1,0 +1,30 @@
+meta {
+  name: peer-update
+  type: http
+  seq: 6
+}
+
+put {
+  url: {{baseUrl}}/api/peer-companies/{{peerId}}
+  body: json
+  auth: bearer
+}
+
+auth:bearer {
+  token: {{token}}
+}
+
+body:json {
+  {"name": "{{peerName}} (edited)", "sector": "retail", "country": "MX", "aliases": [], "domain": "peer.example.test"}
+}
+
+assert {
+  res.status: eq 200
+  res.body.domain: eq peer.example.test
+}
+
+docs {
+  Edits the peer created by 05.
+
+  operationId: update_peer_company
+}

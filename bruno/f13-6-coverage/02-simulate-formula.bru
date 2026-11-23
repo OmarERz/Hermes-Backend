@@ -1,0 +1,32 @@
+meta {
+  name: simulate-formula
+  type: http
+  seq: 2
+}
+
+post {
+  url: {{baseUrl}}/api/formula/simulate
+  body: json
+  auth: bearer
+}
+
+auth:bearer {
+  token: {{token}}
+}
+
+body:json {
+  {"changes": {"formula.kev_exposed_floor": "95"}}
+}
+
+assert {
+  res.status: eq 200
+  res.body.changed_findings: gte 0
+  res.body.top_movers: isArray
+  res.body.last_30_days_effect: isString
+}
+
+docs {
+  Preview of a formula change (FRO-06): changes nothing, so it can run any number of times.
+
+  operationId: simulate_formula
+}
