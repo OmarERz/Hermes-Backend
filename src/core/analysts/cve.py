@@ -46,14 +46,33 @@ SCHEMA_FILE = "cve_analysis_tool.json"
 SCHEMA_VERSION = "1"
 ESTIMATED_CALL_USD = Decimal("0.01")
 MAX_REFERENCES = 30
-# D-014 level 2: advisory pages are downloaded only from domains on an allowlist. It comes from the environment
-# variable ADVISORY_DOMAINS (comma-separated host names); empty or unset means no advisory text is fetched and the
-# analyst works from the CVE record alone (safe by default).
+# D-014 level 2: advisory pages are downloaded only from domains on an allowlist. The default is the list of
+# official vendor and distribution advisory sites approved by the user (docs/02 section 4). The environment variable
+# ADVISORY_DOMAINS (comma-separated host names) replaces it; set to an empty value it disables the downloads, and
+# the analyst then works from the CVE record alone.
 ADVISORY_DOMAINS_ENV = "ADVISORY_DOMAINS"
+DEFAULT_ADVISORY_DOMAINS: tuple[str, ...] = (
+    "access.redhat.com",
+    "debian.org",
+    "fortiguard.com",
+    "helpx.adobe.com",
+    "kb.vmware.com",
+    "msrc.microsoft.com",
+    "openssl.org",
+    "oracle.com",
+    "sec.cloudapps.cisco.com",
+    "security.debian.org",
+    "security.paloaltonetworks.com",
+    "support.apple.com",
+    "support.broadcom.com",
+    "ubuntu.com",
+)
 
 
 def advisory_domains() -> tuple[str, ...]:
-    raw = os.environ.get(ADVISORY_DOMAINS_ENV, "")
+    raw = os.environ.get(ADVISORY_DOMAINS_ENV)
+    if raw is None:
+        return DEFAULT_ADVISORY_DOMAINS
     return tuple(sorted({d.strip().lower().lstrip(".") for d in raw.split(",") if d.strip()}))
 
 

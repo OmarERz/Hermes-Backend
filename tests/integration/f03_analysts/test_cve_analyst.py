@@ -13,6 +13,7 @@ from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from core.analysts.cve import (
+    DEFAULT_ADVISORY_DOMAINS,
     CveOptions,
     advisory_domains,
     analyze_cve,
@@ -254,11 +255,15 @@ def test_pending_cves_are_those_of_active_groups_without_an_analysis(
     assert pending_cves(session) == []
 
 
-def test_the_advisory_allowlist_comes_from_the_environment_and_is_empty_by_default(
+def test_the_advisory_allowlist_defaults_to_the_approved_list_and_can_be_replaced_or_emptied(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     monkeypatch.delenv("ADVISORY_DOMAINS", raising=False)
-    assert advisory_domains() == ()
+    assert advisory_domains() == DEFAULT_ADVISORY_DOMAINS
+    assert len(DEFAULT_ADVISORY_DOMAINS) == 14
+    assert "github.com" not in DEFAULT_ADVISORY_DOMAINS
+    monkeypatch.setenv("ADVISORY_DOMAINS", "")
+    assert advisory_domains() == ()  # explicitly empty: no downloads
     monkeypatch.setenv("ADVISORY_DOMAINS", " Vendor.Example.com, .other.example.org ,,")
     assert advisory_domains() == ("other.example.org", "vendor.example.com")
     web = FakeWeb()
