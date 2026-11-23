@@ -2231,6 +2231,17 @@
       "RoleAssignment": {
         "additionalProperties": false,
         "properties": {
+          "expected_role": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/Role"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Role the admin read; 409 `role_changed` if it changed since (API-03)"
+          },
           "role": {
             "$ref": "#/components/schemas/Role"
           }
@@ -3203,7 +3214,7 @@
                 }
               }
             },
-            "description": "An admin cannot change their own role"
+            "description": "Own role, the last active admin (`last_admin`) or a stale `expected_role` (`role_changed`)"
           },
           "422": {
             "content": {
