@@ -41,6 +41,7 @@ class ConfigParameter(_Model):
     min_role: Literal["reader", "analyst", "admin"]
     description: str
     validations: list[str] = Field(default_factory=list)
+    options: list[str] = Field(default_factory=list, description="Allowed values of an enum parameter")
 
 
 class ConfigDocument(_Model):
@@ -120,6 +121,7 @@ class Source(_Model):
 class SourceCreate(_Model):
     name: str = Field(min_length=1)
     url: str = Field(pattern=r"^https://", description="Own feeds must use HTTPS; they enter as N4 (D-041)")
+    kind: Literal["rss", "atom", "json", "csv", "api"] = Field(default="rss", description="How the feed is read")
 
 
 class SourcePatch(_Model):
