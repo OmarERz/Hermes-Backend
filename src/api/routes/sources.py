@@ -9,9 +9,8 @@ from __future__ import annotations
 import re
 import uuid
 from datetime import UTC, datetime
-from typing import Annotated
 
-from fastapi import APIRouter, Path, Request
+from fastapi import APIRouter, Request
 from sqlalchemy import select, text
 from sqlalchemy.orm import Session
 
@@ -20,6 +19,7 @@ from api.pagination import PAGINATED_RESPONSES, Page, PageQuery, Signer, paginat
 from api.routes._auth import guard
 from api.routes._config_support import CurrentUserDep, app_user_id, to_api_error
 from api.routes._db import SessionDep
+from api.routes._paths import UuidAliasId
 from api.routes.models import Source, SourceCreate, SourcePatch
 from core.configuration.errors import ConfigError, check_text
 from core.db import models as m
@@ -37,7 +37,7 @@ from core.ingestion.sources import (
 from core.ingestion.ssrf import system_resolver
 
 router = APIRouter(tags=["sources and inventory"])
-SourceId = Annotated[str, Path(alias="id")]
+SourceId = UuidAliasId
 SOURCE_TYPES = {"N1": "official", "N2": "research", "N3": "media", "N4": "feed"}
 FAILING_AFTER = 3
 MIN_CODE = 2

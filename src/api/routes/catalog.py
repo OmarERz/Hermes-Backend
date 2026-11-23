@@ -13,6 +13,7 @@ from api.auth import CurrentUser, get_current_user
 from api.errors import ApiError, ErrorDetail
 from api.routes._auth import guard
 from api.routes._db import SessionDep
+from api.routes._paths import UuidId
 from api.routes.models import (
     CpeCandidate,
     InventoryItem,
@@ -106,14 +107,14 @@ def cpe_candidates(
 
 
 @router.put("/api/mappings/{software}", dependencies=[guard("PUT", "/api/mappings/{software}")])
-def put_mapping(software: str, mapping: MappingInput, session: SessionDep, user: CurrentUserDep) -> Mapping:
+def put_mapping(software: UuidId, mapping: MappingInput, session: SessionDep, user: CurrentUserDep) -> Mapping:
     """Maps a software product (its identifier) to the vendor and product of a CPE name (ESC-05, ESC-06)."""
-    try:
+    try:  # defence in depth: the path pattern already refuses anything but a UUID (422)
         product_id = uuid.UUID(software)
     except ValueError:
         raise ApiError(404, "not_found", "El software no existe.") from None
     pair = parse_cpe_name(mapping.cpe)
-    if pair is None:
+    if pair is None:  # defence in depth: CPE_NAME_PATTERN already refuses these in the schema (422)
         raise ApiError(
             422,
             "validation_error",

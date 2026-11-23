@@ -51,7 +51,7 @@ def test_a_scan_request_is_queued_listed_and_streamed(factory: sessionmaker[Sess
         events = client.get(f"/api/runs/{run['id']}/events").text
         assert '"status": "succeeded"' in events
         assert '"message": "Terminado"' in events
-        assert client.get("/api/runs/not-a-uuid/events").status_code == 404
+        assert client.get("/api/runs/not-a-uuid/events").status_code == 422  # F12.3: run ids are UUIDs
         assert client.get("/api/runs/01936b2e-0000-7000-8000-000000000001/events").status_code == 404
 
 

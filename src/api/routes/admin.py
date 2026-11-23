@@ -5,7 +5,7 @@ from __future__ import annotations
 from datetime import datetime
 from typing import Annotated, cast
 
-from fastapi import APIRouter, Depends, Query, Request
+from fastapi import APIRouter, Depends, Path, Query, Request
 
 from api.errors import ApiError
 from api.pagination import PAGINATED_RESPONSES, Page, PageQuery, Signer, decode_key, encode_key
@@ -89,7 +89,11 @@ def setup_status(session: SessionDep, checker: Checker) -> list[SetupStep]:
 
 @router.put("/api/setup/steps/{n}", dependencies=[guard("PUT", "/api/setup/steps/{n}")])
 def setup_step(
-    n: int, update: SetupStepUpdate, session: SessionDep, checker: Checker, user: CurrentUserDep
+    n: Annotated[int, Path(ge=0, le=99)],  # an unknown step inside the range still answers 404
+    update: SetupStepUpdate,
+    session: SessionDep,
+    checker: Checker,
+    user: CurrentUserDep,
 ) -> SetupStep:
     """Marks a step done or skipped (skipping wins); the mark is audited. The wizard never stores a key."""
     mark = setup.Mark(done=update.done, skipped=update.skipped, actor=app_user_id(session, user), at=now())
