@@ -30,6 +30,7 @@ def test_connections_status_and_test_never_carry_a_key(client: TestClient, probe
     )
     assert itop["checked_at"].endswith("Z") and itop["last_ok_at"] == itop["checked_at"]
     assert (status[4]["ok"], status[4]["missing_variable"], status[4]["last_ok_at"]) == (False, "X", None)
+    assert status[4]["message"] == "Variable faltante: X"
     calls = probes.calls
     client.get("/api/connections/status")
     assert probes.calls == calls  # fresh results are reused
@@ -166,3 +167,17 @@ def test_audit_refuses_a_cursor_of_another_list(client: TestClient) -> None:
     runs_cursor = client.get("/api/runs", params={"limit": 1}).json()["next_cursor"]
     response = client.get("/api/audit", params={"cursor": runs_cursor})
     assert (response.status_code, response.json()["error"]["code"]) == (400, "invalid_cursor")
+
+
+def test_texts_follow_the_configured_output_language(client: TestClient, engine: Engine, probes: FakeProbes) -> None:
+    probes.down = {"nvd"}
+    execute(
+        engine,
+        "INSERT INTO company_profile (id, company_name, output_language, updated_at) VALUES (1, 'X', 'en', now())",
+    )
+    try:
+        tested = client.post("/api/connections/test", json={"names": ["nvd", "itop"]}).json()
+        assert [t["message"] for t in tested] == ["Connection OK", "Missing variable: X"]
+        assert client.get("/api/setup/status").json()[0]["name"] == "Connections"
+    finally:
+        execute(engine, "DELETE FROM company_profile")

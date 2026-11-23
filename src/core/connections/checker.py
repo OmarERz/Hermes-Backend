@@ -1,14 +1,17 @@
 """Connection status with a cache and a rate limit (SEG-23: admin only, without spending the NVD quota).
 
 `status()` answers from results younger than `max_age` and checks only what is stale or never checked; `test()`
-forces a new check, but a service checked less than `min_interval` ago keeps its last result. The probes run in
-parallel and each is bounded by `deadline`. Results live in memory: a restart checks again.
+forces a new check, but a service checked less than `min_interval` ago keeps its last result. Checks are serialized,
+so concurrent requests never call a service twice. The probes run in parallel and the batch is bounded by one
+`deadline`; a probe still running after it is reported offline (its own transport timeout ends it). Results live
+in memory: a restart checks again.
 """
 
 from __future__ import annotations
 
 import logging
 import threading
+import time
 from collections.abc import Callable, Iterable
 from concurrent.futures import ThreadPoolExecutor
 from concurrent.futures import TimeoutError as FutureTimeout
@@ -52,6 +55,7 @@ class ConnectionChecker:
         self._min_interval = min_interval
         self._deadline = deadline
         self._lock = threading.Lock()
+        self._check_lock = threading.Lock()
         self._states: dict[Name, ConnectionState] = {}
 
     def cached(self) -> dict[Name, ConnectionState]:
@@ -60,17 +64,19 @@ class ConnectionChecker:
             return dict(self._states)
 
     def status(self) -> list[ConnectionState]:
-        now = self._clock()
-        known = self.cached()
-        stale = [n for n in NAMES if n not in known or now - known[n].checked_at >= self._max_age]
-        return self._check(stale, now)
+        with self._check_lock:  # one check at a time: concurrent requests reuse what the first one fetched
+            now = self._clock()
+            known = self.cached()
+            stale = [n for n in NAMES if n not in known or now - known[n].checked_at >= self._max_age]
+            return self._check(stale, now)
 
     def test(self, names: Iterable[Name] | None = None) -> list[ConnectionState]:
-        now = self._clock()
-        known = self.cached()
-        wanted = list(names) if names is not None else list(NAMES)
-        due = [n for n in wanted if n not in known or now - known[n].checked_at >= self._min_interval]
-        states = {s.name: s for s in self._check(due, now)}
+        wanted = list(dict.fromkeys(names)) if names is not None else list(NAMES)
+        with self._check_lock:
+            now = self._clock()
+            known = self.cached()
+            due = [n for n in wanted if n not in known or now - known[n].checked_at >= self._min_interval]
+            states = {s.name: s for s in self._check(due, now)}
         return [states[n] for n in NAMES if n in wanted]
 
     def _check(self, names: list[Name], now: datetime) -> list[ConnectionState]:
@@ -80,9 +86,10 @@ class ConnectionChecker:
             pool = ThreadPoolExecutor(max_workers=len(names), thread_name_prefix="connection-check")
             try:
                 futures = {name: pool.submit(self._probe_of(name)) for name in names}
+                end = time.monotonic() + self._deadline  # one deadline for the whole batch
                 for name, future in futures.items():
                     try:
-                        results[name] = future.result(timeout=self._deadline)
+                        results[name] = future.result(timeout=max(0.0, end - time.monotonic()))
                     except FutureTimeout:
                         log.warning("connection check of %s exceeded %s s", name, self._deadline)
                         results[name] = ProbeResult(ok=False, latency_ms=None, message=MSG_OFFLINE)

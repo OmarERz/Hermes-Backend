@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import threading
+import time
 from collections.abc import Callable
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
@@ -13,7 +14,19 @@ from google.auth.exceptions import RefreshError
 
 from core.config import Settings
 from core.connections.checker import ConnectionChecker
-from core.connections.probes import MSG_OFFLINE, MSG_OK, MSG_REJECTED, MSG_UNEXPECTED, NAMES, Name, ProbeResult, Probes
+from core.connections.messages import connection_text
+from core.connections.probes import (
+    MSG_INSECURE,
+    MSG_MISSING,
+    MSG_OFFLINE,
+    MSG_OK,
+    MSG_REJECTED,
+    MSG_UNEXPECTED,
+    NAMES,
+    Name,
+    ProbeResult,
+    Probes,
+)
 
 pytestmark = pytest.mark.unit
 FAKE_KEY = "fake-credential-value-123"
@@ -61,9 +74,7 @@ def never(_request: httpx.Request) -> httpx.Response:
 )
 def test_a_missing_variable_is_named_and_nothing_is_called(name: Name, variable: str) -> None:
     result = probes(never).get(name)()
-    assert result == ProbeResult(
-        ok=False, latency_ms=None, message=f"Variable faltante: {variable}", missing_variable=variable
-    )
+    assert result == ProbeResult(ok=False, latency_ms=None, message=MSG_MISSING, missing_variable=variable)
 
 
 def test_itop_token_without_url_and_url_without_token() -> None:
@@ -121,6 +132,8 @@ def test_urlhaus_must_confirm_the_query_and_itop_must_accept_the_token() -> None
     assert not_json.abusech().message == MSG_UNEXPECTED
     refused = probes(lambda _r: httpx.Response(200, json={"query_status": "unknown_auth_key"}), **ALL_KEYS)
     assert refused.abusech().message == MSG_UNEXPECTED
+    odd = probes(lambda _r: httpx.Response(200, json={"query_status": ["ok"]}), **ALL_KEYS)
+    assert odd.abusech().message == MSG_UNEXPECTED  # an odd shape is an answer, not a crash
     unauthorized = probes(lambda _r: httpx.Response(200, json={"code": 1, "message": FAKE_KEY}), **ALL_KEYS)
     assert (unauthorized.itop().ok, unauthorized.itop().message) == (False, MSG_REJECTED)
     other = probes(lambda _r: httpx.Response(200, json={"code": 100}), **ALL_KEYS)
@@ -219,3 +232,76 @@ def test_a_hung_probe_is_cut_at_the_deadline() -> None:
     finally:
         release.set()
     assert (states[0].ok, states[0].message) == (False, MSG_OFFLINE)
+
+
+def test_the_deepseek_key_never_travels_over_plain_http_to_a_remote_host() -> None:
+    remote = probes(never, deepseek_api_key=FAKE_KEY, llm_base_url_judge="http://llm.example.test/v1")
+    assert remote.deepseek() == ProbeResult(ok=False, latency_ms=None, message=MSG_INSECURE)
+
+    def local(request: httpx.Request) -> httpx.Response:
+        assert request.url.host == "localhost"
+        return httpx.Response(200, json={"data": []})
+
+    assert probes(local, deepseek_api_key=FAKE_KEY, llm_base_url_judge="http://localhost:8080/v1").deepseek().ok
+
+
+def test_repeated_names_are_checked_once_and_concurrent_requests_share_one_check() -> None:
+    probe_of, calls = counting({})
+    checker = ConnectionChecker(probe_of)
+    assert [s.name for s in checker.test(["nvd", "nvd", "itop"])] == ["itop", "nvd"]
+    assert calls == {"nvd": 1, "itop": 1}
+
+    gate = threading.Event()
+    slow_calls: dict[str, int] = {}
+
+    def slow_of(name: Name) -> Callable[[], ProbeResult]:
+        def run() -> ProbeResult:
+            slow_calls[name] = slow_calls.get(name, 0) + 1
+            gate.wait(1)
+            return ProbeResult(ok=True, latency_ms=1, message=MSG_OK)
+
+        return run
+
+    shared = ConnectionChecker(slow_of)
+    threads = [threading.Thread(target=shared.status) for _ in range(3)]
+    for thread in threads:
+        thread.start()
+    gate.set()
+    for thread in threads:
+        thread.join(5)
+    assert slow_calls == dict.fromkeys(NAMES, 1)
+
+
+def test_the_deadline_bounds_the_whole_batch() -> None:
+    release = threading.Event()
+
+    def probe_of(_name: Name) -> Callable[[], ProbeResult]:
+        def hang() -> ProbeResult:
+            release.wait(5)
+            return ProbeResult(ok=True, latency_ms=1, message=MSG_OK)
+
+        return hang
+
+    checker = ConnectionChecker(probe_of, deadline=0.2)
+    started = time.monotonic()
+    try:
+        states = checker.test()
+    finally:
+        release.set()
+    assert time.monotonic() - started < 1.0  # six hung probes, one deadline
+    assert {s.message for s in states} == {MSG_OFFLINE}
+
+
+@pytest.mark.parametrize(
+    ("language", "code", "expected"),
+    [
+        ("es", "ok", "Conexión correcta"),
+        ("en", "rejected", "Key rejected"),
+        ("es", "missing", "Variable faltante: NVD_API_KEY"),
+        ("en", "missing", "Missing variable: NVD_API_KEY"),
+        ("fr", "offline", "Sin conexión"),
+        ("es", "something-new", "Respuesta inesperada del servicio"),
+    ],
+)
+def test_messages_follow_the_output_language(language: str, code: str, expected: str) -> None:
+    assert connection_text(code, "NVD_API_KEY", language) == expected

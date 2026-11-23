@@ -79,13 +79,10 @@ def test_a_lower_role_gets_403(client: TestClient) -> None:
     assert response.json()["error"]["code"] == "forbidden"
     as_role(Role.ANALYST)
     assert client.get("/api/connections/status").status_code == 403
-    as_role(Role.ADMIN)
-    assert client.get("/api/connections/status").status_code == 200
 
 
 GET_SAMPLES = [
     "/api/runs",
-    "/api/connections/status",
 ]
 
 
@@ -95,13 +92,6 @@ def test_get_routes_return_sample_data(client: TestClient, url: str) -> None:
     response = client.get(url)
     assert response.status_code == 200, response.text
     assert response.json()
-
-
-def test_connection_status_never_contains_a_key(client: TestClient) -> None:
-    as_role(Role.ADMIN)
-    body = client.get("/api/connections/status").text
-    assert "DEEPSEEK_API_KEY" in body  # the variable name, to tell what is missing
-    assert "sk-" not in body
 
 
 def test_pagination_cursor_flow_and_invalid_cursor(client: TestClient) -> None:
@@ -173,7 +163,6 @@ def test_runs_stix_calibration_and_notifications(client: TestClient) -> None:
     assert (
         client.post("/api/stix/export", json={"scope": "run"}).status_code == 422
     )  # scope data checked before the database
-    assert client.post("/api/connections/test", json={"names": ["itop"]}).json()[0]["name"] == "itop"
 
 
 def test_openapi_documents_error_envelope_for_every_route() -> None:

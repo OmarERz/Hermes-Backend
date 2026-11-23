@@ -17,19 +17,12 @@ from typing import Final
 from sqlalchemy import text
 from sqlalchemy.orm import Session
 
+from core.connections.messages import DEFAULT_LANGUAGE, STEP_NAMES
 from core.db import models as m
 
 ACTION: Final = "setup.step"
 ENTITY: Final = "setup_step"
-STEPS: Final = (
-    "Conexiones",
-    "Perfil de la empresa",
-    "Empresas pares",
-    "Fuentes",
-    "Revisión del inventario",
-    "Sensibilidad y fórmula",
-    "Primer escaneo",
-)
+STEP_COUNT: Final = len(STEP_NAMES["es"])
 
 # Evidence in the data for steps 2 to 7 (step 1 comes from the connection checks).
 _EVIDENCE: Final = text(
@@ -69,8 +62,8 @@ def _marks(session: Session) -> dict[int, tuple[bool, bool]]:
     return marks
 
 
-def setup_status(session: Session, connections_ok: bool) -> list[SetupStep]:
-    """The seven steps. `connections_ok`: every service passed its last connection check."""
+def setup_status(session: Session, connections_ok: bool, language: str = DEFAULT_LANGUAGE) -> list[SetupStep]:
+    """The seven steps, named in `language`. `connections_ok`: every service passed its last connection check."""
     evidence = session.execute(_EVIDENCE).one()
     shown: Mapping[int, bool] = {
         1: connections_ok,
@@ -83,7 +76,7 @@ def setup_status(session: Session, connections_ok: bool) -> list[SetupStep]:
     }
     marks = _marks(session)
     steps: list[SetupStep] = []
-    for n, name in enumerate(STEPS, start=1):
+    for n, name in enumerate(STEP_NAMES.get(language, STEP_NAMES[DEFAULT_LANGUAGE]), start=1):
         marked_done, marked_skipped = marks.get(n, (False, False))
         done = bool(shown[n]) or marked_done
         steps.append(SetupStep(n=n, name=name, done=done, skipped=marked_skipped and not done))
@@ -98,14 +91,16 @@ class Mark:
     at: datetime
 
 
-def mark_step(session: Session, n: int, mark: Mark, *, connections_ok: bool) -> SetupStep | None:
+def mark_step(
+    session: Session, n: int, mark: Mark, *, connections_ok: bool, language: str = DEFAULT_LANGUAGE
+) -> SetupStep | None:
     """Record an admin's mark of step `n` (skipping wins over done) and return the step; None if `n` is no step.
 
     Flushes the audit row; the caller commits.
     """
-    if not 1 <= n <= len(STEPS):
+    if not 1 <= n <= STEP_COUNT:
         return None
-    before = next(s for s in setup_status(session, connections_ok) if s.n == n)
+    before = next(s for s in setup_status(session, connections_ok, language) if s.n == n)
     after = {"done": mark.done and not mark.skipped, "skipped": mark.skipped}
     session.add(
         m.AuditLog(
@@ -119,4 +114,4 @@ def mark_step(session: Session, n: int, mark: Mark, *, connections_ok: bool) -> 
         )
     )
     session.flush()
-    return next(s for s in setup_status(session, connections_ok) if s.n == n)
+    return next(s for s in setup_status(session, connections_ok, language) if s.n == n)

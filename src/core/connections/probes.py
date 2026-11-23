@@ -11,7 +11,8 @@ Endpoints:
   abuse.ch         `GET https://urlhaus-api.abuse.ch/v1/urls/recent/limit/1/` with `Auth-Key` (documented).
   ransomware.live  `GET https://api-pro.ransomware.live/taxii2/intel/collections/` with `X-API-KEY` (documented for
                    the PRO TAXII feed; counts toward the PRO quota).
-  Firebase         the Auth emulator answers, or the service account obtains an access token.
+  Firebase         the Auth emulator answers, or the service account obtains an access token (5 s timeout).
+The DeepSeek key is never sent over plain HTTP to a remote host.
 The answer to a rejected key is not documented by abuse.ch nor ransomware.live: 401 and 403 count as rejected and
 any other non-2xx answer as unexpected (docs/seguridad/pendientes-f12.md).
 """
@@ -23,14 +24,18 @@ import os
 import time
 from collections.abc import Callable
 from dataclasses import dataclass
+from functools import partial
 from pathlib import Path
 from typing import Final, Literal
+from urllib.parse import urlsplit
 
 import httpx
 from firebase_admin import credentials
 from google.auth.exceptions import GoogleAuthError
+from google.auth.transport.requests import Request
 
 from core.config import Settings
+from core.db.session import is_local_host
 from core.itop.client import ItopError, ItopReader, ItopUnavailableError
 
 log = logging.getLogger("core.connections")
@@ -46,10 +51,13 @@ EMULATOR_ENV_VAR: Final = "FIREBASE_AUTH_EMULATOR_HOST"
 REJECTED: Final = frozenset({401, 403})
 ITOP_UNAUTHORIZED: Final = 1
 
-MSG_OK: Final = "Conexión correcta"
-MSG_REJECTED: Final = "Llave rechazada"
-MSG_OFFLINE: Final = "Sin conexión"
-MSG_UNEXPECTED: Final = "Respuesta inesperada del servicio"
+# Message codes; `core.connections.messages` turns them into text in the configured output language.
+MSG_OK: Final = "ok"
+MSG_REJECTED: Final = "rejected"
+MSG_OFFLINE: Final = "offline"
+MSG_UNEXPECTED: Final = "unexpected"
+MSG_MISSING: Final = "missing"
+MSG_INSECURE: Final = "insecure"
 
 
 @dataclass(frozen=True)
@@ -61,7 +69,7 @@ class ProbeResult:
 
 
 def missing(variable: str) -> ProbeResult:
-    return ProbeResult(ok=False, latency_ms=None, message=f"Variable faltante: {variable}", missing_variable=variable)
+    return ProbeResult(ok=False, latency_ms=None, message=MSG_MISSING, missing_variable=variable)
 
 
 Probe = Callable[[], ProbeResult]
@@ -101,7 +109,8 @@ def _query_ok(response: httpx.Response) -> bool:
         body = response.json()
     except ValueError:
         return False
-    return isinstance(body, dict) and body.get("query_status") in {"ok", "no_results"}
+    status = body.get("query_status") if isinstance(body, dict) else None
+    return isinstance(status, str) and status in {"ok", "no_results"}
 
 
 @dataclass(frozen=True)
@@ -148,7 +157,11 @@ class Probes:
         s = self.settings
         if s.deepseek_api_key is None:
             return missing("DEEPSEEK_API_KEY")
-        url = f"{str(s.llm_base_url_judge).rstrip('/')}/models"
+        base = str(s.llm_base_url_judge)
+        parts = urlsplit(base)
+        if parts.scheme != "https" and not is_local_host(parts.hostname):
+            return ProbeResult(ok=False, latency_ms=None, message=MSG_INSECURE)  # never send the key in clear text
+        url = f"{base.rstrip('/')}/models"
         headers = {"Authorization": f"Bearer {s.deepseek_api_key.get_secret_value()}"}
         return _judge(*_timed_get(self.http, url, headers=headers, clock=self.clock), _any)
 
@@ -193,4 +206,5 @@ class Probes:
 
 def service_account_token(path: Path) -> None:
     """Obtain an OAuth access token with the service account and discard it (proves the account is valid)."""
-    credentials.Certificate(str(path)).get_access_token()
+    account = credentials.Certificate(str(path)).get_credential()
+    account.refresh(partial(Request(), timeout=TIMEOUT_SECONDS))  # the SDK's default transport waits 120 s
