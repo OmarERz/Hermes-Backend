@@ -383,3 +383,18 @@ def test_a_last_admin_refusal_is_a_conflict(
     monkeypatch.setattr(directory, "change_role", refuse)
     response = client.put("/api/admin/users/analyst-1/role", json={"role": "reader"}, headers=bearer("admin"))
     assert (response.status_code, response.json()["error"]["code"]) == (409, "last_admin")
+
+
+def test_an_actor_refused_under_the_lock_gets_403(
+    client: TestClient,
+    parts: tuple[FakeVerifier, InMemoryUserDirectory, FakeRoleManager],
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    _, directory, _ = parts
+
+    def refuse(*_args: object) -> None:
+        raise RoleConflictError("actor_not_admin")
+
+    monkeypatch.setattr(directory, "change_role", refuse)
+    response = client.put("/api/admin/users/analyst-1/role", json={"role": "reader"}, headers=bearer("admin"))
+    assert (response.status_code, response.json()["error"]["code"]) == (403, "forbidden")
