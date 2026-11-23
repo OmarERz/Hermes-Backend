@@ -40,7 +40,7 @@ def _run(app: Any, chunks: list[bytes], scope_type: str = "http") -> list[dict[s
     queue = [{"type": "http.request", "body": c, "more_body": i < len(chunks) - 1} for i, c in enumerate(chunks)]
 
     async def receive() -> dict[str, Any]:
-        return queue.pop(0)
+        return queue.pop(0) if queue else {"type": "http.disconnect"}
 
     async def send(message: dict[str, Any]) -> None:
         sent.append(message)
@@ -54,13 +54,14 @@ async def _reading_app(scope: Any, receive: Any, send: Any) -> None:
     more = True
     while more:
         message = await receive()
-        more = message.get("more_body", False)
+        more = message.get("more_body", False) and message["type"] == "http.request"
     await send({"type": "http.response.start", "status": 200, "headers": []})
     await send({"type": "http.response.body", "body": b"ok"})
 
 
 def test_a_chunked_body_is_counted_while_streaming() -> None:
-    assert _run(_reading_app, [b"12345", b"67890", b"1"])[0]["status"] == 413
+    rejected = _run(_reading_app, [b"12345", b"67890", b"1"])
+    assert [m.get("status") for m in rejected if m["type"] == "http.response.start"] == [413]
     assert _run(_reading_app, [b"12345", b"67890"])[0]["status"] == 200
 
 
@@ -68,10 +69,23 @@ def test_a_late_overflow_after_the_response_started_is_not_answered_twice() -> N
     async def answers_then_reads(scope: Any, receive: Any, send: Any) -> None:
         await send({"type": "http.response.start", "status": 200, "headers": []})
         await receive()
-        await receive()
+        assert (await receive())["type"] == "http.disconnect"
+        assert (await receive())["type"] == "http.disconnect"
+        await send({"type": "http.response.body", "body": b"late"})
 
     sent = _run(answers_then_reads, [b"123456", b"789012"])
     assert [m.get("status") for m in sent if m["type"] == "http.response.start"] == [200]
+    assert all(m.get("body") != b"late" for m in sent)
+
+
+def test_a_chunked_body_through_a_real_route_gets_the_413_envelope() -> None:
+    def chunks() -> Any:
+        for _ in range(3):
+            yield b"x" * (MAX_BODY_BYTES // 2)
+
+    response = client().post("/api/feedback", content=chunks(), headers={"content-type": "application/json"})
+    assert response.status_code == 413
+    assert response.json()["error"]["code"] == "payload_too_large"
 
 
 def test_other_scopes_pass_through() -> None:
@@ -82,3 +96,13 @@ def test_other_scopes_pass_through() -> None:
 
     _run(lifespan_app, [b""], scope_type="lifespan")
     assert seen == ["lifespan"]
+
+
+def test_a_client_disconnect_passes_through() -> None:
+    seen: list[str] = []
+
+    async def disconnected_app(scope: Any, receive: Any, send: Any) -> None:
+        seen.append((await receive())["type"])
+
+    _run(disconnected_app, [])
+    assert seen == ["http.disconnect"]

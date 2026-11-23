@@ -13,9 +13,11 @@ from __future__ import annotations
 
 import logging
 import secrets
-from typing import Annotated, Literal
+from collections.abc import Callable, Coroutine
+from typing import Annotated, Any, Literal
 
-from fastapi import APIRouter, BackgroundTasks, Depends, Header, status
+from fastapi import APIRouter, BackgroundTasks, Depends, Header, Request, Response, status
+from fastapi.routing import APIRoute
 from pydantic import BaseModel, ConfigDict, Field, SecretStr
 
 from api.errors import ApiError, ErrorResponse
@@ -47,18 +49,32 @@ def _resync(sync: TicketStateSync, itop_id: str) -> None:
 
 
 def build_itop_webhook_router(token: SecretStr | None, sync: TicketStateSync | None) -> APIRouter:
-    router = APIRouter(prefix="/api/itop", tags=["itop"])
-
-    def require_webhook_token(authorization: Annotated[str | None, Header()] = None) -> TicketStateSync:
-        """Runs before the body is read, so a caller without the token gets 401/503, never a validation 422."""
-        if token is None or sync is None:
-            raise ApiError(503, "webhook_disabled", "El webhook de iTop no está configurado.")
-        expected = f"Bearer {token.get_secret_value()}".encode()
+    def check_token(configured: SecretStr, ready: TicketStateSync, authorization: str | None) -> TicketStateSync:
+        expected = f"Bearer {configured.get_secret_value()}".encode()
         if authorization is None or not secrets.compare_digest(authorization.encode(), expected):
             raise ApiError(401, "unauthorized", "Se requiere autenticación válida.")
-        return sync
+        return ready
 
-    webhook_guard = Depends(require_webhook_token)  # resolved before the body (annotations here are strings)
+    class TokenFirstRoute(APIRoute):
+        """Checks the token before FastAPI reads or decodes the body: a caller without it gets 401/503, never a
+        400/422 that would reveal anything about the payload (pendientes F5.1 #49)."""
+
+        def get_route_handler(self) -> Callable[[Request], Coroutine[Any, Any, Response]]:
+            handler = super().get_route_handler()
+
+            async def token_first(request: Request) -> Response:
+                if token is not None and sync is not None:  # disabled: there is no token to protect (503 below)
+                    check_token(token, sync, request.headers.get("authorization"))
+                return await handler(request)
+
+            return token_first
+
+    def require_webhook_token(authorization: Annotated[str | None, Header()] = None) -> TicketStateSync | None:
+        """Keeps the header in the OpenAPI contract and hands the ticket sync to the route (None when disabled)."""
+        return check_token(token, sync, authorization) if token is not None and sync is not None else None
+
+    router = APIRouter(prefix="/api/itop", tags=["itop"], route_class=TokenFirstRoute)
+    webhook_guard = Depends(require_webhook_token)  # annotations here are strings: a default-value dependency
 
     @router.post(
         "/webhook",
@@ -71,9 +87,11 @@ def build_itop_webhook_router(token: SecretStr | None, sync: TicketStateSync | N
     def itop_webhook(
         call: ItopWebhookCall,
         background: BackgroundTasks,
-        ready: TicketStateSync = webhook_guard,
+        ready: TicketStateSync | None = webhook_guard,
     ) -> WebhookAccepted:
         """Doorbell from iTop: re-read the ticket in the background (ARQ-02). Not for the frontend."""
+        if ready is None:
+            raise ApiError(503, "webhook_disabled", "El webhook de iTop no está configurado.")
         background.add_task(_resync, ready, call.id)
         return WebhookAccepted()
 

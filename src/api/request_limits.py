@@ -23,10 +23,6 @@ _BODY = json.dumps(
 ).encode()
 
 
-class _TooLargeError(Exception):
-    """Raised inside `receive` when a chunked body passes the limit."""
-
-
 class BodySizeLimitMiddleware:
     def __init__(self, app: ASGIApp, max_bytes: int = MAX_BODY_BYTES) -> None:
         self.app = app
@@ -40,28 +36,30 @@ class BodySizeLimitMiddleware:
         if declared is not None and (not declared.isdigit() or int(declared) > self.max_bytes):
             await _reject(send)
             return
-        seen = 0
-        started = False
+        state = {"seen": 0, "started": False, "rejected": False}
 
         async def counting_receive() -> Message:
-            nonlocal seen
+            if state["rejected"]:
+                return {"type": "http.disconnect"}
             message = await receive()
             if message["type"] == "http.request":
-                seen += len(message.get("body", b""))
-                if seen > self.max_bytes:
-                    raise _TooLargeError
+                state["seen"] += len(message.get("body", b""))
+                if state["seen"] > self.max_bytes:
+                    # Answer 413 ourselves and tell the app the client is gone: FastAPI would turn an exception
+                    # raised while it reads the body into a 400.
+                    state["rejected"] = True
+                    if not state["started"]:
+                        await _reject(send)
+                    return {"type": "http.disconnect"}
             return message
 
-        async def tracking_send(message: Message) -> None:
-            nonlocal started
-            started = started or message["type"] == "http.response.start"
+        async def guarded_send(message: Message) -> None:
+            if state["rejected"]:
+                return  # the 413 already went out; whatever the app answers afterwards is dropped
+            state["started"] = state["started"] or message["type"] == "http.response.start"
             await send(message)
 
-        try:
-            await self.app(scope, counting_receive, tracking_send)
-        except _TooLargeError:
-            if not started:
-                await _reject(send)
+        await self.app(scope, counting_receive, guarded_send)
 
 
 async def _reject(send: Send) -> None:
