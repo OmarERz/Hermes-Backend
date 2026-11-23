@@ -1,0 +1,30 @@
+meta {
+  name: me-as-reader
+  type: http
+  seq: 8
+}
+
+get {
+  url: {{baseUrl}}/api/me
+  body: none
+  auth: bearer
+}
+
+auth:bearer {
+  token: {{readerToken}}
+}
+
+vars:post-response {
+  readerUid: res.body.uid
+}
+
+assert {
+  res.status: eq 200
+  res.body.role: eq reader
+}
+
+docs {
+  Every role reads its own identity; keeps the reader's uid for the role assignment at the end.
+
+  operationId: get_current_user
+}

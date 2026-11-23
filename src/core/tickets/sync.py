@@ -29,6 +29,7 @@ from sqlalchemy.orm import Session, sessionmaker
 from core.db import models as m
 from core.itop import oql
 from core.itop.client import ItopError, ItopReader, ItopUnavailableError
+from core.textnum import ascii_int
 
 log = logging.getLogger("core.tickets.sync")
 
@@ -41,6 +42,20 @@ ITOP_DATE_FORMAT: Final = "%Y-%m-%d %H:%M:%S"
 IMPACTS: Final[dict[str, str]] = {"1": "department", "2": "service"}
 SYNCED_STATES: Final = ("open", "resolved")
 
+# Demo tickets (`make demo`) carry these ids instead of iTop's: they are never read from iTop (pending F13.1 #70).
+DEMO_ID_PREFIX: Final = "DEMO-"
+# An urgency write of ours that finished at or after `:since`: iTop may have answered before it landed.
+_URGENCY_WRITE_DONE_SINCE: Final = text(
+    """
+    SELECT 1
+      FROM itop_outbox o
+      JOIN ticket_update u ON u.id = o.ticket_update_id
+     WHERE u.ticket_id = :ticket_id
+       AND o.status = 'done' AND o.done_at >= :since
+       AND o.payload -> 'fields' ? 'urgency'
+     LIMIT 1
+    """
+)
 _URGENCY_WRITE_QUEUED: Final = text(
     """
     SELECT 1
@@ -97,7 +112,7 @@ def last_urgency_change(reader: ItopReader, itop_ticket_id: str) -> UrgencyChang
     dated = [(at, obj) for obj in changes if (at := _parse_itop_date(obj.text("date"))) is not None]
     if not dated:
         return None
-    at, newest = max(dated, key=lambda pair: (pair[0], int(pair[1].key) if pair[1].key.isdigit() else 0))
+    at, newest = max(dated, key=lambda pair: (pair[0], ascii_int(pair[1].key) or 0))
     return UrgencyChange(at=at, by=newest.text("userinfo") or "")
 
 
@@ -119,7 +134,11 @@ class TicketStateSync:
         with self.session_factory() as session:
             ids = session.scalars(
                 select(m.Ticket.id)
-                .where(m.Ticket.status.in_(SYNCED_STATES), m.Ticket.itop_ticket_id.is_not(None))
+                .where(
+                    m.Ticket.status.in_(SYNCED_STATES),
+                    m.Ticket.itop_ticket_id.is_not(None),
+                    m.Ticket.itop_ticket_id.not_like(f"{DEMO_ID_PREFIX}%"),
+                )
                 .order_by(m.Ticket.id)
             ).all()
         read = 0
@@ -138,15 +157,20 @@ class TicketStateSync:
         """Webhook doorbell: re-read one ticket by its iTop id. False when it is not one of ours."""
         with self.session_factory() as session:
             ticket_id = session.scalar(select(m.Ticket.id).where(m.Ticket.itop_ticket_id == itop_ticket_id))
-        if ticket_id is None:
+        if ticket_id is None or itop_ticket_id.startswith(DEMO_ID_PREFIX):
             return False
         self._sync(ticket_id)
         return True
 
     def _sync(self, ticket_id: object) -> None:
+        # Our own pending urgency writes are looked up before reading iTop, and the writes that finish while iTop is
+        # read are caught afterwards: either way the remote urgency may predate our write, so it is not a human
+        # change (pending F5.1 #44, D-007).
+        read_started = self.clock()
         with self.session_factory() as session:
             ticket = session.get_one(m.Ticket, ticket_id)
             itop_id = ticket.itop_ticket_id
+            queued = session.scalar(_URGENCY_WRITE_QUEUED, {"ticket_id": ticket.id}) is not None
         if itop_id is None:
             return
         found = self.reader.get(TICKET_CLASS, itop_id, TICKET_FIELDS)
@@ -155,12 +179,12 @@ class TicketStateSync:
             return
         remote = found[0]
         urgency_text = remote.text("urgency")
-        urgency = int(urgency_text) if urgency_text and urgency_text.isdigit() else None
+        urgency = ascii_int(urgency_text)
         change: UrgencyChange | None = None
         with self.session_factory() as session:
             ticket = session.get_one(m.Ticket, ticket_id)
             suspicious = urgency is not None and urgency != ticket.current_urgency
-            queued = session.scalar(_URGENCY_WRITE_QUEUED, {"ticket_id": ticket.id}) is not None
+            queued = queued or self._ours_in_flight(session, ticket.id, read_started)
         if suspicious and not queued and self.system_user:
             change = last_urgency_change(self.reader, itop_id)
         now = self.clock()
@@ -169,6 +193,7 @@ class TicketStateSync:
             if ticket.itop_ticket_id != itop_id:
                 return  # re-created meanwhile (reopen of a closed ticket): the next pass reads the new one
             self._apply_status(ticket, ticket_status(remote.text("status")), now)
+            queued = queued or self._ours_in_flight(session, ticket.id, read_started)
             if urgency is not None and urgency != ticket.current_urgency and not queued:
                 self._record_human_change(ticket, change, now)
                 ticket.current_urgency = urgency
@@ -176,6 +201,15 @@ class TicketStateSync:
             if impact is not None:
                 ticket.current_impact = impact
             ticket.itop_ref = remote.text("ref") or ticket.itop_ref
+
+    @staticmethod
+    def _ours_in_flight(session: Session, ticket_id: object, since: datetime) -> bool:
+        """An urgency write of ours is queued, running, or finished since `since`."""
+        params = {"ticket_id": ticket_id, "since": since}
+        return (
+            session.scalar(_URGENCY_WRITE_QUEUED, params) is not None
+            or session.scalar(_URGENCY_WRITE_DONE_SINCE, params) is not None
+        )
 
     @staticmethod
     def _apply_status(ticket: m.Ticket, status: str, now: datetime) -> None:

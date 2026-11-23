@@ -25,6 +25,7 @@ from core.llm import (
     load_tools,
     make_tool,
 )
+from core.llm.client import DEFAULT_MAX_OUTPUT_TOKENS
 from core.llm.tools import SCHEMAS_DIR_ENV, check_strict_compatible, default_schemas_dir
 
 pytestmark = pytest.mark.unit
@@ -129,6 +130,31 @@ def test_call_sends_strict_tools_and_returns_validated_arguments() -> None:
     assert body["tools"][0]["function"]["parameters"]["additionalProperties"] is False
     assert body["tool_choice"] == {"type": "function", "function": {"name": "submit_result"}}
     assert body["thinking"] == {"type": "disabled"}  # forced tool choices fail with thinking on
+
+
+def test_every_call_carries_an_explicit_output_cap() -> None:
+    """F12.3 (OWASP LLM10): the output of one call is bounded even if the provider's default is larger."""
+    server = Server(ok(), ok())
+    call(server.client())
+    assert json.loads(server.requests[0].content)["max_tokens"] == DEFAULT_MAX_OUTPUT_TOKENS
+    capped = LlmClient(
+        base_url=URL,
+        api_key=SecretStr(API_KEY),
+        http_client=httpx2.Client(transport=httpx2.MockTransport(server)),
+        max_output_tokens=512,
+    )
+    call(capped)
+    assert json.loads(server.requests[1].content)["max_tokens"] == 512
+    with pytest.raises(ValueError, match="positive"):
+        LlmClient(base_url=URL, api_key=SecretStr(API_KEY), max_output_tokens=0)
+
+
+def test_an_answer_cut_at_the_output_cap_is_a_response_error_with_its_usage() -> None:
+    body = completion(arguments='{"verdict": "yes", "score": 3}')
+    body["choices"][0]["finish_reason"] = "length"
+    with pytest.raises(LlmResponseError, match="output token limit") as caught:
+        call(Server(ok(body)).client())
+    assert caught.value.usage.output == 5  # paid for even though it is unusable (L12)
 
 
 def test_tool_choice_defaults_to_required() -> None:

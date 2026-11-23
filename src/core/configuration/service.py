@@ -32,6 +32,7 @@ from core.db import models as m
 from core.scoring.engine import Formula
 from core.scoring.formula_repo import NoActiveFormulaError, load_formula
 from core.scoring.formula_repo import load_active_formula as _load_active
+from core.scoring.queue import queue_recalculation
 
 
 def load_active_formula(session: Session) -> tuple[uuid.UUID, Formula]:
@@ -414,14 +415,20 @@ def _write(ctx: _Context, stored: dict[str, Any], new_formula: tuple[uuid.UUID, 
                 changed_at=ctx.now,
             )
         )
+    if new_formula is None and "dead_zone" in stored:
+        # The dead zone is a setting but part of the scoring formula (it decides which judge adjustments apply):
+        # the stored scores follow it too (F-18).
+        queue_recalculation(session, ctx.now, _load_active(session)[0], ctx.user_id)
     if new_formula is not None:
         source_id, formula = new_formula
-        fs.save_new_version(
+        saved = fs.save_new_version(
             session,
             source_id,
             formula,
             fs.NewVersion(ctx.user_id, ctx.now, "Cambio desde la configuración", ctx.origin),
         )
+        # FRO-08: the worker recalculates with the saved version, without the judge
+        queue_recalculation(session, ctx.now, saved.id, ctx.user_id)
     session.flush()
 
 

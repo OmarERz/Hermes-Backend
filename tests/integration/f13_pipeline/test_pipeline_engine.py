@@ -4,20 +4,31 @@ from __future__ import annotations
 
 import uuid
 from datetime import UTC, datetime
+from decimal import Decimal
 from typing import Any
 
 import pytest
 from pipeline_support import NOW, judge_caller
-from sqlalchemy import func, select
+from sqlalchemy import Engine, func, select, update
 from sqlalchemy.orm import Session, sessionmaker
 
+from core.configuration import formula_store
+from core.configuration import formula_store as fs
 from core.db import models as m
 from core.pipeline.cycles import NewsCycleOutput, Pipeline, ScanCycleOutput, Steps
-from core.pipeline.wiring import engine_dismissal_package, engine_evaluate, engine_recalculate
+from core.pipeline.wiring import (
+    engine_dismissal_package,
+    engine_evaluate,
+    engine_recalculate,
+    engine_recalculate_queued,
+)
 from core.scoring import evaluate
+from core.scoring.formula_repo import load_active_formula
+from core.scoring.queue import queue_recalculation
 from core.tickets.content import ItopIdentity
 from core.tickets.lifecycle import TicketLifecycle
 from doubles.llm import tool_call_completion
+from harness.transactions import open_transactions
 
 pytestmark = pytest.mark.integration
 
@@ -143,3 +154,177 @@ def test_a_failed_nightly_recalculation_keeps_finished_groups_and_marks_the_run_
         failed = other.scalars(select(m.Run).where(m.Run.kind == "nightly", m.Run.status == "failed")).one()
     assert stored == {marks[0]}
     assert (failed.progress, failed.finished_at is not None) == (0, True)
+
+
+def test_a_queued_formula_request_is_served_on_its_own_run_without_the_judge(factory: sessionmaker[Session]) -> None:
+    now = datetime(2026, 11, 23, tzinfo=UTC)
+    with factory() as session, session.begin():
+        request_id = queue_recalculation(session, now, load_active_formula(session)[0]).id
+    pipeline = Pipeline(factory, Steps(news=None, recalculate_queued=engine_recalculate_queued(None)))
+    assert pipeline.recalculation_requests_cycle() is True
+    with factory() as session:
+        run = session.get_one(m.Run, request_id)
+        assert (run.kind, run.status, run.progress, run.finished_at is not None) == (
+            "recalculation",
+            "succeeded",
+            100,
+            True,
+        )
+        assert run.formula_version_id == load_active_formula(session)[0]  # the formula the pass used (D-061)
+        assert session.scalars(select(m.Run).where(m.Run.kind == "recalculation")).all() == [run]  # no extra run row
+    assert pipeline.recalculation_requests_cycle() is False  # nothing left
+    assert Pipeline(factory, Steps(news=None)).recalculation_requests_cycle() is False  # scoring not wired
+
+
+def test_a_request_left_running_by_a_dead_worker_is_taken_again(factory: sessionmaker[Session]) -> None:
+    now = datetime(2026, 11, 23, tzinfo=UTC)
+    with factory() as session, session.begin():
+        stuck = m.Run(
+            kind="recalculation", status="running", progress=40, trigger_reason="formula_change", started_at=now
+        )
+        session.add(stuck)
+        session.flush()
+        stuck_id = stuck.id
+    pipeline = Pipeline(factory, Steps(news=None, recalculate_queued=engine_recalculate_queued(None)))
+    assert pipeline.recalculation_requests_cycle() is True
+    with factory() as session:
+        assert session.get_one(m.Run, stuck_id).status == "succeeded"
+
+
+def test_a_request_for_a_replaced_formula_is_superseded_and_a_failing_one_is_closed(
+    factory: sessionmaker[Session], monkeypatch: pytest.MonkeyPatch
+) -> None:
+    now = datetime(2026, 11, 23, tzinfo=UTC)
+    with factory() as session, session.begin():
+        old_id, formula = load_active_formula(session)
+        fs.save_new_version(session, old_id, formula, fs.NewVersion(None, now, "newer"))  # old is superseded
+        stale_id = queue_recalculation(session, now, old_id).id
+    pipeline = Pipeline(factory, Steps(news=None, recalculate_queued=engine_recalculate_queued(None)))
+    assert pipeline.recalculation_requests_cycle() is True
+    with factory() as session:
+        stale = session.get_one(m.Run, stale_id)
+        assert (stale.status, stale.progress) == ("succeeded", 100)
+
+    with factory() as session, session.begin():
+        failing_id = queue_recalculation(session, now, load_active_formula(session)[0]).id
+
+    def boom(_session: Session) -> Any:
+        raise RuntimeError("boom")
+
+    monkeypatch.setattr("core.pipeline.wiring.load_active_formula", boom)
+    with pytest.raises(RuntimeError, match="boom"):
+        pipeline.recalculation_requests_cycle()
+    with factory() as session:
+        assert session.get_one(m.Run, failing_id).status == "failed"
+
+
+def test_a_saved_formula_request_reassesses_the_open_groups_on_its_own_run(factory: sessionmaker[Session]) -> None:
+    now = datetime(2026, 11, 23, tzinfo=UTC)
+    with factory() as session, session.begin():
+        old_id, formula = load_active_formula(session)
+        shifted = formula_store.apply_changes(
+            formula,
+            {
+                "weights.S": str(formula.weights["S"] - Decimal("0.2")),
+                "weights.P": str(formula.weights["P"] + Decimal("0.2")),
+            },
+        )
+        saved = fs.save_new_version(session, old_id, shifted, fs.NewVersion(None, now, "heavier exploitation"))
+        request_id = queue_recalculation(session, now, saved.id).id
+        saved_id = saved.id
+    pipeline = Pipeline(factory, Steps(news=None, recalculate_queued=engine_recalculate_queued(None)))
+    assert pipeline.recalculation_requests_cycle() is True
+    with factory() as session:
+        run = session.get_one(m.Run, request_id)
+        assert (run.status, run.formula_version_id) == ("succeeded", saved_id)
+        made = session.scalars(select(m.Assessment).where(m.Assessment.run_id == request_id)).all()
+        assert made, "the new weights must produce at least one new assessment"
+        assert {(a.formula_version_id, a.trigger) for a in made} == {(saved_id, "formula_change")}
+
+
+def test_a_group_that_stops_being_active_mid_pass_is_skipped_and_the_run_still_succeeds(
+    factory: sessionmaker[Session], monkeypatch: pytest.MonkeyPatch
+) -> None:
+    def gone(_session: Session, group_id: uuid.UUID, *_args: Any) -> Any:
+        raise evaluate.GroupNotActiveError(str(group_id))
+
+    monkeypatch.setattr("core.scoring.evaluate.evaluate_group", gone)
+    with factory() as session:
+        report = evaluate.recalculate_open_groups(session, "formula_change")
+        assert report.groups >= 1 and report.changed == 0
+        assert session.get_one(m.Run, report.run_id).status == "succeeded"
+    with factory() as session, session.begin():  # commit=False: the caller's pending work must survive the skip
+        session.add(
+            m.Run(
+                kind="news",
+                status="succeeded",
+                progress=100,
+                trigger_reason="manual",
+                started_at=datetime(2002, 3, 4, tzinfo=UTC),
+            )
+        )
+        report = evaluate.recalculate_open_groups(session, "formula_change", commit=False)
+        assert session.get_one(m.Run, report.run_id).status == "succeeded"
+    with factory() as session:
+        assert (
+            session.scalar(
+                select(func.count()).select_from(m.Run).where(m.Run.started_at == datetime(2002, 3, 4, tzinfo=UTC))
+            )
+            == 1
+        )
+
+
+def describe(engine: Engine, text: str) -> None:
+    """A committed iTop change to the first demo CI: its description is part of the package fingerprint."""
+    with Session(engine) as session, session.begin():
+        session.execute(update(m.Asset).where(m.Asset.itop_ci_id == "CI-1").values(description=text))
+
+
+def test_no_transaction_is_open_while_the_judge_answers_and_a_stale_review_is_judged_again(
+    factory: sessionmaker[Session], engine: Engine
+) -> None:
+    """F12.2 #105 with real commits: the read transaction is committed before every judge call, and a CI that
+    changed during the first review makes the evaluation judge the new package (the first review is kept)."""
+    describe(engine, "Servidor de pagos (revision 1)")  # a package the judge has not reviewed yet
+    caller, double = judge_caller(finalize_only(), finalize_only())
+    seen: list[list[tuple[int, str, int]]] = []
+
+    def meanwhile() -> None:
+        seen.append(open_transactions(engine))
+        if len(seen) == 1:
+            describe(engine, "Servidor de pagos (revision 2)")  # nothing blocks this write while the model answers
+
+    double.on_request = meanwhile
+    with factory() as session, session.begin():
+        run_id = scan_run(session, "persistent")
+    steps = Steps(
+        news=lambda _s, _reason: NewsCycleOutput(None, []),
+        scan=lambda _queued, _reason: ScanCycleOutput(run_id),
+        evaluate=engine_evaluate,
+        judge_caller=caller,
+    )
+    steps.correlate_groups = lambda _s, _g, _n: []
+
+    report = Pipeline(factory, steps, clock=lambda: NOW).scan_cycle()
+
+    assert (report.assessments, report.failures) == (1, 0)
+    assert seen == [[], []]  # two reviews, neither inside a transaction
+    double.assert_calls(2)
+    with factory() as session:
+        assessment = session.scalars(
+            select(m.Assessment)
+            .where(m.Assessment.finding_group_id == demo_group(session))
+            .order_by(m.Assessment.assessed_at.desc(), m.Assessment.id.desc())
+        ).first()
+        assert assessment is not None
+        review = session.get_one(m.LlmReview, assessment.llm_review_id)
+        package = session.get_one(m.ReviewPackage, review.review_package_id)
+        ci = next(c for c in package.content["group"]["cis"] if c["ci_id"] == "CI-1")
+        assert ci["description"] == "Servidor de pagos (revision 2)"  # the applied review saw the CI as it is now
+        stale = session.scalars(
+            select(m.ReviewPackage).where(m.ReviewPackage.content["group"]["cis"].astext.contains("revision 1"))
+        ).all()
+        assert len(stale) == 1  # the first package and its review are kept (its tokens were paid)
+        kept = session.scalars(select(m.LlmReview).where(m.LlmReview.review_package_id == stale[0].id)).one()
+        assert (kept.status, kept.parameters["failure"]) == ("no_judge_review", "stale")  # never looks applied
+        assert session.scalars(select(m.ErrorQueue).where(m.ErrorQueue.review_package_id == stale[0].id)).all() == []

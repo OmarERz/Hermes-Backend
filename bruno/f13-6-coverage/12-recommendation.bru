@@ -1,0 +1,53 @@
+meta {
+  name: recommendation
+  type: http
+  seq: 12
+}
+
+get {
+  url: {{baseUrl}}/api/recommendations/{{assessmentId}}
+  body: none
+  auth: bearer
+}
+
+auth:bearer {
+  token: {{token}}
+}
+
+script:pre-request {
+  async function api(method, path, token, data) {
+    const response = await bru.sendRequest({
+      method,
+      url: `${bru.getEnvVar("baseUrl")}${path}`,
+      headers: { Authorization: `Bearer ${bru.getEnvVar(token || "token")}`, "Content-Type": "application/json" },
+      data,
+    });
+    return response.data;
+  }
+  let first = null;
+  if (bru.getVar("assessmentId")) {
+    // Picked by an earlier request of this run: keep it, a newer assessment may have been stored since.
+    first = { assessment_id: bru.getVar("assessmentId"), asset: { ci_id: bru.getVar("assetCiId") } };
+  } else {
+    const page = await api("GET", "/api/recommendations?limit=1");
+    first = page.items[0] || null;
+    bru.setVar("assessmentId", first ? first.assessment_id : "");
+    bru.setVar("assetCiId", first && first.asset ? first.asset.ci_id : "");
+  }
+  if (!first) {
+    if (Number(bru.getEnvVar("demoMinItems") || 0) > 0) throw new Error("a recommendation expected with demo data");
+    bru.runner.skipRequest();  // an installation without data: nothing to call this route on
+    return;
+  }
+}
+
+assert {
+  res.status: eq 200
+  res.body.assessment_id: eq {{assessmentId}}
+}
+
+docs {
+  A recommendation by its assessment id (FRO-09).
+
+  operationId: get_recommendation
+}

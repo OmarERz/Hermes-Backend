@@ -1,0 +1,40 @@
+meta {
+  name: source-create
+  type: http
+  seq: 8
+}
+
+post {
+  url: {{baseUrl}}/api/sources
+  body: json
+  auth: bearer
+}
+
+auth:bearer {
+  token: {{token}}
+}
+
+script:pre-request {
+  bru.setVar("sourceStamp", String(Date.now()));
+}
+
+body:json {
+  {"name": "Bruno source {{sourceStamp}}", "url": "https://example.com/bruno-{{sourceStamp}}.xml", "kind": "rss"}
+}
+
+vars:post-response {
+  sourceId: res.body.id
+}
+
+assert {
+  res.status: eq 201
+  res.body.structural: eq false
+  res.body.id: isString
+}
+
+docs {
+  A custom news source with a URL unique to this run; 09 turns it off at once (sources are never deleted).
+  The host must resolve (the SSRF rules check it), so this needs DNS: example.com, reserved for examples.
+
+  operationId: create_source
+}

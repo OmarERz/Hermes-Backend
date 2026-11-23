@@ -41,6 +41,7 @@ from core.db import models as m
 from core.itop import oql
 from core.itop.client import READ_OPERATIONS, ItopError, ItopObject, ItopReader, ItopUnavailableError
 from core.itop.oql import FIRST_PRINTABLE
+from core.itop.rich_text import encode_html_fields
 
 log = logging.getLogger("core.itop.outbox")
 
@@ -50,6 +51,10 @@ LOG_FIELDS: Final = frozenset({"public_log", "private_log"})
 STIMULI: Final = frozenset({"ev_reopen"})
 REOPENABLE: Final = frozenset({"resolved", "closed"})  # ev_reopen still needed while the ticket is in these
 MAX_BACKOFF_MINUTES: Final = 60
+# iTop's REST API refuses every core/create, core/update and core/apply_stimulus without `comment` ("Missing parameter
+# 'comment'", code 100, checked live on 3.2.2) and records it as the change's `userinfo` in the ticket history.
+# TicketStateSync tells our changes from a person's by that `userinfo` (D-007), so it is `ITOP_SYSTEM_USER`.
+DEFAULT_TRACK_INFO: Final = "Hermes"
 
 Kind = Literal["create", "update", "stimulus", "comment"]
 # itop_outbox.operation only knows create/update/comment: a stimulus is an update of the ticket's state.
@@ -74,7 +79,8 @@ def create_payload(fields: dict[str, Any], *, fallback_team_id: str | None = Non
 
 
 def update_payload(fields: dict[str, Any]) -> dict[str, Any]:
-    """`core/update` of plain fields. A linked set (`functionalcis_list`, `contacts_list`) replaces the whole list."""
+    """`core/update` of plain fields. A linked set (`functionalcis_list`, `contacts_list`) replaces the whole list; the
+    worker merges `contacts_list` with the contacts already on the ticket before writing."""
     if not fields:
         raise ValueError("an update needs at least one field")
     if LOG_FIELDS & fields.keys():
@@ -86,7 +92,9 @@ def comment_payload(message: str, *, private: bool = False) -> dict[str, Any]:
     """A new entry in the ticket's public or private log (`core/update` of a case log appends an entry)."""
     if not message.strip():
         raise ValueError("a comment needs text")
-    return {"kind": "comment", "log": "private_log" if private else "public_log", "text": message}
+    # `marker: full`: queued by code that always writes the whole row id, so a retry never looks for the short marker
+    # of older rows (F5.1 #43); rows queued before F12.2 lack it.
+    return {"kind": "comment", "log": "private_log" if private else "public_log", "text": message, "marker": "full"}
 
 
 def stimulus_payload(stimulus: str) -> dict[str, Any]:
@@ -158,6 +166,7 @@ class _ItopWriter(ItopReader):
     """
 
     max_attempts: int = 1
+    track_info: str = DEFAULT_TRACK_INFO
 
     def call(self, operation: dict[str, Any]) -> dict[str, Any]:
         if operation.get("operation") not in WRITE_OPERATIONS | READ_OPERATIONS:
@@ -171,7 +180,14 @@ class _ItopWriter(ItopReader):
                 client.close()
 
     def write(self, operation: dict[str, Any]) -> tuple[str, str | None]:
-        """Send a write and return the (id, ref) of the object iTop answered with."""
+        """Send a write and return the (id, ref) of the object iTop answered with.
+
+        The ticket's description and comments are plain text here; iTop reads them as HTML, so they are encoded on
+        the way out (`core.itop.rich_text`). The stored payload stays plain text.
+        """
+        if operation.get("class") == TICKET_CLASS and isinstance(operation.get("fields"), dict):
+            operation = {**operation, "fields": encode_html_fields(operation["fields"])}
+        operation = {"comment": self.track_info, **operation}
         body = self.call(operation)
         objects = body.get("objects") or {}
         if not isinstance(objects, dict) or len(objects) != 1:
@@ -193,7 +209,10 @@ def writer_from_settings(settings: Settings, *, http: httpx.Client | None = None
     """Fails closed when iTop is not configured (prototype C5)."""
     if settings.itop_url is None or settings.itop_token is None:
         raise ValueError("ITOP_URL and ITOP_TOKEN must be configured")
-    return build_writer(str(settings.itop_url), settings.itop_token.get_secret_value(), http=http)
+    track_info = (settings.itop_system_user or "").strip() or DEFAULT_TRACK_INFO
+    return build_writer(
+        str(settings.itop_url), settings.itop_token.get_secret_value(), http=http, track_info=track_info
+    )
 
 
 # --- worker -----------------------------------------------------------------------------------------------------
@@ -214,6 +233,11 @@ class _Claim:
     @property
     def marker(self) -> str:
         """Stable reference written into what we send, to recognise our own write on a retry."""
+        return f"[hermes:{self.row_id.hex}]"  # the whole id: the first 16 hex digits are mostly the timestamp
+
+    @property
+    def legacy_marker(self) -> str:
+        """The shorter marker written before F12.2: a retry of an older row still recognises it (PRE-02)."""
         return f"[hermes:{self.row_id.hex[:16]}]"
 
 
@@ -322,6 +346,11 @@ class ItopOutboxWorker:
                 return "abandoned"
             update = session.get_one(m.TicketUpdate, row.ticket_update_id)
             ticket = session.get_one(m.Ticket, update.ticket_id)
+            legacy = isinstance(row.payload, dict) and row.payload.get("kind") == "comment"
+            if row.attempts == 0 and legacy and "marker" not in row.payload:
+                # Queued before F12.2 but first sent now: it will write the whole id, so its retries must never look
+                # for the short marker (another row's could match its prefix; F5.1 #43).
+                row.payload = {**row.payload, "marker": "full"}
             row.status = "in_progress"
             row.attempts += 1
             row.next_attempt_at = now + self.lease
@@ -343,6 +372,8 @@ class ItopOutboxWorker:
         key = claim.itop_ticket_id
         if kind == "update":
             fields = dict(claim.payload["fields"])
+            if "contacts_list" in fields:
+                fields["contacts_list"] = self._merged_contacts(key, fields["contacts_list"])
             self.writer.write({"operation": "core/update", "class": TICKET_CLASS, "key": key, "fields": fields})
             return _Result(fields=fields)
         if kind == "comment":
@@ -355,7 +386,13 @@ class ItopOutboxWorker:
         log_field = claim.payload["log"]
         if log_field not in LOG_FIELDS:
             raise _PermanentError("unknown log field")
-        if claim.attempts > 1 and self._remote_contains(key, log_field, claim.marker):
+        # Only a row first sent before F12.2 may have written the short marker; the others look for their own only.
+        markers: tuple[str, ...] = (claim.marker,)
+        if claim.payload.get("marker") != "full":
+            # The short marker alone could be another row's (same prefix): only this row's whole entry, its text then
+            # the short marker, counts as already written.
+            markers = (claim.marker, f"{claim.payload['text']}\n\n{claim.legacy_marker}")
+        if claim.attempts > 1 and self._remote_contains(key, log_field, markers):
             return _Result(note="already in iTop (retry)")  # a case log appends: never send twice (PRE-02)
         fields = {log_field: f"{claim.payload['text']}\n\n{claim.marker}"}
         self.writer.write({"operation": "core/update", "class": TICKET_CLASS, "key": key, "fields": fields})
@@ -373,9 +410,31 @@ class ItopOutboxWorker:
         self.writer.write({**operation, "fields": {}, "output_fields": "id"})
         return _Result()
 
-    def _remote_contains(self, key: str, field_name: str, marker: str) -> bool:
+    def _merged_contacts(self, key: str, wanted: list[dict[str, Any]]) -> list[dict[str, Any]]:
+        """A linked set write replaces the whole list: the contacts already on the ticket (a person may have added
+        them by hand) are kept, with their role, and the owners we add go after them (pending F5.2 #54). It is a union:
+        an owner whose CIs left the ticket is not removed; and a contact added in iTop between this read and the write
+        would be lost (milliseconds; the REST API has no conditional update)."""
+        found = self.writer.get(TICKET_CLASS, key, ["contacts_list"])
+        current = found[0].fields.get("contacts_list") if found else None
+        merged: dict[str, dict[str, Any]] = {}
+        for entry in [*(current if isinstance(current, list) else []), *wanted]:
+            contact = str(entry.get("contact_id") or "") if isinstance(entry, dict) else ""
+            if contact and contact != "0" and contact not in merged:
+                kept = {"contact_id": contact}
+                for attribute in ("role", "role_code"):  # the writable link attributes (⚠️ P-011)
+                    if entry.get(attribute):
+                        kept[attribute] = str(entry[attribute])
+                merged[contact] = kept
+        return list(merged.values())
+
+    def _remote_contains(self, key: str, field_name: str, markers: tuple[str, ...]) -> bool:
         found = self.writer.get(TICKET_CLASS, key, [field_name])
-        return bool(found) and marker in json.dumps(found[0].fields.get(field_name), ensure_ascii=False)
+        if not found:
+            return False
+        text = json.dumps(found[0].fields.get(field_name), ensure_ascii=False)
+        # Compare in the same JSON-escaped form (a case log entry keeps its line breaks as \n).
+        return any(json.dumps(marker, ensure_ascii=False)[1:-1] in text for marker in markers)
 
     def _create(self, claim: _Claim) -> _Result:
         fields = dict(claim.payload["fields"])

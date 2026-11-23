@@ -14,8 +14,8 @@ from sqlalchemy.orm import Session, sessionmaker
 
 from core.correlation.engine import Placed, StoryOutcome
 from core.db import models as m
-from core.pipeline.cycles import NewsCycleOutput, Pipeline, ScanCycleOutput, Steps
-from core.pipeline.judging import JudgeFn
+from core.pipeline.cycles import CVE_ANALYST_OFF, NewsCycleOutput, Pipeline, ScanCycleOutput, Steps
+from core.pipeline.judging import PipelineJudge
 from core.pipeline.locks import cycle_lock
 from doubles.llm import tool_call_completion
 from harness.judge import dismissal_package, finding_package
@@ -51,13 +51,14 @@ class Recorder:
         return []
 
     def evaluate(
-        self, _session: Session, group_id: uuid.UUID, run_id: uuid.UUID, trigger: str, judge: JudgeFn | None
+        self, _session: Session, group_id: uuid.UUID, run_id: uuid.UUID, trigger: str, judge: PipelineJudge | None
     ) -> uuid.UUID | None:
         if group_id == self.fail_group:
             raise RuntimeError("broken group")
         self.evaluations.append((group_id, trigger, judge is not None))
         if judge is not None:
-            self.verdicts.append(judge(finding_package(package_id=str(group_id))).adjustment)
+            package = finding_package(package_id=str(group_id))
+            self.verdicts.append(judge.record(_session, package, judge.assess(package)).adjustment)
         assert run_id == self.run_id
         return self.assessment_for.get(group_id)
 
@@ -221,7 +222,7 @@ def test_the_scan_cycle_runs_the_cve_analyst_before_scoring(factory: sessionmake
     steps.correlate_groups = lambda _s, _g, _n: order.append("correlate") or []
     report = Pipeline(factory, steps).scan_cycle()
     assert order == ["correlate", "cves"]
-    assert "CVE analyst is not wired yet (F3.3)" not in report.notes
+    assert CVE_ANALYST_OFF not in report.notes
 
     def broken(_session: Session) -> None:
         raise RuntimeError("analyst down")
@@ -229,4 +230,53 @@ def test_the_scan_cycle_runs_the_cve_analyst_before_scoring(factory: sessionmake
     steps.analyze_cves = broken
     assert Pipeline(factory, steps).scan_cycle().failures == 1
     steps.analyze_cves = None
-    assert "CVE analyst is not wired yet (F3.3)" in Pipeline(factory, steps).scan_cycle().notes
+    assert CVE_ANALYST_OFF in Pipeline(factory, steps).scan_cycle().notes
+
+
+def test_a_story_analysed_in_a_failed_cycle_is_correlated_by_the_next_one(factory: sessionmaker[Session]) -> None:
+    """The analysis committed but correlation never ran; the next news cycle catches it up (pending F13.0 #73)."""
+    with factory() as session, session.begin():
+        run_id, missed, correlated = news_run(session), make_story(session), make_story(session)
+        fields: dict[str, Any] = {
+            "agent": "news_analyst", "model": "m", "response_model": {}, "prompt_version": "1", "prompt_hash": "h",
+            "schema_version": "1", "schema_hash": "h", "parameters": {}, "input_ref": "r", "calls": [],
+            "status": "applied", "attempts": 1, "tokens_input": 1, "tokens_cached": 0, "tokens_output": 1,
+            "tokens_reasoning": 0, "cost_usd": 0, "latency_ms": 1, "ladder_level": 0, "created_at": NOW,
+        }  # fmt: skip
+        review, other = m.LlmReview(**fields), m.LlmReview(**fields)
+        session.add_all([review, other])
+        session.flush()
+        for story, rid in ((missed, review.id), (correlated, other.id)):
+            session.add(
+                m.NewsAnalysis(
+                    story_id=story, llm_review_id=rid, summary="s", event_type="other", output={}, created_at=NOW
+                )
+            )
+        session.add(m.Alert(story_id=correlated, relevance="R2", status="open", created_at=NOW))  # already handled
+    seen: list[list[uuid.UUID]] = []
+
+    def correlate(_session: Session, story_ids: list[uuid.UUID], _now: datetime) -> list[StoryOutcome]:
+        seen.append(list(story_ids))
+        return []
+
+    steps = Steps(news=lambda _s, _r: NewsCycleOutput(run_id, []))
+    steps.correlate_news = correlate
+    Pipeline(factory, steps, clock=lambda: NOW).news_cycle()
+    assert seen == [[missed]]
+
+
+def test_the_nightly_cycle_logs_the_counts_of_its_recalculation(factory: sessionmaker[Session]) -> None:
+    """The cycle report carries the groups and stored assessments of the pass, not zeros (regression 23 nov)."""
+
+    def no_news(_session: Session, _reason: str) -> NewsCycleOutput:
+        return NewsCycleOutput(None, [])
+
+    @dataclass(frozen=True)
+    class Counts:
+        groups: int
+        changed: int
+
+    report = Pipeline(factory, Steps(news=no_news, recalculate=lambda _s: Counts(groups=3, changed=2))).nightly_cycle()
+    assert (report.ran, report.groups, report.assessments) == (True, 3, 2)
+    unknown = Pipeline(factory, Steps(news=no_news, recalculate=lambda _s: None)).nightly_cycle()
+    assert (unknown.groups, unknown.assessments) == (0, 0)

@@ -2,8 +2,9 @@
 
 from __future__ import annotations
 
+import logging
 from datetime import datetime
-from typing import Annotated, Literal, cast
+from typing import Annotated, Final, Literal, cast
 
 from fastapi import APIRouter, Depends, Query, Request
 
@@ -17,8 +18,8 @@ from api.pagination import (
     decode_key,
     encode_key,
 )
-from api.routes import samples
 from api.routes._auth import guard
+from api.routes._config_support import CurrentUserDep
 from api.routes._db import SessionDep
 from api.routes.models import (
     AffectedAsset,
@@ -43,13 +44,15 @@ from api.routes.models import (
     VulnerabilityGroup,
     VulnerabilityList,
 )
+from core.feedback.service import FeedbackRejectedError, SqlFeedbackService
 from core.views import comparison, history
 from core.views import groups as views
 from core.views import recommendations as recs
 from core.views import tickets_alerts as ta
 from core.views.common import iso, parse_uuid
-from notifications_api import FeedbackResult
+from notifications_api import FeedbackInput, FeedbackResult
 
+logger = logging.getLogger(__name__)
 router = APIRouter(tags=["findings"])
 
 
@@ -365,12 +368,36 @@ def get_recommendation(assessment_id: str, session: SessionDep, itop_url: ItopUr
     return _recommendation_model(found)
 
 
+FEEDBACK_ERRORS: Final = {
+    "unauthorized_user": (403, "forbidden", "No tienes permisos para dar feedback."),
+    "unknown_assessment": (404, "not_found", "La evaluación no existe."),
+    "unknown_ticket": (422, "validation_error", "El ticket no corresponde a la evaluación."),
+}
+
+
 @router.post("/api/feedback", status_code=201, dependencies=[guard("POST", "/api/feedback")])
-def post_feedback(feedback: FeedbackRequest) -> FeedbackResult:
-    """Same `FeedbackService` as Slack (NOT-06). Never changes the score by itself."""
-    if not any(r.assessment_id == feedback.assessment_id for r in samples.RECOMMENDATIONS):
-        raise _not_found("La evaluación")
-    return FeedbackResult(feedback_id="0b1f3c5e-7a2d-4e8f-9a6b-1c2d3e4f5a6b", replaced_previous=False)
+def post_feedback(feedback: FeedbackRequest, request: Request, user: CurrentUserDep) -> FeedbackResult:
+    """Same `FeedbackService` as Slack (NOT-06). The user comes from the token, never from the body; it never
+    changes the score by itself."""
+    service = SqlFeedbackService(request.app.state.session_factory)
+    try:
+        return service.record(
+            FeedbackInput(
+                assessment_id=feedback.assessment_id,
+                user_email=user.email,
+                channel="frontend",
+                verdict=feedback.verdict,
+                proposed_level=feedback.proposed_level,
+                proposed_score=feedback.proposed_score,
+                comment=feedback.comment,
+                ticket_itop_id=feedback.ticket_itop_id,
+            )
+        )
+    except FeedbackRejectedError as error:
+        # docs/14 §10.4: rejected feedback is a security event; the code only, never the input or the e-mail.
+        logger.warning("feedback rejected: %s", error.code)
+        status, code, message = FEEDBACK_ERRORS.get(error.code, (422, "validation_error", "El feedback no es válido."))
+        raise ApiError(status, code, message) from None
 
 
 @router.get("/api/recommendations/{id}/feedback", dependencies=[guard("GET", "/api/recommendations/{id}/feedback")])

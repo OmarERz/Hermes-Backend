@@ -9,7 +9,8 @@
 * Nightly: recalculation of every open group **without the judge** (COR-05).
 
 The cycles never overlap: each takes the pipeline lock and is skipped when another cycle holds it (the scan also
-keeps its own lock). Every group is evaluated in its own transaction, so one failing group never stops the rest.
+keeps its own lock). Every group is evaluated in its own session, so one failing group never stops the rest; no
+transaction is open while a model answers (the analysts and the judge commit their read step first, F12.2 #105).
 Events are written by the ticket lifecycle; the dispatcher delivers them on its own.
 
 Scoring (`evaluate`, `recalculate`) and the package scorer of mode 2 (`dismissal_package`) come from F4.3: they are
@@ -22,26 +23,33 @@ import logging
 import uuid
 from collections.abc import Callable, Iterable, Sequence
 from dataclasses import dataclass, field
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 from typing import Any, Final, Protocol
 
-from sqlalchemy import select
+from sqlalchemy import exists, select
 from sqlalchemy.orm import Session, sessionmaker
 
 from core.correlation.engine import StoryOutcome, correlate_new_groups, correlate_stories
 from core.db import models as m
 from core.ingestion.embeddings import EmbeddingError
 from core.judge.session import ToolCaller
-from core.pipeline.judging import JudgeFn, dismiss_story, judge_for
+from core.pipeline.judging import PipelineJudge, dismiss_story, judge_for
 from core.pipeline.locks import cycle_lock
+from core.scoring.queue import (
+    claim_recalculation,
+    has_running_recalculation,
+    next_queued_recalculation,
+    requeue_abandoned_recalculations,
+)
 
 log = logging.getLogger("core.pipeline")
 
 SCAN_EVALUATED_STATUSES: Final = ("new", "reopened", "fixed", "persistent")
 SCAN_CORRELATED_STATUSES: Final = ("new", "reopened")
+CATCH_UP: Final = timedelta(hours=72)  # how far back analysed stories with no trace of correlation are retried
 
 # (session, group_id, run_id, trigger, judge or None) -> the stored assessment id, None when nothing changed.
-Evaluator = Callable[[Session, uuid.UUID, uuid.UUID, str, JudgeFn | None], uuid.UUID | None]
+Evaluator = Callable[[Session, uuid.UUID, uuid.UUID, str, PipelineJudge | None], uuid.UUID | None]
 # (session, story_id) -> the dismissal package of that story (F4.3 scorer).
 DismissalPackager = Callable[[Session, uuid.UUID], dict[str, Any]]
 
@@ -73,6 +81,7 @@ class Steps:
     scan: Callable[[uuid.UUID | None, str], ScanCycleOutput] | None = None
     evaluate: Evaluator | None = None
     recalculate: Callable[[Session], object] | None = None
+    recalculate_queued: Callable[[Session, uuid.UUID], object] | None = None
     dismissal_package: DismissalPackager | None = None
     judge_caller: ToolCaller | None = None
     tickets: TicketApplier | None = None
@@ -81,6 +90,10 @@ class Steps:
     analyze_cves: Callable[[Session], object] | None = None  # F3.3 CVE analyst on the CVEs of active groups
     correlate_news: Callable[[Session, list[uuid.UUID], datetime], list[StoryOutcome]] = correlate_stories
     correlate_groups: Callable[[Session, set[uuid.UUID], datetime], list[StoryOutcome]] = correlate_new_groups
+
+
+# The worker wires the CVE analyst only with an LLM client, i.e. when DEEPSEEK_API_KEY is set.
+CVE_ANALYST_OFF: Final = "CVE analyst is off (DEEPSEEK_API_KEY is not configured)"
 
 
 @dataclass
@@ -96,6 +109,15 @@ class CycleReport:
     dismissals: int = 0
     failures: int = 0
     notes: list[str] = field(default_factory=list)
+
+
+def _count_recalculation(report: CycleReport, result: object) -> None:
+    """Copy the counts of a recalculation pass (F4.3 `RecalculationReport`: groups, assessments stored) into the log."""
+    groups, changed = getattr(result, "groups", None), getattr(result, "changed", None)
+    if isinstance(groups, int):
+        report.groups = groups
+    if isinstance(changed, int):
+        report.assessments = changed
 
 
 def utcnow() -> datetime:
@@ -165,10 +187,39 @@ class Pipeline:
             if not acquired:
                 return self._skipped(report)
             with self.session_factory() as session:
-                self.steps.recalculate(session)
+                result = self.steps.recalculate(session)
                 session.commit()
+        _count_recalculation(report, result)
         self._log(report)
         return report
+
+    def recalculation_requests_cycle(self) -> bool:
+        """FRO-08: serve the oldest queued formula-change request (no judge, D-033). True when one ran."""
+        if self.steps.recalculate_queued is None:
+            return False
+        with self.session_factory() as session:
+            if next_queued_recalculation(session) is None and not has_running_recalculation(session):
+                return False
+        report = CycleReport("recalculation")
+        with cycle_lock(self.session_factory) as acquired:
+            if not acquired:
+                self._skipped(report)  # the request stays queued for the next tick
+                return False
+            with self.session_factory() as session, session.begin():
+                if requeue_abandoned_recalculations(session):
+                    log.warning("requeued a recalculation left running by a stopped worker")
+                run_id = next_queued_recalculation(session)
+                if run_id is None:
+                    return False
+                report.run_id = run_id
+                claimed = claim_recalculation(session, run_id, self.clock())
+            if not claimed:
+                return False
+            with self.session_factory() as session:
+                result = self.steps.recalculate_queued(session, run_id)  # commits per group; failure marks it failed
+        _count_recalculation(report, result)
+        self._log(report)
+        return True
 
     # --- steps ----------------------------------------------------------------------------------------------
     def _news(self, report: CycleReport, trigger_reason: str) -> None:
@@ -189,12 +240,15 @@ class Pipeline:
             return
         report.run_id = output.run_id
         report.stories = len(output.analyzed)
-        if not output.analyzed:
-            self._log(report)
-            return
         now = self.clock()
         with self.session_factory() as session:
-            outcomes = self.steps.correlate_news(session, output.analyzed, now)
+            # Stories analysed in an earlier cycle that failed before correlating them are picked up here (F13.0 #73).
+            stories = list(dict.fromkeys([*output.analyzed, *_uncorrelated_stories(session, now - CATCH_UP)]))
+        if not stories:
+            self._log(report)
+            return
+        with self.session_factory() as session:
+            outcomes = self.steps.correlate_news(session, stories, now)
         groups = {placed.group_id for outcome in outcomes for placed in outcome.matches}
         report.groups = len(groups)
         if output.run_id is not None:
@@ -224,7 +278,7 @@ class Pipeline:
     def _analyze_cves(self, report: CycleReport) -> None:
         """F-04 step 8: the CVE analyst on pending CVEs (vector when CVSS is missing, conditions), before scoring."""
         if self.steps.analyze_cves is None:
-            report.notes.append("CVE analyst is not wired yet (F3.3)")
+            report.notes.append(CVE_ANALYST_OFF)
             return
         try:
             with self.session_factory() as session:
@@ -248,7 +302,7 @@ class Pipeline:
                 report.failures += 1
                 log.exception("mode 2 on story %s failed; the next cycle retries it", story_id)
 
-    def _judge(self, session: Session) -> JudgeFn | None:
+    def _judge(self, session: Session) -> PipelineJudge | None:
         caller = self.steps.judge_caller
         return judge_for(session, caller, self.clock()) if caller is not None else None
 
@@ -286,3 +340,20 @@ class Pipeline:
             report.failures,
             "".join(f"; {note}" for note in report.notes),
         )
+
+
+def _uncorrelated_stories(session: Session, since: datetime) -> list[uuid.UUID]:
+    """Stories analysed since `since` that left no trace of correlation: no correlation, no alert and no mode 2
+    package. Correlation is idempotent, so a story that simply matched nothing is retried harmlessly until the window
+    closes."""
+    traces = (
+        exists().where(m.Correlation.story_id == m.NewsAnalysis.story_id),
+        exists().where(m.Alert.story_id == m.NewsAnalysis.story_id),
+        exists().where(m.ReviewPackage.story_id == m.NewsAnalysis.story_id),
+    )
+    rows = session.scalars(
+        select(m.NewsAnalysis.story_id)
+        .where(m.NewsAnalysis.created_at >= since, *(~trace for trace in traces))
+        .order_by(m.NewsAnalysis.created_at, m.NewsAnalysis.story_id)
+    )
+    return list(rows)

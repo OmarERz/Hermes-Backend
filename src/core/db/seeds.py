@@ -120,8 +120,9 @@ SETTINGS: list[tuple[str, str, str, Any, Any, Any, str, str, str]] = [
     ("top_news_per_package", "correlation", "int", 5, 1, 20, "validated", "admin", "Noticias por paquete"),
     ("max_matches_per_news", "correlation", "int", 50, 1, 500, "validated", "admin", "Uniones máximas por noticia"),
     ("dedup.window_hours", "ingestion", "int", 72, 1, 720, "validated", "admin", "Ventana de deduplicación"),
-    ("dedup.similarity", "ingestion", "decimal", "0.85", "0", "1", "validated", "admin", "Similitud de deduplicación"),
-    ("dedup.gray_zone", "ingestion", "decimal", "0.75", "0", "1", "validated", "admin", "Zona gris de deduplicación"),
+    # Calibrated for multilingual-e5-small (docs/02 §4, 23 nov 2026): distinct security stories reach 0.86.
+    ("dedup.similarity", "ingestion", "decimal", "0.90", "0", "1", "validated", "admin", "Similitud de deduplicación"),
+    ("dedup.gray_zone", "ingestion", "decimal", "0.84", "0", "1", "validated", "admin", "Zona gris de deduplicación"),
     ("judge.max_calls", "judge", "int", 8, 1, 20, "validated", "admin", "Llamadas máximas del juez"),
     ("judge.max_rejections", "judge", "int", 3, 1, 10, "validated", "admin", "Motivos rechazados máximos"),
     ("retries.format", "llm", "int", 2, 0, 5, "validated", "admin", "Reintentos por formato"),

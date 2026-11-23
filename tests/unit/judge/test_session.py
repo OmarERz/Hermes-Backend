@@ -230,6 +230,31 @@ def test_e15_same_format_error_twice_has_no_third_attempt() -> None:
     double.assert_calls(2)
 
 
+def test_format_errors_are_logged_in_calls_and_are_not_tool_calls() -> None:
+    """F6.1 #70: every invalid answer leaves an `error` entry with rule VAL-02; JUE-02 still counts tool calls only."""
+    responses = [propose({**MASS, "points": "10"}), text_completion("no json"), propose(MASS), finalize()]
+    outcome, double = review(responses, settings=JudgeSettings(max_calls=2))
+    assert outcome.status is ReviewStatus.APPLIED  # two tool calls fit the limit of two
+    assert outcome.adjustment == 10
+    double.assert_calls(4)
+    assert [(c.n, c.tool, c.result, c.rule) for c in outcome.calls] == [
+        (1, "propose_reason", "error", "VAL-02"),
+        (2, "", "error", "VAL-02"),
+        (3, "propose_reason", "accepted", None),
+        (4, "finalize_review", "ok", None),
+    ]
+    assert outcome.calls[0].args == {}  # the rejected arguments are never stored, only the error
+    assert "points" in str(outcome.calls[0].reason)
+    assert "10" not in str(outcome.calls[0].reason)
+    assert outcome.calls[1].reason == "expected exactly one tool call"
+
+
+def test_a_review_that_falls_back_on_format_keeps_every_invalid_answer_in_calls() -> None:
+    outcome, _ = review([text_completion("no json"), text_completion("still no json"), finalize()])
+    assert outcome.failure is Failure.FORMAT
+    assert [(c.result, c.rule) for c in outcome.calls] == [("error", "VAL-02"), ("error", "VAL-02")]
+
+
 def test_format_retries_are_bounded() -> None:
     responses = [propose({**MASS, "points": "10"}), text_completion("x"), propose({**MASS, "extra": 1}), finalize()]
     outcome, double = review(responses)

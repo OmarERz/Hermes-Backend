@@ -10,7 +10,6 @@ Version ranges are stored as NVD publishes them and compared locally (F1.4).
 
 from __future__ import annotations
 
-import re
 from collections.abc import Iterator
 from dataclasses import dataclass, field
 from datetime import UTC, datetime, timedelta
@@ -20,6 +19,7 @@ import httpx
 from pydantic import SecretStr
 from sqlalchemy.orm import Session
 
+from core.cpe.fields import split_cpe_fields, unescape_cpe
 from core.vulndata.http import JsonSource, RateLimiter, SourceUnavailableError
 from core.vulndata.records import (
     CVE_ID,
@@ -41,12 +41,7 @@ LIMIT_WITHOUT_KEY: Final = (5, 30.0)
 LIMIT_WITH_KEY: Final = (50, 30.0)
 NVD_SOURCE: Final = "nvd@nist.gov"
 CVSS_KEYS: Final = (("cvssMetricV40", "4.0"), ("cvssMetricV31", "3.1"), ("cvssMetricV30", "3.0"))
-CPE_SPLIT: Final = re.compile(r"(?<!\\):")
 NO_VERSION: Final = frozenset({"*", "-", ""})
-
-
-def _unescape(part: str) -> str:
-    return re.sub(r"\\(.)", r"\1", part)
 
 
 def _english(items: list[dict[str, Any]], key: str = "value") -> str | None:
@@ -92,11 +87,11 @@ def _ranges(configurations: list[dict[str, Any]]) -> list[RangeRecord]:
 
 
 def _range(match: dict[str, Any]) -> RangeRecord | None:
-    parts = CPE_SPLIT.split(str(match.get("criteria", "")))
+    parts = split_cpe_fields(str(match.get("criteria", "")))
     cpe_fields = 6
     if len(parts) < cpe_fields or parts[0] != "cpe" or parts[1] != "2.3":
         return None
-    vendor, product, version = (_unescape(p) for p in parts[3:6])
+    vendor, product, version = (unescape_cpe(p) for p in parts[3:6])
     if vendor in NO_VERSION or product in NO_VERSION:
         return None
     start, start_inclusive = (match.get("versionStartIncluding"), True)

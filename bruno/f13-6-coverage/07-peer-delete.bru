@@ -1,0 +1,25 @@
+meta {
+  name: peer-delete
+  type: http
+  seq: 7
+}
+
+delete {
+  url: {{baseUrl}}/api/peer-companies/{{peerId}}
+  body: none
+  auth: bearer
+}
+
+auth:bearer {
+  token: {{token}}
+}
+
+assert {
+  res.status: eq 204
+}
+
+docs {
+  Deletes the peer created by 05, so runs leave nothing behind.
+
+  operationId: delete_peer_company
+}

@@ -52,6 +52,8 @@ def build_itop_webhook_router(token: SecretStr | None, sync: TicketStateSync | N
     def check_token(configured: SecretStr, ready: TicketStateSync, authorization: str | None) -> TicketStateSync:
         expected = f"Bearer {configured.get_secret_value()}".encode()
         if authorization is None or not secrets.compare_digest(authorization.encode(), expected):
+            # ASVS V16.3.1: a failed attempt is a security event, like a rejected Firebase token (never the header).
+            log.warning("authentication rejected: webhook_bearer")
             raise ApiError(401, "unauthorized", "Se requiere autenticación válida.")
         return ready
 

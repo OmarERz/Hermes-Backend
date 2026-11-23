@@ -12,7 +12,7 @@ from typing import Any
 
 from core.validation.violations import Violation
 
-CVE_FORMAT = re.compile(r"^CVE-\d{4}-\d{4,7}$")
+CVE_FORMAT = re.compile(r"^CVE-[0-9]{4}-[0-9]{4,7}$")  # `\d` would also accept digits of other scripts
 CPE_PAIR = re.compile(r"^[a-z0-9._\-~%]+:[a-z0-9._\-~%]+$")
 CVSS_31_METRICS = {
     "AV": "NALP",
@@ -96,10 +96,29 @@ def _each(items: object, path: str) -> Iterable[tuple[str, dict[str, Any]]]:
 _DASHES = {ord(c): "-" for c in "\u2010\u2011\u2012\u2013\u2014\u2212"}
 
 
+def _plain(text: str) -> str:
+    return normalize_text(text).translate(_DASHES).upper()
+
+
 def _mentions_cve(text: str, cve: str) -> bool:
     """The identifier appears in the text (a quote) as a whole (CVE-2026-1111 is not inside CVE-2026-11112)."""
-    plain = normalize_text(text).translate(_DASHES).upper()
-    return re.search(rf"(?<![0-9]){re.escape(cve.upper())}(?![0-9])", plain) is not None
+    return re.search(rf"(?<![0-9]){re.escape(cve.upper())}(?![0-9])", _plain(text)) is not None
+
+
+_CVE_RUN = re.compile(r"CVE-([0-9]{4})-([0-9]+)")
+_MIN_CVE_DIGITS, _MAX_CVE_DIGITS = 4, 7
+
+
+def cve_candidates(text: str) -> frozenset[str]:
+    """Every CVE identifier that a verbatim quote of `text` could name (as `_mentions_cve` reads it).
+
+    A quote may end inside a longer number, so every 4-to-7-digit prefix of each run counts. Only these need an
+    existence check, done once before the model is called: any other identifier fails the quote rules anyway."""
+    found: set[str] = set()
+    for year, digits in _CVE_RUN.findall(_plain(text)):
+        longest = min(len(digits), _MAX_CVE_DIGITS)
+        found.update(f"CVE-{year}-{digits[:size]}" for size in range(_MIN_CVE_DIGITS, longest + 1))
+    return frozenset(found)
 
 
 def check_news_analysis(

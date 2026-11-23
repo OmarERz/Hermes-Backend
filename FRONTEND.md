@@ -21,7 +21,19 @@ con `openapi-typescript` u `orval`); no escribas tipos a mano.
    interactiva en `http://127.0.0.1:8000/api/docs`, pon `API_DOCS_ENABLED=true` (solo desarrollo).
 2. **Obtén un token de prueba** por rol: `make emulator-token ROLE=admin` (o `analyst`, `reader`). Imprime un
    *ID token* del emulador con el claim `role` ya puesto.
-3. **Genera el cliente** desde `openapi/openapi.json`.
+3. **Genera el cliente** desde `openapi/openapi.json`. Generador recomendado: `openapi-typescript` (probado con la
+   versión 7.9.1; el resultado compila con `tsc --strict`), por ejemplo
+   `npx openapi-typescript@7.9.1 openapi/openapi.json -o src/api/schema.d.ts`; con `orval` o `openapi-generator`
+   funciona igual. El documento declara `servers` (primero `/`, el mismo origen que lo sirve; después `http://127.0.0.1:8000` para
+   desarrollo local), `tags` por pantalla
+   y descripciones en español en cada operación, parámetro y campo, con `examples` en los cuerpos principales.
+   **Convención de `operationId`:** cada operación tiene uno explícito y estable en `snake_case`, de la forma
+   `verbo_sustantivo` (`list_vulnerabilities`, `get_config`, `update_config`, `create_feedback`, `simulate_formula`).
+   Los generadores lo usan como nombre de función. Verbos: `list_` (colecciones paginadas), `get_` (uno),
+   `create_`, `update_`, `delete_`, `restore_`, `approve_`/`reject_`, `stream_` (SSE). Un `operationId` publicado no
+   se renombra sin versionar la ruta. (F10.6 cambió los `operationId` automáticos, como
+   `get_config_api_config_get`, por estos nombres: si ya generaste un cliente, vuelve a generarlo; ninguna ruta,
+   método, cuerpo ni código de estado cambió.)
 4. **Configura Firebase en el front** contra el emulador en desarrollo (`connectAuthEmulator(auth,
    "http://127.0.0.1:9099")`, proyecto `demo-hermes`) y contra el proyecto real en producción.
 5. **Prueba el recorrido** con las colecciones de Bruno de `bruno/` (`make bruno` con `TEST_TOKEN` de admin):
@@ -122,13 +134,20 @@ Todo error responde con:
   ruta para cambiarse**; no muestres controles para ellos.
 - **Fuentes estructurales** (🔒): no se pueden apagar (409 `structural_source`). Un feed nuevo entra como N4 e
   inactivo.
-- **Simulación antes de guardar** la fórmula o la sensibilidad: llama a `POST /api/formula/simulate` y muestra el
-  impacto; guardar recalcula sin llamar al juez. ⚠️ **Estado actual:** la simulación todavía devuelve un resultado
-  de **ejemplo** (el cálculo real existe en el backend y se está conectando a esta ruta) y guardar aún no dispara
-  el recálculo automático. Muestra el resultado marcado como "vista previa no disponible" hasta que el OpenAPI
-  o el changelog del backend indiquen lo contrario.
+- **Simulación antes de guardar** la fórmula: llama a `POST /api/formula/simulate` y muestra el impacto; guardar
+  recalcula sin llamar al juez. La simulación es real y solo acepta parámetros de la fórmula (los demás, como la
+  sensibilidad del juez, dan 422: no tienen vista previa). Compara cada hallazgo abierto con su última evaluación
+  usando la fórmula propuesta (sin llamar al juez) y devuelve `changed_findings` (los que cambian de nivel),
+  `level_matrix` (nivel antes -> nivel después -> cuántos, incluidos los que se quedan en su nivel), `top_movers`
+  (hasta 5, por mayor cambio de puntaje) y `last_30_days_effect` (un resumen del impacto sobre los hallazgos
+  abiertos de hoy; el motor no reproduce los últimos 30 días). Guardar o restaurar una fórmula encola una corrida
+  `recalculation` (estado `queued`, visible en `GET /api/runs`) que el worker toma en segundos; cada guardado
+  encola la suya.
 - **Feedback:** un feedback activo por usuario y evaluación (editable); `wrong_priority` exige el nivel
-  propuesto. El usuario sale del token, nunca del cuerpo.
+  propuesto. El usuario sale del token, nunca del cuerpo. Si la evaluación tiene tickets de varios custodios, manda
+  `ticket_itop_id` (el ticket que el usuario tiene a la vista) para que «no sugerir más» y «falso positivo» solo
+  afecten a ese ticket; sin él se aplican a todos los tickets de la evaluación. Errores: 404 si la evaluación no
+  existe, 403 si el usuario no es analista o admin activo, 422 si el ticket no es de esa evaluación.
 - **Niveles por nombre:** la comparación muestra el nivel CVSS (Crítica/Alta/Media/Baja) contra la urgencia
   final por su nombre, cada uno con su escala; no compares números entre escalas.
 - **Cascada del Δ:** `GET /api/assessments/{id}/breakdown` devuelve las barras (factores, juez, piso, límites,

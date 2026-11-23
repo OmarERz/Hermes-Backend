@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from typing import Annotated
+from typing import Annotated, Any
 
 import httpx
 from fastapi import Depends, FastAPI
@@ -15,7 +15,9 @@ from api.auth.directory import SqlUserDirectory
 from api.auth.role_admin import FirebaseRoleManager, RoleManager
 from api.errors import ERROR_RESPONSES, ErrorResponse, UnhandledErrorMiddleware, install_error_handlers
 from api.itop_webhook import build_itop_webhook_router
+from api.openapi_docs import apply as apply_documentation
 from api.pagination import CursorSigner
+from api.request_context import RequestContextMiddleware
 from api.request_limits import BodySizeLimitMiddleware
 from api.routes import routers
 from api.security_headers import SecurityHeadersMiddleware
@@ -30,6 +32,15 @@ from core.tickets.sync import TicketStateSync
 from core.vulndata.nvd import nvd_client
 
 
+class DocumentedApp(FastAPI):
+    """FastAPI whose OpenAPI document carries the documentation layer (`api.openapi_docs`, F10.6)."""
+
+    def openapi(self) -> dict[str, Any]:
+        if self.openapi_schema is None:
+            apply_documentation(super().openapi())
+        return super().openapi()
+
+
 def create_app(
     settings: Settings | None = None,
     token_verifier: TokenVerifier | None = None,
@@ -41,7 +52,7 @@ def create_app(
     settings = settings or Settings()
     configure_logging(settings.secret_values())
     docs = settings.api_docs_enabled
-    app = FastAPI(
+    app = DocumentedApp(
         title="Hermes API",
         version="0.1.0",
         docs_url="/api/docs" if docs else None,
@@ -60,6 +71,7 @@ def create_app(
             allow_credentials=False,
             allow_methods=["GET", "POST", "PUT", "PATCH", "DELETE"],
             allow_headers=["Authorization", "Content-Type", "Last-Event-ID"],
+            expose_headers=["X-Request-ID"],  # the front can show it in its error messages (F12.3)
             max_age=600,
         )
     app.state.cursor_signer = CursorSigner(settings.cursor_signing_key.get_secret_value())
@@ -68,7 +80,8 @@ def create_app(
     app.state.itop_url = str(settings.itop_url) if settings.itop_url is not None else None  # for links to iTop
     install_error_handlers(app)
     app.add_middleware(BodySizeLimitMiddleware)
-    app.add_middleware(SecurityHeadersMiddleware)  # outermost: also on the 413 of the size limit
+    app.add_middleware(SecurityHeadersMiddleware)  # also on the 413 of the size limit
+    app.add_middleware(RequestContextMiddleware)  # outermost: every log line of a request carries its context
     if token_verifier is None or role_manager is None:
         firebase = FirebaseTokenVerifier(settings.firebase_project_id, settings.firebase_credentials_file)
         token_verifier = token_verifier or firebase

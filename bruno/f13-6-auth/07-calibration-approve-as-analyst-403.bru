@@ -1,0 +1,26 @@
+meta {
+  name: calibration-approve-as-analyst-403
+  type: http
+  seq: 7
+}
+
+post {
+  url: {{baseUrl}}/api/calibration/proposals/unknown/approve
+  body: none
+  auth: bearer
+}
+
+auth:bearer {
+  token: {{analystToken}}
+}
+
+assert {
+  res.status: eq 403
+  res.body.error.code: eq forbidden
+}
+
+docs {
+  Only an admin approves a calibration proposal.
+
+  operationId: approve_calibration_proposal
+}

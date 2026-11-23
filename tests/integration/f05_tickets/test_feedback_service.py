@@ -359,3 +359,19 @@ def test_a_ticket_outside_the_assessment_is_rejected(
         rated = uuid.UUID(two_custodians["assessment_id"])
         stored = session.scalar(select(func.count()).select_from(m.Feedback).where(m.Feedback.assessment_id == rated))
         assert stored == 0  # nothing stored on rejection
+
+
+def test_a_ticket_of_the_group_without_any_rated_finding_is_rejected(
+    factory: sessionmaker[Session], two_custodians: dict[str, Any]
+) -> None:
+    """Its CIs moved to another ticket after the assessment: it is not what the user rated (pending F13.1 #71)."""
+    clicked = two_custodians["itop"]["ops"]
+    with factory() as session, session.begin():
+        ticket = tickets_by_itop(factory, two_custodians["group_id"])[clicked]
+        session.execute(
+            text("UPDATE ticket_finding SET removed_at = now(), removal_reason = 'moved' WHERE ticket_id = :t"),
+            {"t": ticket.id},
+        )
+    with pytest.raises(FeedbackRejectedError, match="unknown_ticket"):
+        service(factory).record(feedback(two_custodians, "stop_suggestions", ticket_itop_id=clicked))
+    assert tickets_by_itop(factory, two_custodians["group_id"])[clicked].suggestions_enabled is True

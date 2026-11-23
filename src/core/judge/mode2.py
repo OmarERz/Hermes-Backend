@@ -408,6 +408,28 @@ class DismissalSession(JudgeSession):
         )
 
 
+def still_holds(decision: AlertDecision, ctx: Mode2Context) -> bool:
+    """F12.2 #105: what an accepted alert rests on, checked again against `ctx` read when the alert is stored (the
+    review validated it against a snapshot taken before the model answered): the cited CI is still that active
+    asset, it still runs the installation the alert links, and nobody refuted the relationship meanwhile."""
+    asset_id = ctx.inventory.find_asset(decision.ci_id) if decision.ci_id else None
+    if asset_id != decision.asset_id:
+        return False
+    software = decision.installed_software_id
+    if (
+        software is not None
+        and asset_id is not None
+        and software not in {sid for sid, _ in ctx.inventory.products(asset_id)}
+    ):
+        return False
+    kind = decision.relationship_type or "direct"
+    return not any(
+        ctx.refuted(kind, sub_id, obj_id)
+        for sub_id in _identities(decision.subject)
+        for obj_id in _identities(decision.object)
+    )
+
+
 def mode2_min_confidence(env: JudgeEnvironment) -> Decimal:
     """The explicit `mode2.min_confidence` setting when an admin set one, else the profile's value (§12)."""
     explicit = env.settings.mode2_min_confidence

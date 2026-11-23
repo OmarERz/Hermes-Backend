@@ -1,0 +1,7 @@
+# CI dynamic jobs only (Schemathesis in ci.yml, ZAP in security-weekly.yml), via COMPOSE_FILE=compose.yaml:compose.ci.yaml.
+# The real embeddings image (torch plus the model, about 2.8 GB) is swapped for a tiny deterministic fake with the same
+# contract (docker/embeddings-fake): those jobs test the API, never the vectors, so rebuilding the real image on every
+# run only costs time. The weekly Trivy job still builds and scans the real image (decidido de noche, docs/02 §4).
+services:
+  embeddings:
+    build: docker/embeddings-fake

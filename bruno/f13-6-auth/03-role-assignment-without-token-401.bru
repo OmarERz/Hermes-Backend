@@ -1,0 +1,26 @@
+meta {
+  name: role-assignment-without-token-401
+  type: http
+  seq: 3
+}
+
+put {
+  url: {{baseUrl}}/api/admin/users/anyone/role
+  body: json
+  auth: none
+}
+
+body:json {
+  {"role": "reader"}
+}
+
+assert {
+  res.status: eq 401
+  res.body.error.code: eq unauthorized
+}
+
+docs {
+  The admin role route without a bearer token.
+
+  operationId: assign_user_role
+}

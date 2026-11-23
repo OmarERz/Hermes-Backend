@@ -329,7 +329,7 @@ def test_more_critical_asset_adds_only_to_the_cited_ci() -> None:
     )
     assert check(structured).rule == "L4.more_critical_asset"
     from_news = proposal(reason_code="more_critical_asset", evidence_id="news-1", quote=MASS_QUOTE)
-    assert check(from_news).rule == "L4.more_critical_asset"
+    assert check(from_news).rule == "L5.asset"  # any CI reason must cite a CI (pending F6.1 #64)
 
 
 def test_exploit_chain_needs_the_other_cve_in_an_active_group() -> None:
@@ -384,3 +384,21 @@ def test_a_ci_description_with_hidden_instructions_flags_the_reason() -> None:
     verdict = check(proposal(reason_code="more_critical_asset", evidence_id="ci-2", quote=CI2_QUOTE), ctx(content))
     assert verdict.accepted
     assert verdict.cites_suspicious
+
+
+def test_a_trimmed_copy_of_an_accepted_quote_is_the_same_evidence() -> None:
+    """One evidence, one reason, even when the quote drops or adds words (pending F6.1 #61)."""
+    p = proposal(
+        reason_code="other",
+        points=5,
+        quote="Researchers observed mass exploitation",
+        explanation="La misma frase recortada para otro motivo.",
+    )
+    assert check(p, done=[accepted(code="mass_exploitation")]).rule == "L5.reused"
+    longer = proposal(
+        reason_code="other",
+        points=5,
+        quote=MASS_QUOTE + " across thousands of servers",
+        explanation="La misma frase alargada para otro motivo.",
+    )
+    assert check(longer, done=[accepted(code="mass_exploitation")]).rule == "L5.reused"

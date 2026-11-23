@@ -10,13 +10,14 @@ from __future__ import annotations
 import re
 from typing import Final, NamedTuple
 
-TOKEN: Final = re.compile(r"\d+|[a-z]+")
+TOKEN: Final = re.compile(r"[0-9]+|[a-z]+")  # ASCII digits only: `\d` would also take Arabic-Indic and full-width ones
 SEPARATORS: Final = re.compile(r"[.\-_+~]")
 PRE_RELEASE: Final = {
     "dev": 0, "snapshot": 0, "alpha": 1, "a": 1, "beta": 2, "b": 2, "preview": 3, "pre": 3, "rc": 4, "c": 4,
 }  # fmt: skip
 POST_RELEASE: Final = frozenset({"post", "p", "sp", "patch"})
 MAX_LENGTH: Final = 100
+DIGITS: Final = "0123456789"
 
 
 class Version(NamedTuple):
@@ -28,14 +29,14 @@ class Version(NamedTuple):
 
 def parse_version(raw: str) -> Version | None:
     text = raw.strip().lower().removeprefix("v").split("+", 1)[0]  # build metadata has no precedence (SemVer)
-    if not text or len(text) > MAX_LENGTH or not text[0].isdigit():
+    if not text or len(text) > MAX_LENGTH or text[0] not in DIGITS:
         return None
     tokens = [t for part in SEPARATORS.split(text) for t in TOKEN.findall(part)]
     if "".join(tokens) != SEPARATORS.sub("", text):
         return None  # characters that are neither words nor numbers
     release: list[int] = []
     index = 0
-    while index < len(tokens) and tokens[index].isdigit():
+    while index < len(tokens) and tokens[index][0] in DIGITS:
         release.append(int(tokens[index]))
         index += 1
     while release and release[-1] == 0:

@@ -19,8 +19,8 @@ from sqlalchemy.orm import Session
 
 from core.configuration.errors import Problem, ValidationFailedError
 from core.db import models as m
-from core.scoring.engine import LEVEL_ORDER, Formula, FormulaError
-from core.scoring.formula_repo import load_formula
+from core.scoring.engine import Formula, FormulaError
+from core.textnum import ascii_int
 
 STORED_DECIMALS: Final = 4  # formula values are stored as numeric(5,4)
 BONUS: Final = "personal_data_bonus"
@@ -49,14 +49,6 @@ def formula_values(formula: Formula) -> dict[str, str]:
         if limit is not None:
             values[f"decay.{number}.max_age_days"] = str(limit)
     return values
-
-
-def formula_keys() -> list[str]:
-    """Every editable formula key of the standard structure (levels follow `LEVEL_ORDER`)."""
-    keys = [f"weights.{f}" for f in ("S", "P", "T", "A", "D")]
-    keys += [f"levels.{factor}.{code}" for factor, codes in LEVEL_ORDER.items() for code in codes]
-    keys += [f"levels.D.{BONUS}", "formula.s_without_cvss", "formula.kev_exposed_floor"]
-    return keys
 
 
 def _bad(key: str, issue: str) -> ValidationFailedError:
@@ -136,14 +128,16 @@ class _Draft:
             raise _bad(key, "unknown_parameter")
 
     def _band(self, key: str, rest: list[str], raw: str) -> None:
-        if len(rest) != 1 or not rest[0].isdigit() or int(rest[0]) not in self.bands:
+        band = ascii_int(rest[0]) if len(rest) == 1 else None
+        if band is None or band not in self.bands:
             raise _bad(key, "unknown_parameter")
-        self.bands[int(rest[0])] = _integer(key, raw)
+        self.bands[band] = _integer(key, raw)
 
     def _decay(self, key: str, rest: list[str], raw: str) -> None:
-        if len(rest) != DECAY_PARTS or not rest[0].isdigit() or not 1 <= int(rest[0]) <= len(self.limits):
+        number = ascii_int(rest[0]) if len(rest) == DECAY_PARTS else None
+        if number is None or not 1 <= number <= len(self.limits):
             raise _bad(key, "unknown_parameter")
-        index = int(rest[0]) - 1
+        index = number - 1
         if rest[1] == "multiplier":
             self.multipliers[index] = _number(key, raw)
         elif rest[1] == "max_age_days" and self.limits[index] is not None:
@@ -266,7 +260,3 @@ def save_new_version(session: Session, source_id: uuid.UUID, formula: Formula, m
     version.activated_at = now
     session.flush()
     return version
-
-
-def formula_of(session: Session, version_id: uuid.UUID) -> Formula:
-    return load_formula(session, version_id)

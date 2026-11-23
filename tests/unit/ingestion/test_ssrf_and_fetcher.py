@@ -124,6 +124,13 @@ def test_size_limit_applies_to_declared_and_streamed_bodies() -> None:
         make_fetcher(web, limits).get("https://example.com/streamed")
 
 
+@pytest.mark.parametrize("declared", ["1e3", " 5", "-1", "0x10", "1_0", "+5"])
+def test_a_content_length_that_is_not_plain_digits_is_ignored_not_a_crash(declared: str) -> None:
+    web = FakeWeb()
+    web.serve("https://example.com/odd", b"x", "text/csv", headers={"content-length": declared})
+    assert make_fetcher(web, FetchLimits(max_bytes=10)).get("https://example.com/odd").body == b"x"
+
+
 def test_status_error_and_transport_error_are_fetch_errors() -> None:
     web = FakeWeb()
     web.serve("https://example.com/missing", b"", status=404)

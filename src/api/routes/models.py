@@ -26,6 +26,21 @@ MAX_VERSION = 2_147_483_647
 ConfigVersionNumber = Annotated[int, Field(ge=1, le=MAX_VERSION), BeforeValidator(_whole_number)]
 Score = Annotated[int, Field(ge=0, le=100), BeforeValidator(_whole_number)]
 
+# Request bounds (F12.3, ASVS 5.0 V2.2.1 and V4): every text of a request body has a maximum length and every list or
+# map a maximum size, generous for real use (decidido de noche, revisar). The services still check the content
+# (catalog codes, control characters, known parameters); these bounds keep oversized input out before any work.
+MAX_NAME = 200
+MAX_CODE = 100
+MAX_URL = 2048
+MAX_CONFIG_CHANGES = 100
+MAX_CONFIG_VALUE = 1000
+MAX_LIST_ITEMS = 50
+MAX_COUNTRIES = 300
+Name = Annotated[str, Field(min_length=1, max_length=MAX_NAME)]
+Code = Annotated[str, Field(max_length=MAX_CODE)]
+ConfigKey = Annotated[str, Field(max_length=MAX_CODE)]
+ConfigValue = Annotated[str, Field(max_length=MAX_CONFIG_VALUE)]
+
 
 class _Model(BaseModel):
     # Strict: a body that violates the published schema (e.g. 0 for a boolean) is rejected, never coerced.
@@ -54,7 +69,7 @@ class ConfigDocument(_Model):
 
 class ConfigUpdate(_Model):
     expected_version: ConfigVersionNumber = Field(description="Version the client read; 409 if it changed (API-03)")
-    changes: dict[str, str] = Field(min_length=1)
+    changes: dict[ConfigKey, ConfigValue] = Field(min_length=1, max_length=MAX_CONFIG_CHANGES)
 
 
 class RestoreRequest(_Model):
@@ -71,7 +86,7 @@ class ConfigVersion(_Model):
 
 
 class SimulationRequest(_Model):
-    changes: dict[str, str] = Field(min_length=1)
+    changes: dict[ConfigKey, ConfigValue] = Field(min_length=1, max_length=MAX_CONFIG_CHANGES)
 
 
 class SimulationResult(_Model):
@@ -92,21 +107,29 @@ class CompanyProfile(_Model):
 
 class ProfileUpdate(_Model):
     expected_version: Version
-    sector: str = Field(min_length=1)
-    subsectors: list[str]
-    countries: list[str]
+    sector: str = Field(min_length=1, max_length=MAX_CODE)
+    subsectors: list[Code] = Field(max_length=MAX_LIST_ITEMS)
+    countries: list[Code] = Field(max_length=MAX_COUNTRIES)
     language: str = Field(min_length=2, max_length=5)
 
 
 class PeerCompanyInput(_Model):
+    name: Name
+    # Empty aliases stay allowed: the service drops them (profile.py normalisation), as before F12.3.
+    aliases: list[Annotated[str, Field(max_length=MAX_NAME)]] = Field(default_factory=list, max_length=MAX_LIST_ITEMS)
+    domain: str | None = Field(default=None, max_length=253)  # the longest DNS name
+    sector: Code
+    country: str = Field(min_length=2, max_length=2)
+
+
+# A stored peer company. The F12.3 bounds apply to what comes in, not to rows saved before them, so the list never
+# fails on an older, longer value (API-06).
+class PeerCompany(_Model):
     name: str = Field(min_length=1)
     aliases: list[str] = Field(default_factory=list)
     domain: str | None = None
     sector: str
     country: str = Field(min_length=2, max_length=2)
-
-
-class PeerCompany(PeerCompanyInput):
     id: str
 
 
@@ -124,8 +147,10 @@ class Source(_Model):
 
 
 class SourceCreate(_Model):
-    name: str = Field(min_length=1)
-    url: str = Field(pattern=r"^https://", description="Own feeds must use HTTPS; they enter as N4 (D-041)")
+    name: Name
+    url: str = Field(
+        pattern=r"^https://", max_length=MAX_URL, description="Own feeds must use HTTPS; they enter as N4 (D-041)"
+    )
     kind: Literal["rss", "atom", "json", "csv", "api"] = Field(default="rss", description="How the feed is read")
 
 
@@ -156,7 +181,7 @@ class CpeCandidate(_Model):
 
 
 class MappingInput(_Model):
-    cpe: str = Field(pattern=r"^cpe:2\.3:")
+    cpe: str = Field(pattern=r"^cpe:2\.3:", max_length=512)
 
 
 class Mapping(_Model):
@@ -312,11 +337,17 @@ class FeedbackRequest(_Model):
         },
     )
 
-    assessment_id: str
+    assessment_id: str = Field(max_length=MAX_CODE)
     verdict: Literal["relevant", "false_positive", "wrong_priority", "investigating", "stop_suggestions"]
     proposed_level: Level | None = None
     proposed_score: Score | None = None
     comment: str | None = Field(default=None, max_length=2000)
+    ticket_itop_id: str | None = Field(
+        default=None,
+        pattern=r"^[0-9]{1,12}$",
+        description="Optional: iTop id of the ticket the user acted on; scopes ticket-level effects "
+        "(stop_suggestions, false_positive) to it instead of every ticket of the assessment (TIC-07).",
+    )
 
     @model_validator(mode="after")
     def _wrong_priority_needs_a_level(self) -> Self:
@@ -376,10 +407,10 @@ class Run(_Model):
 
 class StixExportRequest(_Model):
     scope: Literal["vulnerability", "run", "date_range"]
-    vulnerability_id: str | None = None
-    run_id: str | None = None
-    date_from: str | None = None
-    date_to: str | None = None
+    vulnerability_id: str | None = Field(default=None, max_length=MAX_CODE)
+    run_id: str | None = Field(default=None, max_length=MAX_CODE)
+    date_from: str | None = Field(default=None, max_length=MAX_CODE)
+    date_to: str | None = Field(default=None, max_length=MAX_CODE)
     exclude_ultra_classified: bool = False  # leaves highly classified CIs out of the bundle and of its TLP (P-021)
 
 
@@ -438,7 +469,9 @@ class ConnectionStatus(_Model):
 
 
 class ConnectionTestRequest(_Model):
-    names: list[Literal["itop", "deepseek", "nvd", "abusech", "ransomwarelive", "firebase"]] | None = None
+    names: list[Literal["itop", "deepseek", "nvd", "abusech", "ransomwarelive", "firebase"]] | None = Field(
+        default=None, max_length=10
+    )
 
 
 class SetupStep(_Model):

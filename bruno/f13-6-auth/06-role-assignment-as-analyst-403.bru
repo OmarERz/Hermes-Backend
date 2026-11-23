@@ -1,0 +1,30 @@
+meta {
+  name: role-assignment-as-analyst-403
+  type: http
+  seq: 6
+}
+
+put {
+  url: {{baseUrl}}/api/admin/users/anyone/role
+  body: json
+  auth: bearer
+}
+
+auth:bearer {
+  token: {{analystToken}}
+}
+
+body:json {
+  {"role": "reader"}
+}
+
+assert {
+  res.status: eq 403
+  res.body.error.code: eq forbidden
+}
+
+docs {
+  Only an admin assigns roles.
+
+  operationId: assign_user_role
+}

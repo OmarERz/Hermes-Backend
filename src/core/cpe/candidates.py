@@ -17,12 +17,12 @@ from pydantic import SecretStr
 from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
+from core.cpe.fields import split_cpe_fields, unescape_cpe
 from core.db import models as m
 from core.vulndata.http import JsonSource, SourceRefusedError, SourceUnavailableError
 from core.vulndata.records import NVD_CPE
 
 CPE_URL: Final = "https://services.nvd.nist.gov/rest/json/cpes/2.0"
-CPE_SPLIT: Final = re.compile(r"(?<!\\):")
 TOKEN: Final = re.compile(r"[a-z0-9]+")
 MAX_QUERY: Final = 100
 FIRST_PRINTABLE: Final = 32
@@ -67,10 +67,10 @@ def cpe_uri(vendor: str, product: str) -> str:
 
 
 def parse_cpe_name(name: str) -> tuple[str, str] | None:
-    parts = CPE_SPLIT.split(name)
+    parts = split_cpe_fields(name)
     if len(parts) < CPE_FIELDS or parts[:2] != ["cpe", "2.3"] or parts[2] not in {"a", "o"}:
         return None
-    vendor, product = (re.sub(r"\\(.)", r"\1", p) for p in parts[3:5])
+    vendor, product = (unescape_cpe(p) for p in parts[3:5])
     return (vendor, product) if vendor not in {"", "*", "-"} and product not in {"", "*", "-"} else None
 
 
