@@ -92,6 +92,10 @@ class Steps:
     correlate_groups: Callable[[Session, set[uuid.UUID], datetime], list[StoryOutcome]] = correlate_new_groups
 
 
+# The worker wires the CVE analyst only with an LLM client, i.e. when DEEPSEEK_API_KEY is set.
+CVE_ANALYST_OFF: Final = "CVE analyst is off (DEEPSEEK_API_KEY is not configured)"
+
+
 @dataclass
 class CycleReport:
     """What one cycle did (logged; also handy for tests and the admin CLI)."""
@@ -105,6 +109,15 @@ class CycleReport:
     dismissals: int = 0
     failures: int = 0
     notes: list[str] = field(default_factory=list)
+
+
+def _count_recalculation(report: CycleReport, result: object) -> None:
+    """Copy the counts of a recalculation pass (F4.3 `RecalculationReport`: groups, assessments stored) into the log."""
+    groups, changed = getattr(result, "groups", None), getattr(result, "changed", None)
+    if isinstance(groups, int):
+        report.groups = groups
+    if isinstance(changed, int):
+        report.assessments = changed
 
 
 def utcnow() -> datetime:
@@ -174,8 +187,9 @@ class Pipeline:
             if not acquired:
                 return self._skipped(report)
             with self.session_factory() as session:
-                self.steps.recalculate(session)
+                result = self.steps.recalculate(session)
                 session.commit()
+        _count_recalculation(report, result)
         self._log(report)
         return report
 
@@ -202,7 +216,8 @@ class Pipeline:
             if not claimed:
                 return False
             with self.session_factory() as session:
-                self.steps.recalculate_queued(session, run_id)  # commits per group; a failure marks the run failed
+                result = self.steps.recalculate_queued(session, run_id)  # commits per group; failure marks it failed
+        _count_recalculation(report, result)
         self._log(report)
         return True
 
@@ -263,7 +278,7 @@ class Pipeline:
     def _analyze_cves(self, report: CycleReport) -> None:
         """F-04 step 8: the CVE analyst on pending CVEs (vector when CVSS is missing, conditions), before scoring."""
         if self.steps.analyze_cves is None:
-            report.notes.append("CVE analyst is not wired yet (F3.3)")
+            report.notes.append(CVE_ANALYST_OFF)
             return
         try:
             with self.session_factory() as session:
