@@ -31,6 +31,11 @@ def clean_env(monkeypatch: pytest.MonkeyPatch) -> None:
         "RANSOMWARELIVE_API_KEY",
         "ITOP_SYSTEM_USER",
         "FIREBASE_CREDENTIALS_FILE",
+        "LLM_PROVIDER",
+        "CLAUDE_CODE_MODEL_JUDGE",
+        "CLAUDE_CODE_MODEL_ANALYSTS",
+        "CLAUDE_CODE_EFFORT",
+        "CLAUDE_CODE_TIMEOUT_SECONDS",
     ]:
         monkeypatch.delenv(name, raising=False)
 
@@ -115,6 +120,8 @@ def test_example_env_file_loads(monkeypatch: pytest.MonkeyPatch) -> None:
     settings = Settings(_env_file=example)  # type: ignore[call-arg]
     assert str(settings.llm_base_url_judge) == DEFAULT_LLM_BASE_URL
     assert settings.itop_token is None
+    assert settings.llm_provider == "deepseek"  # blank LLM_PROVIDER and CLAUDE_CODE_* fall back to the defaults
+    assert (settings.claude_code_model_judge, settings.claude_code_effort) == ("opus", "medium")
 
 
 def test_blank_judge_url_uses_default(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -180,6 +187,7 @@ EXAMPLE_EXTRAS = {
     "DB_PORT",
     "AUTH_EMULATOR_PORT",
     "COMPOSE_SECRETS_DIR",
+    "EMBEDDINGS_PORT",  # compose.host.yaml and make worker-host
     "MIGRATION_DATABASE_URL",  # core.devtools.admin (make seed)
     "FORWARDED_ALLOW_IPS",  # read by uvicorn (trusted proxies for X-Forwarded-For)
 }

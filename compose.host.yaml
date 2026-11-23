@@ -1,0 +1,13 @@
+# Worker on the host (make worker-host, D-084): the Claude Code CLI and its subscription login live on this machine,
+# not in the images, so a worker with LLM_PROVIDER=claude-code runs here against the compose stack. The database port
+# is already published on 127.0.0.1; this override also publishes the embeddings service there, so that worker can
+# deduplicate news. A container only on an internal network cannot publish a port, hence the second network. A plain
+# `make up` (without this file) puts the service back on its internal network only.
+services:
+  embeddings:
+    networks: [embeddings, host-worker]
+    ports:
+      - "127.0.0.1:${EMBEDDINGS_PORT:-8081}:8080"
+
+networks:
+  host-worker: {}

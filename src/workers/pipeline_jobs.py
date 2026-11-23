@@ -14,7 +14,8 @@ from core.config import Settings
 from core.ingestion.embeddings import HttpEmbedder
 from core.ingestion.fetcher import Fetcher
 from core.itop.client import reader_from_settings
-from core.llm import LlmClient
+from core.llm import ClaudeCodeClient, LlmClient, LlmRequestError, ToolCaller
+from core.llm.client import Role
 from core.pipeline.cycles import Pipeline, Steps
 from core.pipeline.wiring import (
     cve_step,
@@ -77,10 +78,20 @@ def _embedder(settings: Settings) -> HttpEmbedder | None:
     return HttpEmbedder(str(settings.embeddings_url))
 
 
-def _llm(settings: Settings, role: str) -> LlmClient | None:
+def _llm(settings: Settings, role: str) -> ToolCaller | None:
+    """The LLM client of a role for the configured provider (D-084), or None (fail closed: that role is off)."""
+    llm_role: Role = "judge" if role == "judge" else "analysts"
+    if settings.llm_provider == "claude-code":
+        try:
+            return ClaudeCodeClient.from_settings(settings, llm_role)
+        except LlmRequestError as exc:
+            reason = str(exc)
+        # Inside the containers the CLI is never there: claude-code is for a worker on the host (make worker-host).
+        log.error("LLM_PROVIDER=claude-code but %s: the %s is off", reason, llm_role)
+        return None
     if settings.deepseek_api_key is None:
         return None
-    return LlmClient.from_settings(settings, "judge" if role == "judge" else "analysts")
+    return LlmClient.from_settings(settings, llm_role)
 
 
 def _tickets(settings: Settings) -> TicketLifecycle | None:
