@@ -13,7 +13,7 @@ ISSUES: Final = ("software_unmapped", "exposure_unknown", "unclassified", "owner
 MAX_PAGE: Final = 200
 
 _ROWS = text(
-    "SELECT i.issue, i.asset_id, a.name, a.itop_class, i.software_product_id, p.itop_name, "
+    "SELECT i.issue, i.asset_id, a.itop_ci_id, a.name, a.itop_class, i.software_product_id, p.itop_name, "
     "(SELECT count(*) FROM installed_software s WHERE s.software_product_id = p.id AND s.removed_at IS NULL) "
     "FROM inventory_issue i "
     "LEFT JOIN asset a ON a.id = i.asset_id "
@@ -29,6 +29,7 @@ _COUNTS = text("SELECT issue, count(*) FROM inventory_issue GROUP BY issue")
 class PendingItem:
     issue: str
     asset_id: uuid.UUID | None
+    asset_itop_id: str | None
     asset_name: str | None
     asset_class: str | None
     software_product_id: uuid.UUID | None

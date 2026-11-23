@@ -13,6 +13,7 @@ from api.errors import ApiError, ErrorDetail
 from api.pagination import PAGINATED_RESPONSES, Page, PageQuery, Signer, paginate
 from api.routes import samples
 from api.routes._auth import guard
+from api.routes._db import SessionDep
 from api.routes._events import Events
 from api.routes._state import MetricsSource, RunStore
 from api.routes.models import (
@@ -30,6 +31,7 @@ from api.routes.models import (
     StixBundle,
     StixExportRequest,
 )
+from core.stix.export import ExportOptions, ExportScope, StixExportError, export_bundle
 
 router = APIRouter(tags=["operations"])
 
@@ -84,8 +86,8 @@ def run_events(id: str, runs: RunStore) -> StreamingResponse:  # noqa: A002 - pa
 
 
 @router.post("/api/stix/export", dependencies=[guard("POST", "/api/stix/export")])
-def stix_export(request: StixExportRequest) -> StixBundle:
-    """Exports a STIX 2.1 bundle. The scope needs its matching identifier or range."""
+def stix_export(request: StixExportRequest, session: SessionDep) -> StixBundle:
+    """Exports a STIX 2.1 bundle with TLP marking (STX-03, STX-06). The scope needs its identifier or range."""
     missing = {
         "vulnerability": request.vulnerability_id is None,
         "run": request.run_id is None,
@@ -98,7 +100,23 @@ def stix_export(request: StixExportRequest) -> StixBundle:
             "Faltan datos para el alcance de la exportación.",
             [ErrorDetail(field="body.scope", issue="missing_scope_data")],
         )
-    return StixBundle.model_validate(samples.STIX_BUNDLE)
+    scope = ExportScope(
+        request.scope,
+        vulnerability_id=request.vulnerability_id,
+        run_id=request.run_id,
+        date_from=request.date_from,
+        date_to=request.date_to,
+    )
+    try:
+        result = export_bundle(session, scope, ExportOptions(exclude_ultra_classified=request.exclude_ultra_classified))
+    except StixExportError:
+        raise ApiError(
+            422,
+            "validation_error",
+            "No se pudo exportar con los datos del alcance.",
+            [ErrorDetail(field="body.scope", issue="invalid_scope_data")],
+        ) from None
+    return StixBundle.model_validate(result.bundle)
 
 
 @router.get(

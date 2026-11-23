@@ -362,3 +362,20 @@ def test_one_cve_in_two_products_is_one_vulnerability_with_the_totals(world: Eng
     assert {s["name"] for s in by_type(bundle, "software")} == {"OpenSSL", "nginx"}
     again = export(world, BY_CVE).bundle
     assert json.dumps(bundle, sort_keys=True) == json.dumps(again, sort_keys=True)
+
+
+def test_exclusion_also_hides_the_ticket_states_of_the_excluded_assets(world: Engine) -> None:
+    ultra_finding = rows(
+        world,
+        "SELECT f.id FROM finding f JOIN installed_software i ON i.id = f.installed_software_id "
+        "JOIN asset a ON a.id = i.asset_id WHERE a.confidentiality = 'highly_classified'",
+    )[0][0]
+    ticket = rows(world, "SELECT id FROM ticket")[0][0]
+    run(
+        world,
+        "INSERT INTO ticket_finding (ticket_id, finding_id, added_at) VALUES (:t, :f, now())",
+        {"t": ticket, "f": ultra_finding},
+    )
+    assert by_type(export(world, BY_CVE).bundle, "vulnerability")[0]["x_ticket_status"] == ["open"]
+    reduced = export(world, BY_CVE, ExportOptions(exclude_ultra_classified=True)).bundle
+    assert "x_ticket_status" not in by_type(reduced, "vulnerability")[0]
