@@ -8,15 +8,18 @@ from contextlib import contextmanager
 from typing import Any, cast
 
 import pytest
+from pipeline_support import make_story
 from sqlalchemy import func, select, text
 from sqlalchemy.orm import Session, sessionmaker
 
 from core.analysts.news import NewsResult
 from core.db import models as m
+from core.ingestion.embeddings import EmbeddingError
 from core.ingestion.fetcher import Fetcher
 from core.ingestion.pipeline import PipelineResult
 from core.inventory.sync import SYNC_LOCK_KEY, EmptyInventoryError
 from core.itop.inventory import InventorySnapshot
+from core.pipeline.cycles import Pipeline, Steps
 from core.pipeline.wiring import cve_step, inventory_refresh, news_step, refresh_vulndata, scan_step
 from core.scan.engine import ScanResult
 from core.vulndata.epss import EpssResult
@@ -209,3 +212,27 @@ def test_the_cve_step_runs_the_analyst_with_the_advisory_provider(monkeypatch: p
     analyst, session = object(), object()
     assert cve_step(analyst, Fetcher())(session) == ["done"]
     assert seen == [(session, analyst, True)]
+
+
+def test_with_the_embeddings_service_down_articles_wait_for_the_next_cycle(factory: sessionmaker[Session]) -> None:
+    """Fail closed: the article stays stored without a story, and the next cycle with the service up groups it."""
+    fetcher = Fetcher(transport=FakeWeb().transport(), resolver=lambda _h: ["93.184.216.34"])
+    with factory() as session, session.begin():
+        story = session.get_one(m.Story, make_story(session))
+        article = session.get_one(m.RawArticle, story.representative_article_id)
+        article_id, article.story_id = article.id, None  # stored by the ingestion, not grouped yet
+
+    def down(_texts: Any) -> list[list[float]]:
+        raise EmbeddingError("The embeddings service is unavailable: no answer (ConnectError)")
+
+    pipeline = Pipeline(factory, Steps(news=news_step(fetcher, down, None)))
+    report = pipeline.news_cycle()
+    assert report.failures == 1
+    assert report.notes == [
+        "news deduplication skipped: The embeddings service is unavailable: no answer (ConnectError)"
+    ]
+    with factory() as session:
+        assert session.get_one(m.RawArticle, article_id).story_id is None
+    assert Pipeline(factory, Steps(news=news_step(fetcher, fake_embed, None))).news_cycle().failures == 0
+    with factory() as session:
+        assert session.get_one(m.RawArticle, article_id).story_id is not None

@@ -16,9 +16,9 @@ auth:bearer {
 
 assert {
   res.status: eq 200
-  res.body.next_cursor: isString
+  res.body.items: isArray
 }
 
 docs {
-  Cursor pagination (D-068): the first page carries next_cursor.
+  Peer companies (FRO-12); a fresh installation has none, so the cursor is checked on the sources (05).
 }

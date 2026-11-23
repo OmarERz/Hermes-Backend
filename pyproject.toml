@@ -25,10 +25,6 @@ dependencies = [
     "uvicorn>=0.54.0",
 ]
 
-[project.optional-dependencies]
-# Local embeddings (ING-07, TODO(P-019)): pulls torch, so CI and tests do not install it; the code imports it lazily.
-embeddings = ["sentence-transformers>=5.1.0"]
-
 [dependency-groups]
 dev = [
     "hypothesis>=6.140",
@@ -45,6 +41,7 @@ dev = [
     "testcontainers>=4.15.0",
     "types-jsonschema>=4.26.0.20261006",
     "types-pyyaml>=6.0.12.20261113",
+    "respx>=0.22",
 ]
 
 [build-system]
