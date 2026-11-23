@@ -472,8 +472,8 @@ def test_text_reaches_itop_html_encoded_and_the_payload_stays_plain(factory: ses
     assert outbox_row(factory, comment).payload["text"] == "<b>Nota</b>\nde Ana's"
 
 
-def test_an_escaped_marker_still_finds_our_ticket_and_comment_on_retry(factory: sessionmaker[Session]) -> None:
-    """The idempotency markers have no character HTML escapes, so a retry still recognises our own write."""
+def test_an_escaped_description_still_finds_our_ticket_on_retry(factory: sessionmaker[Session]) -> None:
+    """The create marker has no character HTML escapes, so a retry still recognises our ticket (lost create answer)."""
     double, clock = ItopDouble(), Clock()
     ticket = new_ticket(factory)
     queue(factory, ticket.id, create_payload({**ticket_fields(), "description": "a < b"}), f"create:{ticket.id}")
