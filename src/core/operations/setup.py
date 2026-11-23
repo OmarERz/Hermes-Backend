@@ -19,6 +19,7 @@ from sqlalchemy.orm import Session
 
 from core.connections.messages import DEFAULT_LANGUAGE, STEP_NAMES
 from core.db import models as m
+from core.textnum import ascii_int
 
 ACTION: Final = "setup.step"
 ENTITY: Final = "setup_step"
@@ -57,8 +58,9 @@ def _marks(session: Session) -> dict[int, tuple[bool, bool]]:
     marks: dict[int, tuple[bool, bool]] = {}
     for row in session.execute(_MARKS, {"action": ACTION, "entity": ENTITY}):
         after = row.after if isinstance(row.after, dict) else {}
-        if row.entity_id.isdigit():
-            marks[int(row.entity_id)] = (bool(after.get("done")), bool(after.get("skipped")))
+        step = ascii_int(row.entity_id)
+        if step is not None:
+            marks[step] = (bool(after.get("done")), bool(after.get("skipped")))
     return marks
 
 
