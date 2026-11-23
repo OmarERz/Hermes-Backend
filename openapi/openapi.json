@@ -440,9 +440,44 @@
       "CalibrationProposal": {
         "additionalProperties": false,
         "properties": {
+          "backtest": {
+            "anyOf": [
+              {
+                "additionalProperties": true,
+                "type": "object"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Before and after of the 30-day replay",
+            "title": "Backtest"
+          },
           "created_at": {
             "title": "Created At",
             "type": "string"
+          },
+          "decided_at": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Decided At"
+          },
+          "evidence": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Evidence"
           },
           "id": {
             "title": "Id",
@@ -457,6 +492,30 @@
             "title": "Kind",
             "type": "string"
           },
+          "previous_value": {
+            "anyOf": [
+              {
+                "additionalProperties": true,
+                "type": "object"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Previous Value"
+          },
+          "proposed_value": {
+            "anyOf": [
+              {
+                "additionalProperties": true,
+                "type": "object"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Proposed Value"
+          },
           "status": {
             "enum": [
               "pending",
@@ -469,6 +528,18 @@
           "summary": {
             "title": "Summary",
             "type": "string"
+          },
+          "target_key": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "What the proposal changes, e.g. weights.P or source:code",
+            "title": "Target Key"
           }
         },
         "required": [
@@ -3843,6 +3914,7 @@
     },
     "/api/calibration/proposals": {
       "get": {
+        "description": "Mode 4 proposals, newest first. They are only ever applied when an admin approves them (D-020).",
         "operationId": "list_proposals_api_calibration_proposals_get",
         "parameters": [
           {
@@ -3995,6 +4067,7 @@
     },
     "/api/calibration/proposals/{id}/approve": {
       "post": {
+        "description": "Applies the proposal as a new formula version or a source level change, audited; 409 if it went stale.",
         "operationId": "approve_proposal_api_calibration_proposals__id__approve_post",
         "parameters": [
           {
@@ -6474,6 +6547,7 @@
     },
     "/api/metrics": {
       "get": {
+        "description": "Dashboards of docs/10 (FRO-21): the latest nightly value of each metric and the judge ladder level.",
         "operationId": "metrics_api_metrics_get",
         "responses": {
           "200": {
@@ -6590,6 +6664,7 @@
     },
     "/api/notifications/events": {
       "get": {
+        "description": "Notification events of the outbox (NOT-02); `error` lists those that exhausted their retries.",
         "operationId": "notification_events_api_notifications_events_get",
         "parameters": [
           {
@@ -6757,6 +6832,7 @@
     },
     "/api/notifications/events/{id}/retry": {
       "post": {
+        "description": "Put an event in error back in the queue with a fresh attempt budget.",
         "operationId": "retry_event_api_notifications_events__id__retry_post",
         "parameters": [
           {

@@ -54,6 +54,17 @@ class NewsMatch:
     relevance: str | None
 
 
+def plain(value: Any) -> Any:
+    """JSON-ready copy of a scorer result: the scoring engine works in Decimal, the package carries numbers."""
+    if isinstance(value, Decimal):
+        return float(value)
+    if isinstance(value, dict):
+        return {key: plain(item) for key, item in value.items()}
+    if isinstance(value, list):
+        return [plain(item) for item in value]
+    return value
+
+
 def _canonical(value: object) -> str:
     return json.dumps(value, sort_keys=True, separators=(",", ":"), default=str)
 
@@ -221,20 +232,39 @@ def _tickets(session: Session, group_id: uuid.UUID) -> list[dict[str, Any]]:
     ]
 
 
-def _cis_block(session: Session, group: GroupCtx, scored: ScoredGroup) -> list[dict[str, Any]]:
-    cis: list[dict[str, Any]] = []
-    for index, ci in enumerate(group.cis, start=1):
-        asset = session.get(m.Asset, ci.asset_id)
-        if asset is None:
+STATUS_PRECEDENCE = ("reopened", "new", "persistent", "no_data")  # one status per CI, whatever the install order
+
+
+def _ci_status(session: Session, group: GroupCtx, asset_id: uuid.UUID) -> str:
+    """The status of a CI from every affected installation it has, by a fixed precedence (so the fingerprint does
+    not depend on which installation is read first)."""
+    statuses: set[str] = set()
+    for ci in group.cis:
+        if ci.asset_id != asset_id:
             continue
-        custodian = session.get(m.Team, asset.custodian_team_id) if asset.custodian_team_id else None
-        status = session.execute(
+        latest = session.execute(
             select(m.FindingStatusChange.status)
             .join(m.Finding, m.Finding.id == m.FindingStatusChange.finding_id)
             .where(m.Finding.finding_group_id == group.id, m.Finding.installed_software_id == ci.installed_software_id)
             .order_by(m.FindingStatusChange.changed_at.desc())
             .limit(1)
         ).scalar_one_or_none()
+        if latest is not None:
+            statuses.add(latest)
+    return next((s for s in STATUS_PRECEDENCE if s in statuses), "new")
+
+
+def _cis_block(session: Session, group: GroupCtx, scored: ScoredGroup) -> list[dict[str, Any]]:
+    cis: list[dict[str, Any]] = []
+    seen: set[uuid.UUID] = set()
+    for ci in group.cis:
+        index = len(cis) + 1
+        asset = session.get(m.Asset, ci.asset_id)
+        if asset is None or asset.id in seen:  # one entry per CI, even with two affected installations
+            continue
+        seen.add(asset.id)
+        custodian = session.get(m.Team, asset.custodian_team_id) if asset.custodian_team_id else None
+        status = _ci_status(session, group, asset.id)
         cis.append(
             {
                 "element_id": f"CI{index}",
@@ -248,7 +278,7 @@ def _cis_block(session: Session, group: GroupCtx, scored: ScoredGroup) -> list[d
                 "custodian": custodian.name if custodian else None,
                 "status": status or "new",
                 "description": asset.description,
-                "base": scored.per_ci[asset.id],
+                "base": plain(scored.per_ci[asset.id]),
             }
         )
     return cis
@@ -300,7 +330,7 @@ def build_finding_package(
         "cve_data": cve_data,
         "kev": kev,
         "epss": epss,
-        "base": {**scored.base, "relevance": relevance},
+        "base": {**plain(scored.base), "relevance": relevance},
         "news": news,
         "additional_urls": extra_urls,
         "iocs": [
@@ -330,7 +360,7 @@ class _Touch:
 
 def _story_package(session: Session, kind: str, facts: StoryFacts, scorer: BaseScorer, touch: _Touch) -> dict[str, Any]:
     """An alert or a dismissal candidate: no group, no CVE data; the news item is the whole subject."""
-    base = {**scorer.score_story(session, facts, touch.asset_ids), "relevance": sorted(touch.relevances)}
+    base = {**plain(scorer.score_story(session, facts, touch.asset_ids)), "relevance": sorted(touch.relevances)}
     package: dict[str, Any] = {
         "package_id": str(facts.story_id),
         "type": kind,

@@ -89,6 +89,7 @@ class Actor:
     user_id: uuid.UUID | None
     role: str
     now: datetime
+    origin: str = "frontend"  # frontend | mode4: where the change comes from
 
 
 @dataclass
@@ -96,6 +97,7 @@ class _Context:
     session: Session
     now: datetime
     user_id: uuid.UUID | None
+    origin: str = "frontend"
 
 
 # --- catalog and values ----------------------------------------------------------------------------------
@@ -367,7 +369,7 @@ def update(
         raise ValidationFailedError(GENERIC, tuple(Problem(f"body.changes.{k}", "unknown_parameter") for k in unknown))
     _check_roles(list(changes), actor.role, definitions)
     before = current_values(session)
-    ctx = _Context(session, actor.now, actor.user_id)
+    ctx = _Context(session, actor.now, actor.user_id, actor.origin)
     stored: dict[str, Any] = {}
     for key, raw in changes.items():
         if key in definitions and key not in formula_changes:
@@ -382,7 +384,7 @@ def update(
             new_formula = (formula_id, candidate)
     if not stored and new_formula is None:
         return current, before
-    _write(ctx, stored, new_formula, "frontend")
+    _write(ctx, stored, new_formula)
     after = current_values(session)
     changed = [k for k in after if after[k] != before.get(k)]
     summary = _summary("Cambió", changed)
@@ -390,7 +392,7 @@ def update(
     return current + 1, after
 
 
-def _write(ctx: _Context, stored: dict[str, Any], new_formula: tuple[uuid.UUID, Formula] | None, origin: str) -> None:
+def _write(ctx: _Context, stored: dict[str, Any], new_formula: tuple[uuid.UUID, Formula] | None) -> None:
     session = ctx.session
     for key, value in stored.items():
         version = (
@@ -404,13 +406,21 @@ def _write(ctx: _Context, stored: dict[str, Any], new_formula: tuple[uuid.UUID, 
         ) + 1
         session.add(
             m.SettingValue(
-                setting_key=key, version=version, value=value, origin=origin, changed_by=ctx.user_id, changed_at=ctx.now
+                setting_key=key,
+                version=version,
+                value=value,
+                origin=ctx.origin,
+                changed_by=ctx.user_id,
+                changed_at=ctx.now,
             )
         )
     if new_formula is not None:
         source_id, formula = new_formula
         fs.save_new_version(
-            session, source_id, formula, fs.NewVersion(ctx.user_id, ctx.now, "Cambio desde la configuración")
+            session,
+            source_id,
+            formula,
+            fs.NewVersion(ctx.user_id, ctx.now, "Cambio desde la configuración", ctx.origin),
         )
     session.flush()
 
@@ -423,7 +433,7 @@ def restore(session: Session, actor: Actor, version: int, expected_version: int)
     before = current_values(session)
     differing = [k for k, v in target_values.items() if _text(v, definitions[k].value_type) != before[k]]
     _check_roles(differing, actor.role, definitions)
-    ctx = _Context(session, actor.now, actor.user_id)
+    ctx = _Context(session, actor.now, actor.user_id, actor.origin)
     stored = {
         key: value for key, value in target_values.items() if _text(value, definitions[key].value_type) != before[key]
     }
@@ -436,7 +446,7 @@ def restore(session: Session, actor: Actor, version: int, expected_version: int)
         raise ForbiddenParameterError(
             "No tienes permisos para cambiar la fórmula.", (Problem("body", "requires_admin"),)
         )
-    _write(ctx, stored, new_formula, "frontend")
+    _write(ctx, stored, new_formula)
     after = current_values(session)
     _audit(ctx, "config.restore", current + 1, _change(before, after, f"Restauró la versión {version}"))
     return current + 1, after

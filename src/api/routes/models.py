@@ -390,6 +390,12 @@ class CalibrationProposal(_Model):
     kind: Literal["source_level", "reason_threshold", "formula_weight"]
     summary: str
     status: Literal["pending", "approved", "rejected"]
+    target_key: str | None = Field(default=None, description="What the proposal changes, e.g. weights.P or source:code")
+    previous_value: dict[str, Any] | None = None
+    proposed_value: dict[str, Any] | None = None
+    evidence: str | None = None
+    backtest: dict[str, Any] | None = Field(default=None, description="Before and after of the 30-day replay")
+    decided_at: str | None = None
 
 
 class Metric(_Model):

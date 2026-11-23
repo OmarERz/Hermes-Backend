@@ -7,9 +7,6 @@ from __future__ import annotations
 
 from api.routes.models import (
     AffectedAsset,
-    CalibrationProposal,
-    Metric,
-    NotificationEventRow,
     Recommendation,
     Run,
 )
@@ -91,28 +88,4 @@ RUNS = [
         progress=100,
     ),
     Run(id="run-2", kind="recalculation", status="running", started_at=NOW, finished_at=None, progress=40),
-]
-PROPOSALS = [
-    CalibrationProposal(
-        id="cal-1",
-        created_at=NOW,
-        kind="source_level",
-        summary="Subir 'Medio de seguridad de ejemplo' de N3 a N2: 24 afirmaciones confirmadas",
-        status="pending",
-    ),
-]
-METRICS = [
-    Metric(key="findings_open", label="Hallazgos abiertos", value="42", unit=None),
-    Metric(key="judge_cost", label="Costo del juez (mes)", value="3.20", unit="USD"),
-]
-NOTIFICATION_EVENTS = [
-    NotificationEventRow(
-        id="evt-1",
-        type="new_ticket",
-        priority="immediate",
-        status="error",
-        attempts=10,
-        last_error="Tiempo de espera agotado",
-        created_at=NOW,
-    ),
 ]
