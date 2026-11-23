@@ -16,7 +16,9 @@ from api.auth.role_admin import FirebaseRoleManager, RoleManager
 from api.errors import ERROR_RESPONSES, ErrorResponse, UnhandledErrorMiddleware, install_error_handlers
 from api.itop_webhook import build_itop_webhook_router
 from api.pagination import CursorSigner
-from api.routes import routers, samples
+from api.request_limits import BodySizeLimitMiddleware
+from api.routes import routers
+from api.security_headers import SecurityHeadersMiddleware
 from core.config import Settings
 from core.connections.checker import ConnectionChecker
 from core.connections.probes import Probes
@@ -64,8 +66,9 @@ def create_app(
     # Connection checks (SEG-23): short timeouts, results cached; tests replace it with fake probes.
     app.state.connections = ConnectionChecker(Probes(settings, httpx.Client(trust_env=False)).get)
     app.state.itop_url = str(settings.itop_url) if settings.itop_url is not None else None  # for links to iTop
-    app.state.runs = list(samples.RUNS)
     install_error_handlers(app)
+    app.add_middleware(BodySizeLimitMiddleware)
+    app.add_middleware(SecurityHeadersMiddleware)  # outermost: also on the 413 of the size limit
     if token_verifier is None or role_manager is None:
         firebase = FirebaseTokenVerifier(settings.firebase_project_id, settings.firebase_credentials_file)
         token_verifier = token_verifier or firebase

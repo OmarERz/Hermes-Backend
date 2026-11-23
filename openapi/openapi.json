@@ -839,6 +839,7 @@
           },
           "expected_version": {
             "description": "Version the client read; 409 if it changed (API-03)",
+            "maximum": 2147483647.0,
             "minimum": 1.0,
             "title": "Expected Version",
             "type": "integer"
@@ -2179,6 +2180,7 @@
         "properties": {
           "expected_version": {
             "description": "Current version the client read; 409 if it changed (API-03)",
+            "maximum": 2147483647.0,
             "minimum": 1.0,
             "title": "Expected Version",
             "type": "integer"
@@ -5114,6 +5116,8 @@
             "name": "v",
             "required": true,
             "schema": {
+              "maximum": 2147483647,
+              "minimum": -2147483648,
               "title": "V",
               "type": "integer"
             }
@@ -8299,6 +8303,7 @@
     },
     "/api/runs": {
       "get": {
+        "description": "Scans, news runs and recalculations, newest first (ARQ-04).",
         "operationId": "list_runs_api_runs_get",
         "parameters": [
           {
@@ -8451,6 +8456,7 @@
     },
     "/api/runs/{id}/events": {
       "get": {
+        "description": "Progress of a run until it ends (ARQ-05): one event each time its status or progress changes.",
         "operationId": "run_events_api_runs__id__events_get",
         "parameters": [
           {
@@ -8594,7 +8600,7 @@
     },
     "/api/scans": {
       "post": {
-        "description": "Queues a simulated scan; progress comes from the run events (FRO-19). The run shows up in GET /api/runs.",
+        "description": "Queues a simulated scan; the worker runs it on this run row and its progress streams from the run events\n(FRO-19). The run shows up in GET /api/runs.",
         "operationId": "launch_scan_api_scans_post",
         "requestBody": {
           "content": {

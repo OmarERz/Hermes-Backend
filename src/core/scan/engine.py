@@ -91,11 +91,12 @@ def next_status(current: str, last_active: str | None, *, scanned: bool, present
 
 
 # --- run rows ------------------------------------------------------------------------------------------
-def _create_run(
-    factory: sessionmaker[Session], reason: str, triggered_by: uuid.UUID | None, now: datetime
-) -> uuid.UUID:
+def _create_run(factory: sessionmaker[Session], options: ScanOptions, now: datetime) -> uuid.UUID:
+    reason, triggered_by = options.reason, options.triggered_by
     try:
         with factory() as session, session.begin():
+            if options.run_id is not None:
+                return _start_queued(session, options.run_id, now)
             run = m.Run(
                 kind="scan",
                 status="running",
@@ -111,6 +112,38 @@ def _create_run(
         if ONE_SCAN_INDEX in str(error.orig):
             raise ScanAlreadyRunningError("a scan is already running") from None
         raise
+
+
+def _start_queued(session: Session, run_id: uuid.UUID, now: datetime) -> uuid.UUID:
+    started = session.execute(
+        update(m.Run)
+        .where(m.Run.id == run_id, m.Run.kind == "scan", m.Run.status == "queued")
+        .values(status="running", started_at=now)
+        .returning(m.Run.id)
+    ).scalar()
+    if started is None:
+        raise ValueError("not a queued scan request")
+    return run_id
+
+
+def queue_scan(session: Session, now: datetime, triggered_by: uuid.UUID | None = None) -> m.Run:
+    """A scan request (`POST /api/scans`): a `queued` run the worker picks up. Flushes, the caller commits."""
+    run = m.Run(
+        kind="scan", status="queued", progress=0, trigger_reason="manual", triggered_by=triggered_by, started_at=now
+    )
+    session.add(run)
+    session.flush()
+    return run
+
+
+def next_queued_scan(session: Session) -> uuid.UUID | None:
+    """The oldest scan request still waiting."""
+    return session.scalar(
+        select(m.Run.id)
+        .where(m.Run.kind == "scan", m.Run.status == "queued")
+        .order_by(m.Run.started_at, m.Run.id)
+        .limit(1)
+    )
 
 
 def _update_run(factory: sessionmaker[Session], run_id: uuid.UUID, **values: Any) -> None:
@@ -147,6 +180,7 @@ class ScanOptions:
     osv: OsvClient | None = None  # default: the real OSV API, asked only for packages with distribution data
     recency_days: int = RECENCY_DAYS
     reader: ItopReader | None = None  # refresh the inventory from iTop first (ARQ-03)
+    run_id: uuid.UUID | None = None  # run a queued request (`POST /api/scans`) on its own `run` row
 
 
 def run_scan(
@@ -171,7 +205,7 @@ def run_scan(
 
 
 def _run_locked(factory: sessionmaker[Session], options: ScanOptions, started: datetime) -> ScanResult:
-    run_id = _create_run(factory, options.reason, options.triggered_by, started)
+    run_id = _create_run(factory, options, started)
     result = ScanResult(run_id)
     try:
         if options.reader is not None:

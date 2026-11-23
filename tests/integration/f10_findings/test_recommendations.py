@@ -89,7 +89,7 @@ def test_unknown_recommendation_is_404(client: TestClient, assessment: str) -> N
 def test_feedback_received_with_history_and_version(get: Get, scenario: Scenario) -> None:
     older = get(f"/api/recommendations/{scenario.assessments['A1']}/feedback")
     assert [(f["user"], f["channel"], f["verdict"], f["active"]) for f in older] == [
-        ("luis", "slack", "false_positive", True),
+        ("Usuario sin nombre", "slack", "false_positive", True),  # never a piece of the e-mail (#91)
         ("Ana Analista", "frontend", "relevant", True),
         ("Ana Analista", "frontend", "wrong_priority", False),
     ]

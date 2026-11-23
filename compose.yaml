@@ -50,6 +50,10 @@ x-backend: &backend
     # Non-secret connection settings of docs/11 §2 (blank means not configured)
     ITOP_URL: ${ITOP_URL:-}
     ITOP_SYSTEM_USER: ${ITOP_SYSTEM_USER:-}
+    ITOP_ORG_ID: ${ITOP_ORG_ID:-}
+    ITOP_CALLER_ID: ${ITOP_CALLER_ID:-}
+    ITOP_SERVICE_ID: ${ITOP_SERVICE_ID:-}
+    SCAN_INTERVAL_HOURS: ${SCAN_INTERVAL_HOURS:-0}
     LLM_BASE_URL_JUDGE: ${LLM_BASE_URL_JUDGE:-}
     LLM_BASE_URL_ANALYSTS: ${LLM_BASE_URL_ANALYSTS:-}
   secrets:
@@ -70,7 +74,9 @@ x-backend: &backend
 
 services:
   db:
-    image: pgvector/pgvector:pg18@sha256:38681dc6eaf55308e2a4c6de392d131652dcfac70e1263e35cd9b5ea3fe39782
+    # The pinned pgvector image without gosu (docker/db/Dockerfile, F12.1).
+    build: docker/db
+    image: hermes-db:local
     environment:
       POSTGRES_DB: hermes
       POSTGRES_USER: hermes

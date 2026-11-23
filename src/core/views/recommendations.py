@@ -101,7 +101,7 @@ _TICKETS: Final = text(
 )
 _FEEDBACK: Final = text(
     """
-    SELECT COALESCE(u.display_name, split_part(u.email::text, '@', 1)) AS "user", fb.channel, fb.verdict,
+    SELECT COALESCE(u.display_name, 'Usuario sin nombre') AS "user", fb.channel, fb.verdict,
            fb.proposed_level, fb.proposed_score, fb.comment, fb.created_at, (fb.superseded_at IS NULL) AS active
       FROM feedback fb JOIN app_user u ON u.id = fb.app_user_id
      WHERE fb.assessment_id = :assessment_id

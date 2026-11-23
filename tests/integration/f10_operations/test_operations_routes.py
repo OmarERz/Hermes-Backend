@@ -163,7 +163,12 @@ def test_audit_pages_chain_and_refuse_a_foreign_cursor(client: TestClient) -> No
     assert seen == ["profile.update", "source.down", "source.enable", "config.update"]
 
 
-def test_audit_refuses_a_cursor_of_another_list(client: TestClient) -> None:
+def test_audit_refuses_a_cursor_of_another_list(client: TestClient, engine: Engine) -> None:
+    for _ in range(2):  # the run list reads the run table (F13.0): two rows give a next page
+        execute(
+            engine,
+            "INSERT INTO run (kind, status, progress, trigger_reason) VALUES ('nightly', 'succeeded', 100, 'schedule')",
+        )
     runs_cursor = client.get("/api/runs", params={"limit": 1}).json()["next_cursor"]
     response = client.get("/api/audit", params={"cursor": runs_cursor})
     assert (response.status_code, response.json()["error"]["code"]) == (400, "invalid_cursor")

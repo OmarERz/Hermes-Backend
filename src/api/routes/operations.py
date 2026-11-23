@@ -3,21 +3,24 @@ in `admin`."""
 
 from __future__ import annotations
 
+import json
 from collections.abc import Iterator
 from datetime import UTC, datetime
 from typing import Annotated, Literal
 
 from fastapi import APIRouter, Path
 from fastapi.responses import StreamingResponse
+from sqlalchemy import select
 
+from api.auth import CurrentUser
 from api.errors import ApiError, ErrorDetail
 from api.pagination import PAGINATED_RESPONSES, Page, PageQuery, Signer, paginate
-from api.routes import samples
 from api.routes._auth import guard
 from api.routes._config_support import CurrentUserDep, app_user_id, now, to_api_error
 from api.routes._db import SessionDep
 from api.routes._events import Events
-from api.routes._state import MetricsSource, RunStore
+from api.routes._runs import Runs
+from api.routes._state import MetricsSource
 from api.routes.models import (
     CalibrationProposal,
     Metric,
@@ -31,9 +34,11 @@ from api.routes.models import (
 from core.calibration import proposals as calibration
 from core.configuration.errors import ConfigError
 from core.db import models as m
+from core.db.models import AppUser, AuditLog
 from core.stix.export import ExportOptions, ExportScope, StixExportError, export_bundle
 
 router = APIRouter(tags=["operations"])
+PROGRESS_ES = {"queued": "En cola", "running": "En curso", "succeeded": "Terminado", "failed": "Falló"}
 
 # Schema of one parsed event: `event` is the event name and `data` a JSON text {run_id, progress, message}.
 SSE_EVENT_SCHEMA = {
@@ -47,18 +52,16 @@ SSE_EVENT_SCHEMA = {
 
 
 @router.post("/api/scans", status_code=202, dependencies=[guard("POST", "/api/scans")])
-def launch_scan(_request: ScanRequest, runs: RunStore) -> Run:
-    """Queues a simulated scan; progress comes from the run events (FRO-19). The run shows up in GET /api/runs."""
-    run = Run(
-        id=f"run-{len(runs) + 1}", kind="scan", status="queued", started_at=samples.NOW, finished_at=None, progress=0
-    )
-    runs.insert(0, run)
-    return run
+def launch_scan(_request: ScanRequest, runs: Runs, user: CurrentUserDep) -> Run:
+    """Queues a simulated scan; the worker runs it on this run row and its progress streams from the run events
+    (FRO-19). The run shows up in GET /api/runs."""
+    return runs.queue_scan(user.uid)
 
 
 @router.get("/api/runs", dependencies=[guard("GET", "/api/runs")], responses=PAGINATED_RESPONSES)
-def list_runs(params: PageQuery, signer: Signer, runs: RunStore) -> Page[Run]:
-    return paginate(runs, params, signer)
+def list_runs(params: PageQuery, signer: Signer, runs: Runs) -> Page[Run]:
+    """Scans, news runs and recalculations, newest first (ARQ-04)."""
+    return paginate(runs.list(), params, signer)
 
 
 @router.get(
@@ -69,24 +72,28 @@ def list_runs(params: PageQuery, signer: Signer, runs: RunStore) -> Page[Run]:
         200: {"content": {"text/event-stream": {"schema": SSE_EVENT_SCHEMA}}, "description": "Server-sent events"}
     },
 )
-def run_events(id: str, runs: RunStore) -> StreamingResponse:  # noqa: A002 - path parameter name of API-06
-    run = next((r for r in runs if r.id == id), None)
-    if run is None:
-        raise ApiError(404, "not_found", "La corrida no existe.")
+def run_events(id: str, runs: Runs) -> StreamingResponse:  # noqa: A002 - path parameter name of API-06
+    """Progress of a run until it ends (ARQ-05): one event each time its status or progress changes."""
+    snapshots = runs.progress(id)
 
     def stream() -> Iterator[str]:
-        for progress, message in (
-            (10, "Leyendo activos de iTop"),
-            (60, "Correlacionando con noticias"),
-            (100, "Terminado"),
-        ):
-            yield f'event: progress\ndata: {{"run_id": "{run.id}", "progress": {progress}, "message": "{message}"}}\n\n'
+        for run in snapshots:
+            data = json.dumps(
+                {"run_id": run.id, "progress": run.progress, "status": run.status, "message": PROGRESS_ES[run.status]},
+                ensure_ascii=False,
+            )
+            yield f"event: progress\ndata: {data}\n\n"
 
     return StreamingResponse(stream(), media_type="text/event-stream")
 
 
-@router.post("/api/stix/export", dependencies=[guard("POST", "/api/stix/export")])
-def stix_export(request: StixExportRequest, session: SessionDep) -> StixBundle:
+_STIX_GUARD = guard("POST", "/api/stix/export")
+
+
+@router.post("/api/stix/export")
+def stix_export(
+    request: StixExportRequest, session: SessionDep, user: Annotated[CurrentUser, _STIX_GUARD]
+) -> StixBundle:
     """Exports a STIX 2.1 bundle with TLP marking (STX-03, STX-06). The scope needs its identifier or range."""
     missing = {
         "vulnerability": request.vulnerability_id is None,
@@ -116,7 +123,30 @@ def stix_export(request: StixExportRequest, session: SessionDep) -> StixBundle:
             "No se pudo exportar con los datos del alcance.",
             [ErrorDetail(field="body.scope", issue="invalid_scope_data")],
         ) from None
-    return StixBundle.model_validate(result.bundle)
+    bundle = StixBundle.model_validate(result.bundle)
+    # Who exported what leaves the system, and with which marking (ASVS V16; pendientes F1.5 #50).
+    session.add(
+        AuditLog(
+            app_user_id=session.scalar(select(AppUser.id).where(AppUser.firebase_uid == user.uid)),
+            action="stix_exported",
+            entity_type="stix_bundle",
+            entity_id=str(result.bundle.get("id", "")),
+            before=None,
+            after={
+                "scope": request.scope,
+                "vulnerability_id": request.vulnerability_id,
+                "run_id": request.run_id,
+                "date_from": request.date_from,
+                "date_to": request.date_to,
+                "exclude_ultra_classified": request.exclude_ultra_classified,
+                "tlp": result.tlp,
+                "objects": len(result.bundle.get("objects", [])),
+            },
+            created_at=datetime.now(UTC),
+        )
+    )
+    session.commit()
+    return bundle
 
 
 KINDS: dict[str, Literal["source_level", "reason_threshold", "formula_weight"]] = {

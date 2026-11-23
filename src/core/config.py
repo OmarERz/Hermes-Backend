@@ -42,6 +42,8 @@ _OPTIONAL_FIELDS = (
     "itop_token",
     "itop_system_user",
     "itop_webhook_token",
+    "itop_org_id",
+    "itop_caller_id",
     "nvd_api_key",
     "deepseek_api_key",
     "llm_base_url_analysts",
@@ -83,6 +85,13 @@ class Settings(BaseSettings):
     itop_system_user: str | None = None
     # Shared secret iTop sends as `Authorization: Bearer` to the webhook doorbell (ARQ-02); unset = webhook off
     itop_webhook_token: SecretStr | None = None
+    # Who files tickets (D-036, prototype C7): organization, the system person as caller, the service; ids in iTop
+    itop_org_id: str | None = None
+    itop_caller_id: str | None = None
+    itop_service_id: str | None = None
+
+    # Scheduled simulated scan every N hours (docs/03 §2); 0 = only on demand (POST /api/scans)
+    scan_interval_hours: int = Field(default=0, ge=0, le=24 * 30)
 
     # Vulnerability and threat sources
     nvd_api_key: SecretStr | None = None

@@ -8,7 +8,6 @@ from __future__ import annotations
 from api.routes.models import (
     AffectedAsset,
     Recommendation,
-    Run,
 )
 
 NOW = "2026-01-15T10:30:00Z"
@@ -77,15 +76,4 @@ RECOMMENDATIONS = [
         ticket_url=None,
         feedback_count=0,
     ),
-]
-RUNS = [
-    Run(
-        id="run-1",
-        kind="scan",
-        status="succeeded",
-        started_at="2026-01-15T02:00:00Z",
-        finished_at="2026-01-15T02:07:00Z",
-        progress=100,
-    ),
-    Run(id="run-2", kind="recalculation", status="running", started_at=NOW, finished_at=None, progress=40),
 ]

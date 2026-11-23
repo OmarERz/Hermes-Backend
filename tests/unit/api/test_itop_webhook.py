@@ -103,3 +103,19 @@ def test_the_app_builds_the_ticket_sync_when_itop_is_configured(monkeypatch: pyt
     assert fake.calls == ["123"]
     assert built[0][1].endpoint == "http://localhost:8080/webservices/rest.php?version=1.3"
     assert built[0][2] == "Hermes System"
+
+
+@pytest.mark.parametrize("body", [{}, {"class": "Server"}, {"junk": "x" * 100}])
+def test_the_token_is_checked_before_the_body(body: dict[str, str]) -> None:
+    """A caller without the token learns nothing about the payload: 401, never a validation 422 (pendientes #49)."""
+    assert client(sync=FakeSync()).post("/api/itop/webhook", json=body).status_code == 401
+    # disabled (no token configured): nothing to protect, the body is validated first and a valid one gets 503
+    assert client(token=None).post("/api/itop/webhook", json=body).status_code == 422
+
+
+@pytest.mark.parametrize("raw", [b"{not json", b"\xff\xfe", b""])
+def test_malformed_json_without_the_token_is_still_401(raw: bytes) -> None:
+    headers = {"content-type": "application/json"}
+    assert client(sync=FakeSync()).post("/api/itop/webhook", content=raw, headers=headers).status_code == 401
+    with_token = {**headers, "Authorization": f"Bearer {TOKEN}"}
+    assert client(sync=FakeSync()).post("/api/itop/webhook", content=raw, headers=with_token).status_code == 422

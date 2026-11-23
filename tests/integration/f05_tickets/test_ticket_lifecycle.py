@@ -499,3 +499,21 @@ def test_a_false_positive_ci_never_drives_a_level_up(session: Session) -> None:
 
     assert [e.event_type for e in events(session, ticket)] == ["new_ticket"]
     assert not any(action == "raise_urgency" for action, _ in writes(session, ticket))
+
+
+def test_fixes_found_without_a_new_assessment_are_still_reported(session: Session) -> None:
+    sc = Scenario(session)
+    sc.ci("web-01", sc.team("Ops"))
+    assessment = sc.assess({"web-01": 70}, sc.scan({"web-01": "new"}))
+    lifecycle(sc).apply(session, assessment.id)
+    ticket = tickets(session, sc)[0]
+    created_in_itop(ticket, "100", 3)
+    sc.later(days=1)
+    sc.scan({"web-01": "fixed"})  # every CI fixed: scoring stores no new assessment for the group
+
+    lifecycle(sc).apply(session, assessment.id)  # the pipeline re-applies the latest assessment
+
+    assert writes(session, ticket)[-1][0] == "fix_comment"
+    assert events(session, ticket)[-1].event_type == "fixed"
+    report = lifecycle(sc).apply(session, assessment.id)
+    assert (report.writes, report.events) == (0, 0)  # reported once
