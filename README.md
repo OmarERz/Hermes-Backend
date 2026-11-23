@@ -64,8 +64,8 @@ pantallas del front tienen datos. No usa red ni gasta tokens: el juez es un dobl
 aceptado. Las operaciones de iTop quedan guardadas como `failed` («demo data: never sent to iTop») en la misma
 transacción, así que el trabajador del *outbox* nunca las envía aunque iTop esté configurado, y la demo **se niega a
 correr** si la base ya tiene activos que no son de la demo. Úsala solo en una instalación de pruebas: los eventos de
-notificación sí son filas reales, así que no cambies el consumidor a Slack con datos de demostración. Los tickets llevan ids `DEMO-n`: si iTop está configurado, la sincronización los consultará y solo registrará que no existen. Repetirlo agrega
-una evaluación por grupo, sin duplicar datos, tickets ni eventos.
+notificación sí son filas reales, así que no cambies el consumidor a Slack con datos de demostración. Los tickets llevan ids `DEMO-n`: si iTop está configurado, la sincronización los consultará y solo registrará que no existen. Repetirlo no
+duplica datos, tickets ni eventos, y sin cambios no vuelve a evaluar.
 Para ver los eventos: `docker compose exec api python -m core.devtools.admin events`.
 
 **Guion de punta a punta (unos 10 minutos).**
