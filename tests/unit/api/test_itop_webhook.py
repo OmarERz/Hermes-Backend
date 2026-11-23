@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import logging
 from typing import Any
 
 import pytest
@@ -119,3 +120,20 @@ def test_malformed_json_without_the_token_is_still_401(raw: bytes) -> None:
     assert client(sync=FakeSync()).post("/api/itop/webhook", content=raw, headers=headers).status_code == 401
     with_token = {**headers, "Authorization": f"Bearer {TOKEN}"}
     assert client(sync=FakeSync()).post("/api/itop/webhook", content=raw, headers=with_token).status_code == 422
+
+
+@pytest.fixture
+def webhook_client() -> TestClient:
+    # Built during setup: create_app reinstalls the log handlers, which would drop caplog's in the test body.
+    return client(sync=FakeSync())
+
+
+def test_a_rejected_webhook_call_is_logged_without_the_header(
+    webhook_client: TestClient, caplog: pytest.LogCaptureFixture
+) -> None:
+    """ASVS V16.3.1 (F12.3): a failed attempt on the webhook is a WARNING like a rejected Firebase token."""
+    with caplog.at_level(logging.WARNING, logger="api.itop_webhook"):
+        response = webhook_client.post("/api/itop/webhook", json=CALL, headers=bearer("guess-1234"))
+    assert response.status_code == 401
+    assert "authentication rejected: webhook_bearer" in caplog.text
+    assert "guess-1234" not in caplog.text
