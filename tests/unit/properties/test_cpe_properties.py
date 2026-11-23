@@ -5,7 +5,7 @@ from __future__ import annotations
 import contextlib
 import string
 
-from hypothesis import given
+from hypothesis import assume, given
 from hypothesis import strategies as st
 
 from core.cpe.candidates import clean_query, cpe_uri, parse_cpe_name
@@ -14,6 +14,7 @@ from core.cpe.mapping import MappingError, MappingInput, validate
 NVD_ALPHABET = string.ascii_lowercase + string.digits + "._~+:-"
 names = st.text(alphabet=NVD_ALPHABET, min_size=1, max_size=30).filter(lambda s: s not in {"-", "*"})
 visible = st.characters(min_codepoint=32, max_codepoint=0x10FFFF, blacklist_categories=("Cs",))
+anything = st.characters(blacklist_categories=("Cs",))  # control characters and line breaks included
 printable = st.text(alphabet=visible, min_size=1, max_size=30).filter(lambda s: s not in {"-", "*"})
 
 
@@ -65,3 +66,9 @@ def test_valid_mappings_validate_and_are_stable(vendor: str, product: str) -> No
 def test_validation_never_raises_anything_but_mapping_error(vendor: str, product: str) -> None:
     with contextlib.suppress(MappingError):
         validate(MappingInput(vendor, product, vendor, product))
+
+
+@given(st.text(alphabet=anything, min_size=1, max_size=20), st.text(alphabet=anything, min_size=1, max_size=20))
+def test_even_names_with_control_characters_round_trip(vendor: str, product: str) -> None:
+    assume(vendor not in {"-", "*"} and product not in {"-", "*"})
+    assert parse_cpe_name(cpe_uri(vendor, product)) == (vendor, product)

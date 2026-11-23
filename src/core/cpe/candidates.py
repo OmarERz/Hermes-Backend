@@ -70,7 +70,7 @@ def parse_cpe_name(name: str) -> tuple[str, str] | None:
     parts = CPE_SPLIT.split(name)
     if len(parts) < CPE_FIELDS or parts[:2] != ["cpe", "2.3"] or parts[2] not in {"a", "o"}:
         return None
-    vendor, product = (re.sub(r"\\(.)", r"\1", p) for p in parts[3:5])
+    vendor, product = (re.sub(r"\\(.)", r"\1", p, flags=re.DOTALL) for p in parts[3:5])
     return (vendor, product) if vendor not in {"", "*", "-"} and product not in {"", "*", "-"} else None
 
 
