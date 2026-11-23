@@ -185,6 +185,7 @@ def vulnerability_detail(group_id: str, session: SessionDep, itop_url: ItopUrl) 
                 classification_at_evaluation=cast(Classification, a.classification_at_evaluation),
                 finding_status=cast(FindingStatus, a.finding_status),
                 score=a.score,
+                finding_id=str(a.finding_id) if a.finding_id else None,
             )
             for a in assets
         ],
