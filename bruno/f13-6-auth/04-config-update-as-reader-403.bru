@@ -15,15 +15,8 @@ auth:bearer {
 }
 
 script:pre-request {
-  async function api(method, path, token, data) {
-    const response = await bru.sendRequest({
-      method,
-      url: `${bru.getEnvVar("baseUrl")}${path}`,
-      headers: { Authorization: `Bearer ${bru.getEnvVar(token || "token")}`, "Content-Type": "application/json" },
-      data,
-    });
-    return response.data;
-  }
+  const hermes = require("./lib/hermes");
+  const api = (method, path, token, data) => hermes.api(bru, method, path, token, data);
   const current = await api("GET", "/api/config");
   bru.setVar("configVersion", current.version);  // the version check runs before the role check
 }

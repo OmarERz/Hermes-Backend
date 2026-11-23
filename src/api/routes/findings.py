@@ -21,6 +21,7 @@ from api.pagination import (
 from api.routes._auth import guard
 from api.routes._config_support import CurrentUserDep
 from api.routes._db import SessionDep
+from api.routes._paths import CiId, UuidId
 from api.routes.models import (
     AffectedAsset,
     Alert,
@@ -162,7 +163,7 @@ def list_vulnerabilities(
 
 
 @router.get("/api/vulnerabilities/{group_id}", dependencies=[guard("GET", "/api/vulnerabilities/{group_id}")])
-def vulnerability_detail(group_id: str, session: SessionDep, itop_url: ItopUrl) -> VulnerabilityDetail:
+def vulnerability_detail(group_id: UuidId, session: SessionDep, itop_url: ItopUrl) -> VulnerabilityDetail:
     """A vulnerability group with each scored CI and that CI's own score (D-035)."""
     parsed = parse_uuid(group_id)
     found = views.group_detail(session, parsed, itop_url) if parsed is not None else None
@@ -185,6 +186,7 @@ def vulnerability_detail(group_id: str, session: SessionDep, itop_url: ItopUrl) 
                 classification_at_evaluation=cast(Classification, a.classification_at_evaluation),
                 finding_status=cast(FindingStatus, a.finding_status),
                 score=a.score,
+                finding_id=str(a.finding_id) if a.finding_id else None,
             )
             for a in assets
         ],
@@ -192,7 +194,7 @@ def vulnerability_detail(group_id: str, session: SessionDep, itop_url: ItopUrl) 
 
 
 @router.get("/api/assets/{ci_id}", dependencies=[guard("GET", "/api/assets/{ci_id}")])
-def asset_detail(ci_id: str, session: SessionDep) -> AssetDetail:
+def asset_detail(ci_id: CiId, session: SessionDep) -> AssetDetail:
     """A live CI and its vulnerabilities; each one carries this CI's final, level and status (D-035)."""
     found = views.asset_detail(session, ci_id)
     if found is None:
@@ -209,7 +211,7 @@ def asset_detail(ci_id: str, session: SessionDep) -> AssetDetail:
 
 
 @router.get("/api/findings/{id}/history", dependencies=[guard("GET", "/api/findings/{id}/history")])
-def finding_history(id: str, session: SessionDep) -> list[ScoreHistoryPoint]:  # noqa: A002 - path parameter name of API-06
+def finding_history(id: UuidId, session: SessionDep) -> list[ScoreHistoryPoint]:  # noqa: A002 - path parameter name of API-06
     """Score of the finding's CI in each assessment of its group, oldest first (EVA-05). The judge adjustment
     shown is the group's plus the CI's own."""
     parsed = parse_uuid(id)
@@ -274,7 +276,7 @@ def comparison_table(params: PageQuery, signer: Signer, session: SessionDep) -> 
 
 @router.get("/api/assessments/{id}/breakdown", dependencies=[guard("GET", "/api/assessments/{id}/breakdown")])
 def assessment_breakdown(
-    id: str,  # noqa: A002
+    id: UuidId,  # noqa: A002
     session: SessionDep,
     ci_id: Annotated[str | None, Query(max_length=100, description="CI of the waterfall; default the top one")] = None,
 ) -> Breakdown:
@@ -360,7 +362,7 @@ def list_recommendations(
 
 
 @router.get("/api/recommendations/{assessment_id}", dependencies=[guard("GET", "/api/recommendations/{assessment_id}")])
-def get_recommendation(assessment_id: str, session: SessionDep, itop_url: ItopUrl) -> Recommendation:
+def get_recommendation(assessment_id: UuidId, session: SessionDep, itop_url: ItopUrl) -> Recommendation:
     parsed = parse_uuid(assessment_id)
     found = recs.get_recommendation(session, parsed, itop_url) if parsed is not None else None
     if found is None:
@@ -401,7 +403,7 @@ def post_feedback(feedback: FeedbackRequest, request: Request, user: CurrentUser
 
 
 @router.get("/api/recommendations/{id}/feedback", dependencies=[guard("GET", "/api/recommendations/{id}/feedback")])
-def recommendation_feedback(id: str, session: SessionDep) -> list[FeedbackEntry]:  # noqa: A002
+def recommendation_feedback(id: UuidId, session: SessionDep) -> list[FeedbackEntry]:  # noqa: A002
     """Feedback received on one assessment, from Slack and the front, newest first, superseded ones included
     (FRO-15). `on_older_version`: a newer assessment of the same group changed the score."""
     parsed = parse_uuid(id)

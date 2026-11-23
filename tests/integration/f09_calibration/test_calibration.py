@@ -557,7 +557,7 @@ def test_the_routes_list_approve_and_reject_real_proposals(client: TestClient, w
     assert rejected.json()["status"] == "rejected"
     assert client.post(f"/api/calibration/proposals/{weight}/approve").status_code == 409
     assert client.post(f"/api/calibration/proposals/{uuid.uuid4()}/reject").status_code == 404
-    assert client.post("/api/calibration/proposals/not-a-uuid/approve").status_code == 404
+    assert client.post("/api/calibration/proposals/not-a-uuid/approve").status_code == 422  # F12.3: UUID path ids
     assert rows(world, "SELECT trust_tier FROM source WHERE code = 'good_blog'") == [("N3",)]  # rejected: unchanged
 
 

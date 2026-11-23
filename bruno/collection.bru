@@ -12,5 +12,7 @@ docs {
   data, demoMinItems=1 makes the data-dependent requests fail instead of skipping. stateChanging=1 (test
   installations only) also runs the checks that change data a person owns: retry a failed event, approve and
   reject calibration proposals, map unmapped software.
+  Request scripts share bruno/lib/hermes.js (require("./lib/hermes")): the API call with a role token, the
+  skip-or-fail rule for data, the stateChanging opt-in and the lookups of a recommendation and a group.
   In the Bruno app, paste the tokens into the `token`, `analystToken` and `readerToken` secrets of `local`.
 }

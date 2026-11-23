@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import uuid
 from collections.abc import Iterator
 from datetime import UTC, datetime
 
@@ -33,20 +34,25 @@ SETTINGS = Settings(  # type: ignore[call-arg]
 APP = create_app(SETTINGS)
 
 
+# Run ids are UUIDs, like the rows of `run` (F12.3 validates them in the path).
+RUN_1 = "0196a6f0-0000-7000-8000-0000000000a1"
+RUN_2 = "0196a6f0-0000-7000-8000-0000000000a2"
+
+
 class SampleRuns:
     """In-memory runs for the route tests (the SQL source is tested in tests/integration/f13_pipeline)."""
 
     def __init__(self) -> None:
         self.runs = [
             Run(
-                id="run-1",
+                id=RUN_1,
                 kind="scan",
                 status="succeeded",
                 started_at="2026-01-15T02:00:00Z",
                 finished_at="2026-01-15T02:07:00Z",
                 progress=100,
             ),
-            Run(id="run-2", kind="recalculation", status="running", started_at="t", finished_at=None, progress=40),
+            Run(id=RUN_2, kind="recalculation", status="running", started_at="t", finished_at=None, progress=40),
         ]
 
     def page(self, after: RunKey | None, limit: int) -> tuple[list[Run], RunKey | None]:
@@ -56,9 +62,7 @@ class SampleRuns:
         return kept, ((0, datetime(2026, 1, 15, tzinfo=UTC), kept[-1].id) if more else None)
 
     def queue_scan(self, firebase_uid: str | None) -> Run:
-        run = Run(
-            id=f"run-{len(self.runs) + 1}", kind="scan", status="queued", started_at="t", finished_at=None, progress=0
-        )
+        run = Run(id=str(uuid.uuid4()), kind="scan", status="queued", started_at="t", finished_at=None, progress=0)
         self.runs.insert(0, run)
         return run
 
@@ -140,7 +144,7 @@ def test_pagination_cursor_flow_and_invalid_cursor(client: TestClient) -> None:
     assert len(first["items"]) == 1
     assert first["next_cursor"]
     second = client.get("/api/runs", params={"limit": 1, "cursor": first["next_cursor"]}).json()
-    assert second["items"][0]["id"] == "run-2"
+    assert second["items"][0]["id"] == RUN_2
     assert second["next_cursor"] is None
     bad = client.get("/api/runs", params={"cursor": "tampered.cursor"})
     assert bad.status_code == 400
@@ -150,10 +154,14 @@ def test_pagination_cursor_flow_and_invalid_cursor(client: TestClient) -> None:
 
 def test_not_found_uses_the_envelope(client: TestClient) -> None:
     as_role(Role.READER)
+    response = client.get("/api/no-such-route")
+    assert response.status_code == 404
+    assert response.json()["error"]["code"] == "not_found"
+    # F12.3: a path id that is not a UUID is refused before any lookup: 422 with the field, never a 404 from the DB.
     for url in ("/api/recommendations/nope", "/api/recommendations/nope/feedback", "/api/findings/x/history"):
-        response = client.get(url)
-        assert response.status_code == 404
-        assert response.json()["error"]["code"] == "not_found"
+        malformed = client.get(url)
+        assert malformed.status_code == 422
+        assert malformed.json()["error"]["details"][0]["field"] in {"path.assessment_id", "path.id"}
 
 
 def test_scan_run_is_listed_and_streams_its_progress(client: TestClient) -> None:
@@ -163,14 +171,15 @@ def test_scan_run_is_listed_and_streams_its_progress(client: TestClient) -> None
     run_id = run.json()["id"]
     listed = client.get("/api/runs").json()["items"]
     assert run_id in [r["id"] for r in listed]
-    assert run_id not in {"run-1", "run-2"}
+    assert run_id not in {RUN_1, RUN_2}
     events = client.get(f"/api/runs/{run_id}/events")
     assert events.status_code == 200
     assert f'"run_id": "{run_id}"' in events.text
     assert '"progress": 100' in events.text
     other = client.post("/api/scans", json={}).json()["id"]
     assert other != run_id
-    assert client.get("/api/runs/run-zzz/events").status_code == 404
+    assert client.get("/api/runs/0196a6f0-0000-7000-8000-00000000beef/events").status_code == 404
+    assert client.get("/api/runs/run-zzz/events").status_code == 422  # F12.3: run ids are UUIDs
 
 
 def test_vulnerability_filters_are_validated_before_the_database(client: TestClient) -> None:
@@ -191,10 +200,10 @@ def test_feedback_body_rules(client: TestClient) -> None:
 
 def test_runs_stix_calibration_and_notifications(client: TestClient) -> None:
     as_role(Role.ADMIN)
-    events = client.get("/api/runs/run-1/events")
+    events = client.get(f"/api/runs/{RUN_1}/events")
     assert events.headers["content-type"].startswith("text/event-stream")
     assert "event: progress" in events.text
-    assert client.get("/api/runs/zzz/events").status_code == 404
+    assert client.get("/api/runs/0196a6f0-0000-7000-8000-00000000beef/events").status_code == 404
     assert (
         client.post("/api/stix/export", json={"scope": "run"}).status_code == 422
     )  # scope data checked before the database
@@ -250,7 +259,7 @@ def test_metrics_come_from_the_dashboard_service(client: TestClient) -> None:
 class FakeEvents:
     def __init__(self) -> None:
         self.row = NotificationEventRow(
-            id="e1",
+            id="0196a6f0-0000-7000-8000-0000000000e1",
             type="new_ticket",
             priority="immediate",
             status="error",
@@ -269,6 +278,11 @@ class FakeEvents:
 def test_notification_events_come_from_the_event_queue(client: TestClient) -> None:
     as_role(Role.ADMIN)
     APP.dependency_overrides[get_event_queue] = FakeEvents
-    assert [e["id"] for e in client.get("/api/notifications/events").json()["items"]] == ["e1"]
+    assert [e["id"] for e in client.get("/api/notifications/events").json()["items"]] == [
+        "0196a6f0-0000-7000-8000-0000000000e1"
+    ]
     assert client.get("/api/notifications/events", params={"status": "pending"}).json()["items"] == []
-    assert client.post("/api/notifications/events/e1/retry").json()["status"] == "pending"
+    assert (
+        client.post("/api/notifications/events/0196a6f0-0000-7000-8000-0000000000e1/retry").json()["status"]
+        == "pending"
+    )

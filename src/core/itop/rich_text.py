@@ -10,7 +10,8 @@ What Hermes writes there is plain text built from names and text it does not con
 iTop, news sources and URLs, the judge's mitigation draft, the comment of a user's feedback). Sent as is, a
 `<a href=…>`, an `<img src=…>` or a `[[…]]` inside any of them would become a live link, a tracking image or a link
 to another iTop object, and the line breaks would collapse into one paragraph. So every such field is HTML-escaped,
-`[[` is broken with an empty `<span>` (an entity would not survive iTop's DOM round trip), and line breaks become
+`[[` is broken with U+2060 WORD JOINER (an entity would not survive iTop's DOM round trip, and an empty `<span>` could
+be dropped by a rich-text editor when a person edits the ticket; checked live on 3.2.2), and line breaks become
 `<br>`: the text reads in iTop exactly as it was written, and markup in it stays literal.
 
 The description is a MySQL `TEXT` column (65 535 bytes, `AttributeText::GetMaxSize`) and escaping makes text a bit
@@ -33,7 +34,7 @@ DESCRIPTION_MAX_BYTES: Final = 65_000
 # TODO(P-009): ticket texts are Spanish only until the output language reaches the ticket templates (D-060).
 TRUNCATION_NOTE: Final = "[…] Texto recortado: no cabe completo en iTop; el detalle está en Hermes."
 _WIKI_OPENING: Final = re.compile(r"\[(?=\[)")
-_BREAK: Final = "<span></span>"
+_BREAK: Final = "\u2060"  # WORD JOINER: invisible, kept by iTop's sanitizer and by editors
 
 
 def plain_text_to_html(text: str) -> str:

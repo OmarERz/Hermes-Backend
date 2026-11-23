@@ -63,6 +63,7 @@ def test_recommendation_shows_score_ci_snapshot_mitigation_and_ticket(get: Get, 
         "classification_at_evaluation": "highly_classified",
         "finding_status": "new",
         "score": 90,
+        "finding_id": None,  # only the vulnerability detail carries it (F13.8)
     }
     assert rec["feedback_count"] == 1
 
@@ -79,7 +80,7 @@ def test_recommendation_without_judge_shows_the_most_restrictive_ci(get: Get, sc
     assert (rec["asset"]["ci_id"], rec["asset"]["score"]) == ("CI-1", 70)
 
 
-@pytest.mark.parametrize("assessment", ["nope", str(uuid.UUID(int=3))])
+@pytest.mark.parametrize("assessment", [str(uuid.UUID(int=3))])  # malformed: 422 since F12.3 (test_path_params)
 def test_unknown_recommendation_is_404(client: TestClient, assessment: str) -> None:
     for url in (f"/api/recommendations/{assessment}", f"/api/recommendations/{assessment}/feedback"):
         response = client.get(url)

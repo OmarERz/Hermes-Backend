@@ -385,7 +385,7 @@ def test_peer_errors(client: TestClient, engine: Engine) -> None:
     other = client.post("/api/peer-companies", json=peer_body(engine, name="Otra", aliases=["Otra Co"])).json()
     assert client.put(f"/api/peer-companies/{other['id']}", json=peer_body(engine)).status_code == 409
     assert client.put(f"/api/peer-companies/{uuid.uuid4()}", json=peer_body(engine, name="Z")).status_code == 404
-    assert client.put("/api/peer-companies/not-a-uuid", json=peer_body(engine, name="Z")).status_code == 404
+    assert client.put("/api/peer-companies/not-a-uuid", json=peer_body(engine, name="Z")).status_code == 422  # F12.3
     assert client.delete(f"/api/peer-companies/{uuid.uuid4()}").status_code == 404
     assert (
         client.put(f"/api/peer-companies/{first['id']}", json=peer_body(engine, name="Tienda Ejemplo")).status_code
@@ -530,7 +530,7 @@ def test_switching_sources_and_levels(client: TestClient, engine: Engine) -> Non
         client.patch(f"/api/sources/{own['id']}", json={"level": "N1"}).status_code == 422
     )  # N1 is for official sources
     assert client.patch(f"/api/sources/{uuid.uuid4()}", json={"active": True}).status_code == 404
-    assert client.patch("/api/sources/not-a-uuid", json={"active": True}).status_code == 404
+    assert client.patch("/api/sources/not-a-uuid", json={"active": True}).status_code == 422  # F12.3: UUID path ids
     actions = [
         r[0] for r in rows(engine, "SELECT action FROM audit_log WHERE entity_type = 'source' ORDER BY created_at")
     ]

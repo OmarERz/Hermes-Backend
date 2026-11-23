@@ -16,6 +16,7 @@ from api.pagination import PAGINATED_RESPONSES, Page, PageQuery, Signer, paginat
 from api.routes._auth import guard
 from api.routes._config_support import CurrentUserDep, app_user_id, now, to_api_error
 from api.routes._db import SessionDep
+from api.routes._paths import UuidAliasId
 from api.routes.models import (
     MAX_VERSION,
     CompanyProfile,
@@ -36,7 +37,7 @@ from core.db import models as m
 from core.scoring.evaluate import simulate as simulate_formula
 
 router = APIRouter(tags=["configuration"])
-PeerId = Annotated[str, Path(alias="id")]
+PeerId = UuidAliasId
 # Any PostgreSQL `integer` is a version that may not exist (404); only a number outside that range is a 422.
 VersionPath = Annotated[int, Path(ge=-MAX_VERSION - 1, le=MAX_VERSION)]
 

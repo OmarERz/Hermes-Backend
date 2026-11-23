@@ -8,7 +8,7 @@ from collections.abc import Iterator
 from datetime import UTC, datetime
 from typing import Annotated, Literal
 
-from fastapi import APIRouter, Path
+from fastapi import APIRouter
 from fastapi.responses import StreamingResponse
 from sqlalchemy import select
 
@@ -19,6 +19,7 @@ from api.routes._auth import guard
 from api.routes._config_support import CurrentUserDep, app_user_id, now, to_api_error
 from api.routes._db import SessionDep
 from api.routes._events import Events
+from api.routes._paths import UuidAliasId, UuidId
 from api.routes._runs import Runs
 from api.routes._state import MetricsSource
 from api.routes.models import (
@@ -74,7 +75,7 @@ def list_runs(params: PageQuery, signer: Signer, runs: Runs) -> Page[Run]:
         200: {"content": {"text/event-stream": {"schema": SSE_EVENT_SCHEMA}}, "description": "Server-sent events"}
     },
 )
-def run_events(id: str, runs: Runs) -> StreamingResponse:  # noqa: A002 - path parameter name of API-06
+def run_events(id: UuidId, runs: Runs) -> StreamingResponse:  # noqa: A002 - path parameter name of API-06
     """Progress of a run until it ends (ARQ-05): one event each time its status or progress changes."""
     snapshots = runs.progress(id)
 
@@ -165,7 +166,7 @@ STATUSES: dict[str, Literal["pending", "approved", "rejected"]] = {
     "rejected": "rejected",
     "discarded": "rejected",
 }
-ProposalId = Annotated[str, Path(alias="id")]
+ProposalId = UuidAliasId
 
 
 def _proposal(row: m.CalibrationProposal) -> CalibrationProposal:
@@ -254,6 +255,6 @@ def notification_events(
     status_code=202,
     dependencies=[guard("POST", "/api/notifications/events/{id}/retry")],
 )
-def retry_event(id: str, events: Events) -> NotificationEventRow:  # noqa: A002
+def retry_event(id: UuidId, events: Events) -> NotificationEventRow:  # noqa: A002
     """Put an event in error back in the queue with a fresh attempt budget."""
     return events.retry(id)
