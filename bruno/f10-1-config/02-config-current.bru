@@ -1,0 +1,23 @@
+meta {
+  name: config-current
+  type: http
+  seq: 2
+}
+
+get {
+  url: {{baseUrl}}/api/config
+  body: none
+  auth: bearer
+}
+
+auth:bearer {
+  token: {{token}}
+}
+
+assert {
+  res.status: eq 200
+}
+
+docs {
+  Current values and version. Manual flow: read the version, then PUT /api/config with expected_version.
+}

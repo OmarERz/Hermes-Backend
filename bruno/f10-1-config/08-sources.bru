@@ -1,0 +1,23 @@
+meta {
+  name: sources
+  type: http
+  seq: 8
+}
+
+get {
+  url: {{baseUrl}}/api/sources
+  body: none
+  auth: bearer
+}
+
+auth:bearer {
+  token: {{token}}
+}
+
+assert {
+  res.status: eq 200
+}
+
+docs {
+  Sources with level, health and last capture. Manual flow: POST a feed (enters as N4), PATCH active or level.
+}

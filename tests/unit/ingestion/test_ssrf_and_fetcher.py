@@ -164,3 +164,9 @@ def test_initial_private_target_is_refused_before_any_request() -> None:
     with pytest.raises(FetchError, match="Refused target"):
         make_fetcher(web).get("https://10.1.2.3/feed")
     assert web.requests == []
+
+
+@pytest.mark.parametrize("url", ["https:// \u0087q\u00b6", "https://bad\u0087host.example"])
+def test_host_that_is_not_a_valid_name_is_refused_by_the_system_resolver(url: str) -> None:
+    with pytest.raises(UnsafeUrlError, match="not a valid name"):
+        validate_public_url(url)

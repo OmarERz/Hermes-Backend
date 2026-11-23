@@ -75,6 +75,30 @@ def test_feedback_comment_limit() -> None:
         FeedbackInput.model_validate(data)
 
 
+@pytest.mark.parametrize("ticket", [None, "123", "123456789012"])
+def test_feedback_ticket_is_optional_and_numeric(ticket: str | None) -> None:
+    base = load(FIXTURES / "feedback.json")
+    assert "ticket_itop_id" not in base  # the field is optional: existing payloads stay valid
+    data = base if ticket is None else {**base, "ticket_itop_id": ticket}
+    assert validator("feedback.schema.json").is_valid(data)
+    assert FeedbackInput.model_validate(data).ticket_itop_id == ticket
+    assert validator("feedback.schema.json").is_valid({**base, "ticket_itop_id": None})
+
+
+def test_an_empty_feedback_ticket_counts_as_absent() -> None:
+    data = {**load(FIXTURES / "feedback.json"), "ticket_itop_id": ""}  # event sent before iTop created the ticket
+    assert validator("feedback.schema.json").is_valid(data)
+    assert FeedbackInput.model_validate(data).ticket_itop_id is None
+
+
+@pytest.mark.parametrize("ticket", ["R-000123", "1234567890123", " 12", 123])
+def test_feedback_ticket_rejects_non_ids(ticket: object) -> None:
+    data = {**load(FIXTURES / "feedback.json"), "ticket_itop_id": ticket}
+    assert not validator("feedback.schema.json").is_valid(data)
+    with pytest.raises(ValidationError):
+        FeedbackInput.model_validate(data)
+
+
 @pytest.mark.parametrize("event_type", EVENT_TYPES)
 def test_log_consumer_logs_one_line_without_personal_data(event_type: str, caplog: pytest.LogCaptureFixture) -> None:
     event = NotificationEvent.model_validate(load(FIXTURES / f"{event_type}.json"))
