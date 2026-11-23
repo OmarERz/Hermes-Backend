@@ -22,7 +22,6 @@ from core.vulndata.http import JsonSource, SourceRefusedError, SourceUnavailable
 from core.vulndata.records import NVD_CPE
 
 CPE_URL: Final = "https://services.nvd.nist.gov/rest/json/cpes/2.0"
-CPE_SPLIT: Final = re.compile(r"(?<!\\):")
 TOKEN: Final = re.compile(r"[a-z0-9]+")
 MAX_QUERY: Final = 100
 FIRST_PRINTABLE: Final = 32
@@ -66,8 +65,30 @@ def cpe_uri(vendor: str, product: str) -> str:
     return f"cpe:2.3:a:{escape(vendor)}:{escape(product)}:*:*:*:*:*:*:*:*"
 
 
+def _split_fields(name: str) -> list[str]:
+    """The fields of a CPE name: a backslash escapes the next character, so `\\:` stays inside its field and the
+    colon after an escaped backslash (`\\\\:`) ends it."""
+    parts: list[str] = []
+    current: list[str] = []
+    escaped = False
+    for char in name:
+        if escaped:
+            current.append(char)
+            escaped = False
+        elif char == "\\":
+            current.append(char)
+            escaped = True
+        elif char == ":":
+            parts.append("".join(current))
+            current = []
+        else:
+            current.append(char)
+    parts.append("".join(current))
+    return parts
+
+
 def parse_cpe_name(name: str) -> tuple[str, str] | None:
-    parts = CPE_SPLIT.split(name)
+    parts = _split_fields(name)
     if len(parts) < CPE_FIELDS or parts[:2] != ["cpe", "2.3"] or parts[2] not in {"a", "o"}:
         return None
     vendor, product = (re.sub(r"\\(.)", r"\1", p, flags=re.DOTALL) for p in parts[3:5])
