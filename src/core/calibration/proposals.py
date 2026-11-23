@@ -27,7 +27,8 @@ from core.calibration.weights import WINDOW_DAYS, Candidate, best_candidate, loa
 from core.configuration import service
 from core.configuration.errors import ConflictError, ForbiddenParameterError, NotFoundError, Problem
 from core.db import models as m
-from core.ingestion.sources import SourceRuleError, set_trust_tier
+from core.ingestion.sources import SourceRuleError, change_trust_tier
+from core.scoring.engine import FACTORS
 from core.scoring.formula_repo import load_active_formula
 
 WEEK: Final = timedelta(days=7)
@@ -55,7 +56,9 @@ def _blocked_keys(session: Session, now: datetime, settings: CalibrationSettings
         ),
         {"since": cooldown_since, "today": now.date()},
     )
-    return frozenset(row[0] for row in rows)
+    keys = frozenset(row[0] for row in rows)
+    # A weight change rescales every other weight, so the weights count as one parameter for cooldown and blocks.
+    return keys | frozenset(f"weights.{f}" for f in FACTORS) if any(k.startswith("weights.") for k in keys) else keys
 
 
 def _weight_proposal(
@@ -218,7 +221,10 @@ def _apply_weights(session: Session, row: m.CalibrationProposal, who: Decider) -
         raise ConflictError(
             "La fórmula cambió desde que se hizo la propuesta; ya no aplica.", (Problem("path.id", "stale_proposal"),)
         )
-    actor = service.Actor(who.user_id, "admin", who.now)
+    user = session.get(m.AppUser, who.user_id) if who.user_id is not None else None
+    if user is None or not user.active or user.role != "admin":  # the route checks it too; the core does not trust it
+        raise ForbiddenParameterError("No tienes permiso para este cambio.", (Problem("path.id", "requires_admin"),))
+    actor = service.Actor(who.user_id, user.role, who.now, origin="mode4")
     service.update(session, actor, service.current_version(session), {k: str(v) for k, v in row.proposed_value.items()})
     version_id = session.scalar(select(m.FormulaVersion.id).where(m.FormulaVersion.status == "active"))
     if version_id is None:
@@ -237,7 +243,7 @@ def _apply_source(session: Session, row: m.CalibrationProposal, who: Decider) ->
             (Problem("path.id", "stale_proposal"),),
         )
     try:
-        set_trust_tier(session, source.id, str(row.proposed_value["trust_tier"]), who.user_id, who.now)
+        change_trust_tier(session, source.id, str(row.proposed_value["trust_tier"]), who.user_id, who.now)
     except SourceRuleError as error:
         raise ForbiddenParameterError(str(error), (Problem("path.id", "source_rule"),)) from None
 

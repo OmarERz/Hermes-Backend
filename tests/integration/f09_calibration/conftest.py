@@ -1,4 +1,4 @@
-"""A migrated database per test for the vulnerability loaders."""
+"""A migrated database per test for the calibration tests."""
 
 from __future__ import annotations
 

@@ -18,7 +18,8 @@ from sqlalchemy.orm import Session, sessionmaker
 from api.app import create_app
 from api.auth import CurrentUser, Role, get_current_user
 from core.calibration.claims import resolve_claims
-from core.calibration.proposals import Decider, approve, reject, run_weekly
+from core.calibration.proposals import Decider, _blocked_keys, approve, reject, run_weekly
+from core.calibration.settings import load_settings
 from core.calibration.weights import MIN_CASES, best_candidate, load_cases, shifted, ticket_final
 from core.config import Settings
 from core.configuration import formula_store
@@ -421,7 +422,7 @@ def test_approving_a_weight_proposal_creates_a_formula_version_and_audits_it(wor
     assert after["P"] > before["P"] and sum(after.values()) == 1
     assert rows(world, "SELECT version_no, status, origin FROM formula_version ORDER BY version_no") == [
         (1, "superseded", "seed"),
-        (2, "active", "frontend"),
+        (2, "active", "mode4"),
     ]
     applied = rows(
         world, "SELECT status, formula_version_id IS NOT NULL, decided_by IS NOT NULL FROM calibration_proposal"
@@ -473,9 +474,8 @@ def test_approving_a_source_proposal_changes_its_level_unless_it_went_stale(worl
         approve(session, proposal, decider(world))
     assert stale.value.problems[0].issue == "stale_proposal"
     run(world, "UPDATE source SET trust_tier = 'N3' WHERE code = 'good_blog'")
-    with Session(world) as session:  # a source change commits inside the rule (F2.3), so no outer transaction here
+    with Session(world) as session, session.begin():  # the level change, the status and both audits are one commit
         approve(session, proposal, decider(world))
-        session.commit()
     assert rows(world, "SELECT trust_tier FROM source WHERE code = 'good_blog'") == [("N2",)]
     assert {r[0] for r in rows(world, "SELECT action FROM audit_log")} == {"source.trust_tier", "calibration.approve"}
 
@@ -572,3 +572,12 @@ def test_a_stale_proposal_answers_409_from_the_route(client: TestClient, world: 
 
 def test_best_candidate_needs_enough_cases() -> None:
     assert best_candidate(default_formula(), [], Decimal("0.1"), frozenset()) is None
+
+
+def test_an_applied_weight_change_puts_every_weight_on_cooldown(world: Engine) -> None:
+    proposal = make_weight_proposal(world)
+    with Session(world) as session, session.begin():
+        approve(session, proposal, decider(world))
+    with Session(world) as session:
+        blocked = _blocked_keys(session, LATER + timedelta(days=2), load_settings(session))
+    assert {f"weights.{f}" for f in "SPTAD"} <= blocked

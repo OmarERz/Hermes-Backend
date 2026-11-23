@@ -103,7 +103,7 @@ def set_source_enabled(
     return source
 
 
-def set_trust_tier(
+def change_trust_tier(
     session: Session, source_id: uuid.UUID, tier: str, actor: uuid.UUID | None, now: datetime
 ) -> m.Source:
     """Only an admin changes a trust level; N1 stays reserved for the official (structural) sources."""
@@ -117,6 +117,14 @@ def set_trust_tier(
         change = Change(actor, now, "source.trust_tier", {"trust_tier": source.trust_tier}, {"trust_tier": tier})
         _audit(session, source, change)
         source.trust_tier = tier
+    return source
+
+
+def set_trust_tier(
+    session: Session, source_id: uuid.UUID, tier: str, actor: uuid.UUID | None, now: datetime
+) -> m.Source:
+    """`change_trust_tier` and its own commit, for callers that have no transaction to join."""
+    source = change_trust_tier(session, source_id, tier, actor, now)
     session.commit()
     return source
 
