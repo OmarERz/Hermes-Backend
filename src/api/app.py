@@ -61,6 +61,7 @@ def create_app(
             allow_credentials=False,
             allow_methods=["GET", "POST", "PUT", "PATCH", "DELETE"],
             allow_headers=["Authorization", "Content-Type", "Last-Event-ID"],
+            expose_headers=["X-Request-ID"],  # the front can show it in its error messages (F12.3)
             max_age=600,
         )
     app.state.cursor_signer = CursorSigner(settings.cursor_signing_key.get_secret_value())
