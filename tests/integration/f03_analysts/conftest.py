@@ -31,10 +31,12 @@ def migrated_url(postgres_url: str) -> Iterator[str]:
 
 
 @pytest.fixture
-def session(migrated_url: str) -> Iterator[Session]:
-    """Tests flush and roll back."""
+def session(migrated_url: str, monkeypatch: pytest.MonkeyPatch) -> Iterator[Session]:
+    """Tests flush and roll back: the analysts commit their read and write steps, so here a commit only flushes
+    (`test_analyst_transactions` checks the real transactions on a database of its own)."""
     engine = make_engine(migrated_url)
     with Session(engine, expire_on_commit=False) as db_session:
+        monkeypatch.setattr(db_session, "commit", db_session.flush)
         yield db_session
         db_session.rollback()
     engine.dispose()

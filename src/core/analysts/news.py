@@ -5,6 +5,12 @@ Flow: the story must be `relevant` and without an analysis; the budget must allo
 with the retry policy; an accepted output is stored as `news_analysis` and normalized into the `news_*` tables and
 `claim` so the correlation never reads inside the JSON. A failed story waits in `error_queue` (PRE-01) and the
 code still correlates it by CVE and product with reduced certainty (docs/09 §4). The analyst never receives iTop data.
+
+No transaction is open while the model answers (F12.2 #105): a read transaction loads everything the call and its
+validation need (the article, the model, which cited CVEs exist) and is committed; then the model answers; then a
+short write transaction takes the story's lock, re-checks that the story is still relevant, still has the same
+article and still has no analysis, and only then stores the result. The review is stored either way (its tokens
+were paid); a stale answer is not applied and the story is analyzed again in the next run.
 """
 
 from __future__ import annotations
@@ -23,7 +29,15 @@ from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
 from core.analysts import prompt as prompts
-from core.analysts.runner import Request, ReviewInfo, Seams, default_seams, record_review, run_analyst
+from core.analysts.runner import (
+    Request,
+    ReviewInfo,
+    RunResult,
+    Seams,
+    default_seams,
+    record_review,
+    run_analyst,
+)
 from core.correlation.keys import normalize_name, same_product
 from core.db import models as m
 from core.db.ids import new_id
@@ -32,7 +46,7 @@ from core.llm.client import LlmClient
 from core.llm.tools import ToolDefinition, default_schemas_dir, load_tools
 from core.validation.budget import BudgetConfig, can_start
 from core.validation.budget import spent_on as spent_on_day
-from core.validation.content import check_news_analysis
+from core.validation.content import check_news_analysis, cve_candidates
 from core.validation.queue import QueueRef, enqueue_failure, resolve
 from core.validation.schema import ToolSchema, validate_schema
 from core.validation.violations import Violation
@@ -67,8 +81,6 @@ SECTOR_MAP = {
 EXPLOITED = {"limited": "exploited", "active": "exploited", "mass": "exploited", "denied": "not_exploited"}
 _SLUG = re.compile(r"[^a-z0-9]+")
 
-CveExists = Callable[[str], bool]
-
 
 @dataclass(frozen=True)
 class NewsOptions:
@@ -79,9 +91,12 @@ class NewsOptions:
 @dataclass(frozen=True)
 class NewsResult:
     story_id: uuid.UUID
-    status: str  # analyzed | exists | not_relevant | no_text | budget | queued
+    status: str  # analyzed | exists | not_relevant | no_text | budget | queued | stale
     analysis_id: uuid.UUID | None = None
     reason: str | None = None
+
+
+STALE = "stale"  # the story changed while the model answered: the answer is not applied
 
 
 def _tool() -> ToolDefinition:
@@ -105,8 +120,14 @@ def _article(session: Session, story: m.Story) -> tuple[m.RawArticle, str] | Non
     return article, code or ""
 
 
-def _cve_exists(session: Session) -> CveExists:
-    return lambda cve_id: session.get(m.Cve, cve_id) is not None
+def _cve_lookup(session: Session, text: str) -> Callable[[str], bool]:
+    """VAL-03.cve_exists without a query while the model answers: the CVEs a verbatim quote of the text could name
+    are looked up once, before the call. Any other identifier fails VAL-03.cve_in_quote or the quote rule whether it
+    exists or not, so it is let through here and that rule is the one reported (the same as before #105 when the CVE
+    exists)."""
+    candidates = cve_candidates(text)
+    known = frozenset(session.scalars(select(m.Cve.id).where(m.Cve.id.in_(candidates)))) if candidates else frozenset()
+    return lambda cve: cve in known or cve not in candidates
 
 
 def _allowed(session: Session, estimate: Decimal) -> bool:
@@ -127,10 +148,39 @@ def primary_event_type(event_types: list[str]) -> str:
 def analyze_story(
     session: Session, client: LlmClient, story_id: uuid.UUID, options: NewsOptions | None = None
 ) -> NewsResult:
-    """Analyze one story. Flushes (the caller commits). Idempotent: a story with an analysis is not analyzed again."""
+    """Analyze one story. Commits twice: the read transaction before the model call (with anything the caller's
+    session already held) and the write transaction after it. Idempotent: a story with an analysis is not analyzed
+    again."""
     options = options or NewsOptions()
     now = options.now or datetime.now(UTC)
+    prepared = _prepare(session, story_id, now)
+    session.commit()  # no transaction stays open while the model answers (an early exit may have queued the story)
+    if isinstance(prepared, NewsResult):
+        return prepared
+    result = run_analyst(client, prepared.request, options.seams or default_seams())
+    outcome = _finish(session, prepared, result, now)
+    session.commit()
+    return outcome
+
+
+@dataclass(frozen=True)
+class _Prepared:
+    """What the model call and the write need, read in the first transaction (plain values, no ORM rows)."""
+
+    story_id: uuid.UUID
+    article_id: uuid.UUID
+    source_fetch_id: uuid.UUID
+    published_at: datetime
+    request: Request
+    info: ReviewInfo
+
+
+def _lock(session: Session, story_id: uuid.UUID) -> None:
     session.execute(select(func.pg_advisory_xact_lock(func.hashtextextended(f"news-analyst:{story_id}", 0))))
+
+
+def _prepare(session: Session, story_id: uuid.UUID, now: datetime) -> _Prepared | NewsResult:
+    """The read step: the checks that end without a call, then everything the call and its validation need."""
     story = session.get(m.Story, story_id)
     if story is None or story.relevance_status != "relevant":
         return NewsResult(story_id, "not_relevant")
@@ -140,15 +190,16 @@ def analyze_story(
     if found is None:
         return NewsResult(story_id, "no_text")
     article, source_code = found
-    ref = QueueRef(AGENT, story_id=story_id)
     if not _allowed(session, ESTIMATED_CALL_USD):
-        enqueue_failure(session, ref, "budget", now)
+        _lock(session, story_id)
+        enqueue_failure(session, QueueRef(AGENT, story_id=story_id), "budget", now)
         return NewsResult(story_id, "budget", reason="budget")
     schema = _schema()
     text = f"{article.title}\n{article.clean_text}"
+    exists = _cve_lookup(session, text)
 
     def validate(output: dict[str, Any]) -> list[Violation]:
-        return validate_schema(output, schema) or check_news_analysis(output, text, str(story_id), _cve_exists(session))
+        return validate_schema(output, schema) or check_news_analysis(output, text, str(story_id), exists)
 
     request = Request(
         model=str(get_setting(session, "analyst_model")),
@@ -159,13 +210,43 @@ def analyze_story(
         ),
         validate=validate,
     )
-    result = run_analyst(client, request, options.seams or default_seams())
     versions = prompts.fingerprint(prompts.NEWS_PROMPT_VERSION, prompts.NEWS_SYSTEM, schema.version, schema.hash)
-    review = record_review(session, ReviewInfo(AGENT, request, versions, str(story_id)), result, now)
+    return _Prepared(
+        story_id=story_id,
+        article_id=article.id,
+        source_fetch_id=article.source_fetch_id,
+        published_at=article.published_at,
+        request=request,
+        info=ReviewInfo(AGENT, request, versions, str(story_id)),
+    )
+
+
+def _recheck(session: Session, prepared: _Prepared) -> str | None:
+    """Under the story's lock: None when the story is as it was read, else the status that applies now."""
+    story = session.get(m.Story, prepared.story_id, populate_existing=True)
+    if story is None or story.relevance_status != "relevant":
+        return "not_relevant"
+    if session.scalar(select(m.NewsAnalysis.id).where(m.NewsAnalysis.story_id == prepared.story_id)) is not None:
+        return "exists"
+    if story.representative_article_id != prepared.article_id:
+        return STALE  # deduplication picked another article: the quotes were checked against the old one
+    return None
+
+
+def _finish(session: Session, prepared: _Prepared, result: RunResult, now: datetime) -> NewsResult:
+    """The write step: store the review (paid either way), then the analysis only if the story did not change."""
+    story_id = prepared.story_id
+    _lock(session, story_id)
+    changed = _recheck(session, prepared)
+    if changed is not None:
+        record_review(session, prepared.info, result if result.failure else replace(result, failure=STALE), now)
+        log.info("news analyst: story changed while the model answered (%s); answer not applied", changed)
+        return NewsResult(story_id, changed, reason=STALE)
+    review = record_review(session, prepared.info, result, now)
     if result.failure is not None or result.outcome is None or result.outcome.output is None:
-        enqueue_failure(session, ref, result.failure or "failed", now)
+        enqueue_failure(session, QueueRef(AGENT, story_id=story_id), result.failure or "failed", now)
         return NewsResult(story_id, "queued", reason=result.failure)
-    analysis = _store(session, _Subject(story, article, review.id, now), result.outcome.output)
+    analysis = _store(session, _Subject(prepared, review.id, now), result.outcome.output)
     for row in session.scalars(
         select(m.ErrorQueue).where(m.ErrorQueue.story_id == story_id, m.ErrorQueue.status == "pending")
     ):
@@ -175,8 +256,7 @@ def analyze_story(
 
 @dataclass(frozen=True)
 class _Subject:
-    story: m.Story
-    article: m.RawArticle
+    prepared: _Prepared
     review_id: uuid.UUID
     now: datetime
 
@@ -184,7 +264,7 @@ class _Subject:
 def _store(session: Session, subject: _Subject, output: dict[str, Any]) -> m.NewsAnalysis:
     analysis = m.NewsAnalysis(
         id=new_id(),
-        story_id=subject.story.id,
+        story_id=subject.prepared.story_id,
         llm_review_id=subject.review_id,
         summary=output["summary"],
         event_type=primary_event_type(output["event_types"]),
@@ -193,7 +273,7 @@ def _store(session: Session, subject: _Subject, output: dict[str, Any]) -> m.New
     )
     session.add(analysis)
     session.flush()
-    _normalize(session, analysis, subject.article, output)
+    _normalize(session, analysis, subject.prepared, output)
     session.flush()
     return analysis
 
@@ -253,7 +333,7 @@ def _software_product_id(session: Session, vendor: str, product: str) -> uuid.UU
     return None
 
 
-def _normalize(session: Session, analysis: m.NewsAnalysis, article: m.RawArticle, output: dict[str, Any]) -> None:
+def _normalize(session: Session, analysis: m.NewsAnalysis, prepared: _Prepared, output: dict[str, Any]) -> None:
     for item in output["cves"]:
         if session.get(m.NewsCveMention, (analysis.id, item["cve"])) is None:
             session.add(m.NewsCveMention(analysis_id=analysis.id, cve_id=item["cve"], quote=item["quote"]))
@@ -290,12 +370,12 @@ def _normalize(session: Session, analysis: m.NewsAnalysis, article: m.RawArticle
     vector = _SLUG.sub("_", output["vector"].strip().casefold()).strip("_")
     if vector:
         session.add(m.NewsAttackVector(analysis_id=analysis.id, vector_code=vector, quote=output["vector"].strip()))
-    _claims(session, analysis, article, output)
+    _claims(session, analysis, prepared, output)
 
 
-def _claims(session: Session, analysis: m.NewsAnalysis, article: m.RawArticle, output: dict[str, Any]) -> None:
+def _claims(session: Session, analysis: m.NewsAnalysis, prepared: _Prepared, output: dict[str, Any]) -> None:
     """ANA-06: every verifiable claim is also a `claim`, so the nightly job can confirm or refute it (docs/09 §2)."""
-    source_id = session.scalar(select(m.SourceFetch.source_id).where(m.SourceFetch.id == article.source_fetch_id))
+    source_id = session.scalar(select(m.SourceFetch.source_id).where(m.SourceFetch.id == prepared.source_fetch_id))
     if source_id is None:
         return
     single = output["cves"][0]["cve"] if len(output["cves"]) == 1 else None
@@ -316,7 +396,7 @@ def _claims(session: Session, analysis: m.NewsAnalysis, article: m.RawArticle, o
                 source_id=source_id,
                 claim_type=claim_type,
                 cve_id=cve_id,
-                claimed_at=article.published_at,
+                claimed_at=prepared.published_at,
                 status="pending",
             )
         )
@@ -347,12 +427,12 @@ def pending_stories(session: Session, limit: int = 50) -> list[uuid.UUID]:
 def analyze_pending(
     session: Session, client: LlmClient, options: NewsOptions | None = None, limit: int = 50
 ) -> list[NewsResult]:
-    """Analyze the pending stories one by one; a failing story never stops the next one. Commits per story."""
+    """Analyze the pending stories one by one; a failing story never stops the next one. Commits per story (each
+    story is a read transaction and a write transaction, with the model call between them)."""
     options = options or NewsOptions()
     shared = replace(options, seams=options.seams or default_seams())  # one circuit breaker for the whole batch
     results = []
     for story_id in pending_stories(session, limit):
         results.append(analyze_story(session, client, story_id, shared))
-        session.commit()
     log.info("news analyst: %d stories, %d analyzed", len(results), sum(r.status == "analyzed" for r in results))
     return results
