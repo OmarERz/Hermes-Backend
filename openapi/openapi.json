@@ -953,7 +953,7 @@
         "examples": [
           {
             "changes": {
-              "weights.D": "0.10",
+              "weights.P": "0.25",
               "weights.S": "0.30"
             },
             "expected_version": 3
@@ -2772,7 +2772,7 @@
           {
             "changes": {
               "weights.P": "0.25",
-              "weights.S": "0.35"
+              "weights.S": "0.30"
             }
           }
         ],
@@ -10731,6 +10731,10 @@
     }
   },
   "servers": [
+    {
+      "description": "El mismo origen que sirve este documento (producción detrás del proxy)",
+      "url": "/"
+    },
     {
       "description": "Desarrollo local (Docker Compose)",
       "url": "http://127.0.0.1:8000"

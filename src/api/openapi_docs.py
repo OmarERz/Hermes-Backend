@@ -26,7 +26,10 @@ INFO_DESCRIPTION: Final = (
     "que los generadores de clientes usan como nombre de función."
 )
 CONTACT: Final = {"name": "Equipo Hermes", "email": "hermes@example.test"}  # placeholder until the team publishes one
-SERVERS: Final = [{"url": "http://127.0.0.1:8000", "description": "Desarrollo local (Docker Compose)"}]
+SERVERS: Final = [
+    {"url": "/", "description": "El mismo origen que sirve este documento (producción detrás del proxy)"},
+    {"url": "http://127.0.0.1:8000", "description": "Desarrollo local (Docker Compose)"},
+]
 
 TAGS: Final = (
     ("system", "Sistema", "Salud del servicio y usuario actual."),
@@ -729,11 +732,11 @@ OVERRIDES: Final[dict[str, str]] = {
 }
 
 EXAMPLES: Final[dict[str, list[dict[str, Any]]]] = {
-    "ConfigUpdate": [{"expected_version": 3, "changes": {"weights.S": "0.30", "weights.D": "0.10"}}],
+    "ConfigUpdate": [{"expected_version": 3, "changes": {"weights.S": "0.30", "weights.P": "0.25"}}],
     "ConfigDocument": [
         {"version": 4, "values": {"weights.S": "0.30", "dead_zone": "4", "notifications.consumer": "log"}}
     ],
-    "SimulationRequest": [{"changes": {"weights.S": "0.35", "weights.P": "0.25"}}],
+    "SimulationRequest": [{"changes": {"weights.S": "0.30", "weights.P": "0.25"}}],
     "SimulationResult": [
         {
             "changed_findings": 2,

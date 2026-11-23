@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import re
+from decimal import Decimal
 from typing import Any
 
 import pytest
@@ -14,6 +15,7 @@ from api.errors import ErrorResponse
 from api.itop_webhook import ItopWebhookCall, WebhookAccepted
 from api.openapi_docs import ENUMS, OPERATIONS, TAGS
 from api.routes import models as route_models
+from core.db.seeds import WEIGHTS
 from notifications_api import FeedbackResult
 
 pytestmark = pytest.mark.contract
@@ -83,7 +85,9 @@ def test_every_enum_value_is_described() -> None:
 def test_info_has_description_contact_and_a_local_server() -> None:
     info = DOCUMENT["info"]
     assert info["description"] and info["contact"]["name"]
-    assert DOCUMENT["servers"][0]["url"].startswith("http://127.0.0.1")
+    urls = [server["url"] for server in DOCUMENT["servers"]]
+    assert urls[0] == "/"  # a client that takes the first server stays on its own origin
+    assert "http://127.0.0.1:8000" in urls
 
 
 MODELS: dict[str, type[BaseModel]] = {
@@ -104,3 +108,16 @@ def test_examples_are_valid_instances_of_their_schema() -> None:
     for name, examples in with_examples.items():
         for example in examples:
             MODELS[name].model_validate(example)
+
+
+def test_formula_examples_keep_the_weights_summing_to_one() -> None:
+    schemas = DOCUMENT["components"]["schemas"]
+    for name in ("ConfigUpdate", "SimulationRequest"):
+        for example in schemas[name]["examples"]:
+            weights = {
+                key.removeprefix("weights."): Decimal(v)
+                for key, v in example["changes"].items()
+                if key.startswith("weights.")
+            }
+            total = sum({**{k: Decimal(v) for k, v in WEIGHTS.items()}, **weights}.values())
+            assert total == Decimal(1), f"{name} example weights sum to {total}"
