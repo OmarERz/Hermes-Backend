@@ -165,8 +165,8 @@ def test_the_inventory_refresh_reads_itop_outside_a_transaction(
         seen.append((reader, open_transactions(factory)))
         return "snapshot"
 
-    monkeypatch.setattr("core.pipeline.wiring.read_inventory", read)
-    monkeypatch.setattr("core.pipeline.wiring.sync_inventory", lambda _s, snapshot: f"synced {snapshot}")
+    monkeypatch.setattr("core.inventory.sync.read_inventory", read)
+    monkeypatch.setattr("core.inventory.sync.sync_inventory", lambda _s, snapshot, **_kw: f"synced {snapshot}")
     reader = object()
     assert inventory_refresh(factory, cast("Any", reader))() == "synced snapshot"
     assert seen == [(reader, 0)]
@@ -176,7 +176,7 @@ def test_the_inventory_refresh_reads_itop_outside_a_transaction(
 def test_the_inventory_refresh_frees_the_lock_on_failure_and_skips_when_busy(
     factory: sessionmaker[Session], monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    monkeypatch.setattr("core.pipeline.wiring.read_inventory", lambda _r: InventorySnapshot())
+    monkeypatch.setattr("core.inventory.sync.read_inventory", lambda _r: InventorySnapshot())
     # The real write takes the same key per transaction (re-entrant on the same connection), then refuses to
     # decommission the whole seeded inventory.
     with pytest.raises(EmptyInventoryError):
