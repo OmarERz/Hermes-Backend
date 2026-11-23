@@ -62,7 +62,7 @@ class Failure(StrEnum):
     BUDGET = "budget"
     LADDER = "ladder"
     LIMIT = "limit"
-    STALE = "stale"  # mode 2: what an accepted alert rests on changed while the model answered (F12.2 #105)
+    STALE = "stale"  # what the answer rests on changed while the model answered: never applied (F12.2 #105)
 
 
 class ToolCaller(Protocol):

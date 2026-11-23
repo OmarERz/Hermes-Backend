@@ -48,6 +48,7 @@ AGENT = "judge"
 # LIMIT reaches the queue only from mode 2, where hitting the limits means no decision; a mode 1 review that hit
 # them still answered (partial_review with its accepted reasons) and its callers pass no failure.
 # STALE: a mode 2 alert whose inventory facts changed while the model answered is not raised and waits for a retry.
+# A stale mode 1 review is different (its package is outdated): `JudgeService.store` never queues it.
 QUEUED_FAILURES = frozenset(
     {Failure.TRANSPORT, Failure.REQUEST, Failure.FORMAT, Failure.BUDGET, Failure.LIMIT, Failure.STALE}
 )

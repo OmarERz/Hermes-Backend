@@ -115,21 +115,31 @@ class JudgeService:
         """Store an evaluation: the first review carries the final status, the blind one links to it (A-2); the
         package is queued for a later run when the result fell back to the base (PRE-01).
 
-        `stale`: the package changed while the model answered, so the review is never applied (F12.2 #105). It is
-        stored as `no_judge_review` with failure `stale` and no mitigation, its accepted reasons do not count as
-        used (MET-07), and the queue of that outdated package is left alone."""
-        first = result.first
+        `stale`: the package changed while the model answered, so the review is never applied (F12.2 #105). Both
+        reviews are stored as `no_judge_review` without a mitigation draft, so their accepted reasons do not count as
+        used (MET-07). The failure says `stale` when the judge answered and keeps the real cause when it did not
+        (L13). Nothing is queued for that outdated package; an answer still resolves an earlier failure of it."""
+        first, second = result.first, result.second
+        answered = stale and result.adjustment is not None  # a stale review the judge did answer
         if stale:
-            result = JudgeResult(ReviewStatus.NO_JUDGE_REVIEW, None, {}, first, result.second)
-            first = replace(first, failure=Failure.STALE, mitigation=MitigationResult.absent())
+            failure = Failure.STALE if answered else result.failure
+            first = replace(first, failure=failure, mitigation=MitigationResult.absent())
+            second = replace(second, mitigation=MitigationResult.absent()) if second is not None else None
+            result = JudgeResult(ReviewStatus.NO_JUDGE_REVIEW, None, {}, first, second)
         elif result.status is ReviewStatus.NO_JUDGE_REVIEW and first.adjustment is not None:
             # the blind review failed: final = base, so no drafted mitigation is kept (JUE-MIT-09); record the cause
             first = replace(first, failure=result.failure, mitigation=MitigationResult.absent())
         first_id = save_review(session, first, target, status=result.status)
         second_id: uuid.UUID | None = None
-        if result.second is not None:
-            second_id = save_review(session, result.second, target, second_review_of=first_id)
-        queued = False if stale else sync_error_queue(session, target.review_package_id, result.failure, target.now)
+        if second is not None:
+            unapplied = ReviewStatus.NO_JUDGE_REVIEW if stale else None
+            second_id = save_review(session, second, target, status=unapplied, second_review_of=first_id)
+        if stale:
+            queued = False
+            if answered:  # resolves a pending entry of the same package, never creates one
+                sync_error_queue(session, target.review_package_id, None, target.now)
+        else:
+            queued = sync_error_queue(session, target.review_package_id, result.failure, target.now)
         return StoredJudgeResult(result, first_id, second_id, queued)
 
 
