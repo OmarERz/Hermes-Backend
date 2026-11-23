@@ -6,7 +6,7 @@ import html
 import re
 
 import pytest
-from hypothesis import given
+from hypothesis import assume, given
 from hypothesis import strategies as st
 
 from core.itop.rich_text import (
@@ -21,11 +21,12 @@ from core.itop.rich_text import (
 
 # iTop's wiki reference syntax (WIKI_OBJECT_REGEXP of core/attributedef.class.inc.php, 3.2.2, ungreedy).
 WIKI_OBJECT = re.compile(r"\[\[(.+?):(.+?)(\|(.+?))?\]\]")
+WORD_JOINER = chr(0x2060)
 
 
 def decode(encoded: str) -> str:
     """What a person reads in iTop: the text with the line breaks and the wiki breaks undone."""
-    return html.unescape(encoded.replace("<span></span>", "").replace("<br>", "\n"))
+    return html.unescape(re.sub(rf"\[{WORD_JOINER}(?=\[)", "[", encoded).replace("<br>", "\n"))
 
 
 def test_markup_is_escaped_and_line_breaks_become_br() -> None:
@@ -97,7 +98,13 @@ def test_a_single_line_that_cannot_fit_is_refused() -> None:
 
 @given(st.text())
 def test_no_tag_or_wiki_reference_survives_and_the_text_round_trips(text: str) -> None:
+    assume(WORD_JOINER not in text)  # the separator itself (a text holding it would not round-trip exactly)
     encoded = plain_text_to_html(text)
-    assert "<" not in encoded.replace("<br>", "").replace("<span></span>", "")
+    assert "<" not in encoded.replace("<br>", "")
     assert '"' not in encoded and "'" not in encoded and "[[" not in encoded
     assert decode(encoded) == text.replace("\r\n", "\n").replace("\r", "\n")
+
+
+def test_the_wiki_break_is_a_word_joiner_not_markup() -> None:
+    """F12.3 (#139): a character, so a person editing the ticket in iTop's rich-text editor cannot drop it."""
+    assert plain_text_to_html("[[Person:x]]") == f"[{WORD_JOINER}[Person:x]]"
