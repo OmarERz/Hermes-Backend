@@ -73,7 +73,9 @@ x-backend: &backend
 
 services:
   db:
-    image: pgvector/pgvector:pg18@sha256:38681dc6eaf55308e2a4c6de392d131652dcfac70e1263e35cd9b5ea3fe39782
+    # The pinned pgvector image without gosu (docker/db/Dockerfile, F12.1).
+    build: docker/db
+    image: hermes-db:local
     environment:
       POSTGRES_DB: hermes
       POSTGRES_USER: hermes

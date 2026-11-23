@@ -10,7 +10,9 @@ from typing import Annotated, Literal
 
 from fastapi import APIRouter, Path
 from fastapi.responses import StreamingResponse
+from sqlalchemy import select
 
+from api.auth import CurrentUser
 from api.errors import ApiError, ErrorDetail
 from api.pagination import PAGINATED_RESPONSES, Page, PageQuery, Signer, paginate
 from api.routes._auth import guard
@@ -32,6 +34,7 @@ from api.routes.models import (
 from core.calibration import proposals as calibration
 from core.configuration.errors import ConfigError
 from core.db import models as m
+from core.db.models import AppUser, AuditLog
 from core.stix.export import ExportOptions, ExportScope, StixExportError, export_bundle
 
 router = APIRouter(tags=["operations"])
@@ -84,8 +87,13 @@ def run_events(id: str, runs: Runs) -> StreamingResponse:  # noqa: A002 - path p
     return StreamingResponse(stream(), media_type="text/event-stream")
 
 
-@router.post("/api/stix/export", dependencies=[guard("POST", "/api/stix/export")])
-def stix_export(request: StixExportRequest, session: SessionDep) -> StixBundle:
+_STIX_GUARD = guard("POST", "/api/stix/export")
+
+
+@router.post("/api/stix/export")
+def stix_export(
+    request: StixExportRequest, session: SessionDep, user: Annotated[CurrentUser, _STIX_GUARD]
+) -> StixBundle:
     """Exports a STIX 2.1 bundle with TLP marking (STX-03, STX-06). The scope needs its identifier or range."""
     missing = {
         "vulnerability": request.vulnerability_id is None,
@@ -115,7 +123,30 @@ def stix_export(request: StixExportRequest, session: SessionDep) -> StixBundle:
             "No se pudo exportar con los datos del alcance.",
             [ErrorDetail(field="body.scope", issue="invalid_scope_data")],
         ) from None
-    return StixBundle.model_validate(result.bundle)
+    bundle = StixBundle.model_validate(result.bundle)
+    # Who exported what leaves the system, and with which marking (ASVS V16; pendientes F1.5 #50).
+    session.add(
+        AuditLog(
+            app_user_id=session.scalar(select(AppUser.id).where(AppUser.firebase_uid == user.uid)),
+            action="stix_exported",
+            entity_type="stix_bundle",
+            entity_id=str(result.bundle.get("id", "")),
+            before=None,
+            after={
+                "scope": request.scope,
+                "vulnerability_id": request.vulnerability_id,
+                "run_id": request.run_id,
+                "date_from": request.date_from,
+                "date_to": request.date_to,
+                "exclude_ultra_classified": request.exclude_ultra_classified,
+                "tlp": result.tlp,
+                "objects": len(result.bundle.get("objects", [])),
+            },
+            created_at=datetime.now(UTC),
+        )
+    )
+    session.commit()
+    return bundle
 
 
 KINDS: dict[str, Literal["source_level", "reason_threshold", "formula_weight"]] = {

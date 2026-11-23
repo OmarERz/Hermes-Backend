@@ -98,6 +98,10 @@ jobs:
           scan-ref: .
           severity: HIGH,CRITICAL
           exit-code: "1"
+          # docker/itop/Dockerfile builds the iTop TEST instance only (compose.itop.yaml, never deployed): its base
+          # image runs Apache and MariaDB as root, so it cannot have a non-root USER (DS-0002). Skipped by file
+          # only, a decision of the user recorded in docs/02 §4 (F12.1); every other Dockerfile is still checked.
+          skip-files: docker/itop/Dockerfile
       # Every scan runs even if an earlier one fails, so the job reports all findings (docs/14 §4).
       - name: Build the backend image
         if: ${{ !cancelled() }}
@@ -105,13 +109,9 @@ jobs:
       - name: Build the auth emulator image
         if: ${{ !cancelled() }}
         run: docker build -t hermes-auth-emulator:scan docker/auth-emulator
-      - name: Resolve the database image from compose.yaml
-        id: db_image
+      - name: Build the database image (pinned pgvector without gosu, docker/db)
         if: ${{ !cancelled() }}
-        run: |
-          image=$(docker compose config --no-interpolate --format json | jq -r '.services.db.image')
-          [ -n "$image" ] && [ "$image" != "null" ] || { echo "::error::no image for the db service"; exit 1; }
-          echo "ref=$image" >> "$GITHUB_OUTPUT"
+        run: docker build -t hermes-db:scan docker/db
       - name: Trivy image scan (backend)
         if: ${{ !cancelled() }}
         uses: aquasecurity/trivy-action@ed142fd0673e97e23eac54620cfb913e5ce36c25 # v0.36.0
@@ -120,6 +120,9 @@ jobs:
           image-ref: hermes-backend:scan
           severity: HIGH,CRITICAL
           exit-code: "1"
+          # Fail only when a fix exists (user decision, docs/02 §4, F12.1). Unfixed OS findings of the Debian base
+          # images are still printed in the job log and documented as accepted risk (docs/seguridad/asvs-resumen.md).
+          ignore-unfixed: true
       - name: Trivy image scan (auth emulator)
         if: ${{ !cancelled() }}
         uses: aquasecurity/trivy-action@ed142fd0673e97e23eac54620cfb913e5ce36c25 # v0.36.0
@@ -128,14 +131,28 @@ jobs:
           image-ref: hermes-auth-emulator:scan
           severity: HIGH,CRITICAL
           exit-code: "1"
-      - name: Trivy image scan (pgvector database)
-        if: ${{ !cancelled() && steps.db_image.outputs.ref != '' }}
+          # Fail only when a fix exists (user decision, docs/02 §4, F12.1). Unfixed OS findings of the Debian base
+          # images are still printed in the job log and documented as accepted risk (docs/seguridad/asvs-resumen.md).
+          ignore-unfixed: true
+      - name: Trivy image scan (database)
+        if: ${{ !cancelled() }}
         uses: aquasecurity/trivy-action@ed142fd0673e97e23eac54620cfb913e5ce36c25 # v0.36.0
         with:
           scan-type: image
-          image-ref: ${{ steps.db_image.outputs.ref }}
+          image-ref: hermes-db:scan
           severity: HIGH,CRITICAL
           exit-code: "1"
+          ignore-unfixed: true
+      # The steps above fail only on fixable findings; this one keeps the unfixed ones reported in the log
+      # (accepted risk, docs/seguridad/asvs-resumen.md) and never fails the job.
+      - name: Trivy report of unfixed findings (informational)
+        if: ${{ !cancelled() }}
+        run: |
+          for image in hermes-backend:scan hermes-auth-emulator:scan hermes-db:scan; do
+            echo "::group::Unfixed HIGH/CRITICAL in $image"
+            trivy image --severity HIGH,CRITICAL --exit-code 0 --no-progress "$image"
+            echo "::endgroup::"
+          done
 
   zap:
     name: zap
