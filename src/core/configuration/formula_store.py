@@ -197,6 +197,7 @@ class NewVersion:
     author: uuid.UUID | None
     now: datetime
     note: str
+    origin: str = "frontend"  # frontend | mode4
 
 
 def save_new_version(session: Session, source_id: uuid.UUID, formula: Formula, meta: NewVersion) -> m.FormulaVersion:
@@ -213,7 +214,7 @@ def save_new_version(session: Session, source_id: uuid.UUID, formula: Formula, m
         version_no=next_no,
         status="draft",
         based_on_id=source.id,
-        origin="frontend",
+        origin=meta.origin,
         s_without_cvss=formula.s_without_cvss,
         kev_exposed_floor=formula.kev_exposed_floor,
         hysteresis_margin=source.hysteresis_margin,

@@ -1,9 +1,12 @@
 """Admin CLI for local development and tests (docs/12 F0.7, D-059).
 
     python -m core.devtools.admin seed --scenario empty|demo|edge
+    python -m core.devtools.admin bootstrap
     python -m core.devtools.admin events [--limit N] [--status pending|delivered|failed] [--type new_ticket ...]
 
-`seed` loads a seed scenario as the migrator role (it owns the catalogs): MIGRATION_DATABASE_URL plus the
+`bootstrap` is what the compose stack runs after the migrations (F-01): it loads the factory values (the `empty`
+scenario) only when there is no formula version, and syncs the default news sources; running it again changes
+nothing. `seed` loads a seed scenario as the migrator role (it owns the catalogs): MIGRATION_DATABASE_URL plus the
 migrator_db_password secret. `events` lists the latest notification events as JSON lines, read as the app role:
 DATABASE_URL plus the pgpassword secret. Passwords never go on the command line.
 """
@@ -15,6 +18,7 @@ import json
 import os
 import sys
 from collections.abc import Sequence
+from datetime import UTC, datetime
 from typing import Any
 
 from sqlalchemy import select
@@ -24,6 +28,7 @@ from core.config import read_secret
 from core.db import models as m
 from core.db.seeds import SCENARIOS, seed
 from core.db.session import make_engine, with_password
+from core.ingestion.catalog import sync_default_sources
 
 MAX_EVENTS = 500
 EVENT_STATUSES = ("pending", "delivered", "failed")
@@ -48,6 +53,20 @@ def run_seed(url: str, scenario: str) -> None:
             seed(session, scenario)
     finally:
         engine.dispose()
+
+
+def run_bootstrap(url: str, now: datetime | None = None) -> str:
+    """Factory values on a fresh database and the default sources; idempotent. Returns what it did."""
+    engine = make_engine(url)
+    try:
+        with Session(engine) as session, session.begin():
+            fresh = session.scalar(select(m.FormulaVersion.id).limit(1)) is None
+            if fresh:
+                seed(session, "empty")
+            added = sync_default_sources(session, now or datetime.now(UTC))
+    finally:
+        engine.dispose()
+    return f"factory values {'loaded' if fresh else 'already present'}; {len(added)} source(s) added"
 
 
 def list_events(url: str, *, limit: int, status: str | None, event_type: str | None) -> list[dict[str, Any]]:
@@ -88,6 +107,7 @@ def main(argv: Sequence[str] | None = None) -> int:
     commands = parser.add_subparsers(dest="command", required=True)
     seed_cmd = commands.add_parser("seed", help="load a seed scenario")
     seed_cmd.add_argument("--scenario", choices=SCENARIOS, required=True)
+    commands.add_parser("bootstrap", help="load the factory values and default sources if missing (idempotent)")
     events_cmd = commands.add_parser("events", help="list the latest notification events")
     events_cmd.add_argument("--limit", type=_positive, default=20)
     events_cmd.add_argument("--status", choices=EVENT_STATUSES)
@@ -97,6 +117,8 @@ def main(argv: Sequence[str] | None = None) -> int:
         if args.command == "seed":
             run_seed(_url("MIGRATION_DATABASE_URL", "migrator_db_password"), args.scenario)
             sys.stdout.write(f"seeded scenario {args.scenario}\n")
+        elif args.command == "bootstrap":
+            sys.stdout.write(run_bootstrap(_url("MIGRATION_DATABASE_URL", "migrator_db_password")) + "\n")
         else:
             rows = list_events(
                 _url("DATABASE_URL", "pgpassword"), limit=args.limit, status=args.status, event_type=args.event_type

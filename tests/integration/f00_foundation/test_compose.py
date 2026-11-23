@@ -95,6 +95,7 @@ def test_all_services_running(stack: dict[str, str]) -> None:
         "auth-emulator": "running",
         "provision": "exited",
         "migrate": "exited",
+        "bootstrap": "exited",
         "api": "running",
         "workers": "running",
     }
@@ -104,6 +105,28 @@ def test_migrations_ran_as_migrator(stack: dict[str, str]) -> None:
     query = "SELECT tableowner, count(*) FROM pg_tables WHERE schemaname = 'public' GROUP BY 1"
     out = compose(stack, "exec", "-T", "db", "psql", "-U", "hermes", "-d", "hermes", "-tAc", query)
     assert out.stdout.strip() == "migrator|76"  # 75 model tables + alembic_version
+
+
+def test_factory_values_were_loaded_once_by_the_bootstrap(stack: dict[str, str]) -> None:
+    query = "SELECT (SELECT count(*) FROM formula_version WHERE status = 'active'), (SELECT count(*) FROM source)"
+    out = compose(stack, "exec", "-T", "db", "psql", "-U", "hermes", "-d", "hermes", "-tAc", query)
+    active, sources = out.stdout.strip().split("|")
+    assert active == "1" and int(sources) > 0
+    again = compose(stack, "run", "--rm", "bootstrap")  # a second start changes nothing
+    assert again.returncode == 0 and "already present" in again.stdout
+
+
+def test_the_demo_profile_runs_one_full_cycle(stack: dict[str, str]) -> None:
+    demo = compose(stack, "--profile", "demo", "run", "--rm", "demo")
+    assert demo.returncode == 0, demo.stderr
+    assert "demo ready" in demo.stdout and "2 assessment(s)" in demo.stdout
+    query = (
+        "SELECT (SELECT count(*) FROM ticket), (SELECT count(*) FROM itop_outbox), "
+        "(SELECT count(*) FROM notification_event)"
+    )
+    out = compose(stack, "exec", "-T", "db", "psql", "-U", "hermes", "-d", "hermes", "-tAc", query)
+    tickets, outbox, events = (int(n) for n in out.stdout.strip().split("|"))
+    assert tickets >= 2 and outbox >= tickets and events >= tickets
 
 
 def test_api_connects_as_the_app_role(stack: dict[str, str]) -> None:
