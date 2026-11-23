@@ -5,7 +5,7 @@ meta {
 }
 
 get {
-  url: {{baseUrl}}/api/sources
+  url: {{baseUrl}}/api/sources?limit=1
   body: none
   auth: bearer
 }
@@ -16,8 +16,11 @@ auth:bearer {
 
 assert {
   res.status: eq 200
+  res.body.items.length: eq 1
+  res.body.next_cursor: isString
 }
 
 docs {
-  Sources with level and health (FRO-16).
+  Sources with level and health (FRO-16). The factory values load several sources, so with limit=1 the first page
+  carries next_cursor (cursor pagination, D-068).
 }
