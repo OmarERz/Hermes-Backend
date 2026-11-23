@@ -11,7 +11,7 @@ from __future__ import annotations
 import logging
 import os
 from collections.abc import Callable
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from datetime import UTC, datetime
 from decimal import Decimal
 from typing import Any, Protocol
@@ -25,6 +25,7 @@ from core.analysts.runner import Request, ReviewInfo, Seams, default_seams, reco
 from core.db import models as m
 from core.db.ids import new_id
 from core.ingestion.article import extract_article
+from core.ingestion.cleaning import clean_html, clean_plain
 from core.ingestion.fetcher import ARTICLE_CONTENT_TYPES, Fetcher, FetchError
 from core.ingestion.settings import get_decimal, get_setting
 from core.llm.client import LlmClient
@@ -33,7 +34,7 @@ from core.scoring.cvss import base_score
 from core.validation.budget import BudgetConfig, can_start
 from core.validation.budget import spent_on as spent_on_day
 from core.validation.content import check_cve_analysis
-from core.validation.queue import QueueRef, enqueue_failure
+from core.validation.queue import QueueRef, enqueue_failure, resolve
 from core.validation.schema import ToolSchema, validate_schema
 from core.validation.violations import Violation
 
@@ -103,18 +104,36 @@ def _tool() -> ToolDefinition:
     return load_tools()[TOOL_NAME]
 
 
-def _material(session: Session, cve: m.Cve, advisory: str | None) -> str:
+@dataclass(frozen=True)
+class Material:
+    """What the model receives, and the part of it a quote may come from (description and advisory, as sent)."""
+
+    text: str
+    quotable: str
+
+
+def _material(session: Session, cve: m.Cve, advisory: str | None) -> Material:
+    """External text is cleaned first (SEG-01). Order: header, description, advisory, then references, so that the
+    cut at the context limit falls on the references and never on text a quote may cite."""
     cwes = sorted(session.scalars(select(m.CveCwe.cwe_id).where(m.CveCwe.cve_id == cve.id)))
-    lines = [f"CVE: {cve.id}", f"CVSS: {cve.cvss_score if cve.cvss_score is not None else 'ninguno'}"]
-    lines.append(f"CWE: {', '.join(cwes) if cwes else 'ninguno'}")
-    lines.append(f"Descripción: {cve.description or ''}")
+    header = "\n".join(
+        [
+            f"CVE: {cve.id}",
+            f"CVSS: {cve.cvss_score if cve.cvss_score is not None else 'ninguno'}",
+            f"CWE: {', '.join(clean_plain(c).text for c in cwes) if cwes else 'ninguno'}",
+        ]
+    )
+    description = clean_html(cve.description or "").text
+    body = description
+    if advisory:
+        body += "\nAviso del fabricante:\n" + clean_html(advisory).text
+    room = max(0, prompts.MAX_ARTICLE_CHARS - len(header) - 1)
+    lines = [header, body[:room]]
     references = session.scalars(select(m.CveReference).where(m.CveReference.cve_id == cve.id).limit(MAX_REFERENCES))
     for ref in references:
         tags = sorted(session.scalars(select(m.CveReferenceTag.tag).where(m.CveReferenceTag.reference_id == ref.id)))
-        lines.append(f"Referencia: {ref.url} [{', '.join(tags)}]")
-    if advisory:
-        lines.append(f"Aviso del fabricante:\n{advisory}")
-    return "\n".join(lines)
+        lines.append(f"Referencia: {clean_plain(ref.url).text} [{', '.join(clean_plain(t).text for t in tags)}]")
+    return Material("\n".join(lines), body[:room])
 
 
 def _advisory_urls(session: Session, cve_id: str) -> list[str]:
@@ -128,12 +147,12 @@ def _advisory_urls(session: Session, cve_id: str) -> list[str]:
 
 
 def _violations(
-    output: dict[str, Any], cve: m.Cve, material: str, schema: ToolSchema, exists: Callable[[str], bool]
+    output: dict[str, Any], cve: m.Cve, quotable: str, schema: ToolSchema, exists: Callable[[str], bool]
 ) -> list[Violation]:
     found = validate_schema(output, schema)
     if found:
         return found
-    found = check_cve_analysis(output, cve.id, material, exists)
+    found = check_cve_analysis(output, cve.id, quotable, exists)
     vector = output["inferred_cvss_vector"]
     if vector and cve.cvss_score is not None:
         found.append(
@@ -171,8 +190,10 @@ def analyze_cve(session: Session, client: LlmClient, cve_id: str, options: CveOp
         model=str(get_setting(session, "analyst_model")),
         tool=_tool(),
         system=prompts.CVE_SYSTEM,
-        user=prompts.cve_user_message(cve_id, material),
-        validate=lambda output: _violations(output, cve, material, schema, lambda c: session.get(m.Cve, c) is not None),
+        user=prompts.cve_user_message(cve_id, material.text),
+        validate=lambda output: _violations(
+            output, cve, material.quotable, schema, lambda c: session.get(m.Cve, c) is not None
+        ),
     )
     result = run_analyst(client, request, options.seams or default_seams())
     versions = prompts.fingerprint(prompts.CVE_PROMPT_VERSION, prompts.CVE_SYSTEM, schema.version, schema.hash)
@@ -180,6 +201,12 @@ def analyze_cve(session: Session, client: LlmClient, cve_id: str, options: CveOp
     if result.failure is not None or result.outcome is None or result.outcome.output is None:
         enqueue_failure(session, ref, result.failure or "failed", now)
         return CveResult(cve_id, "queued", reason=result.failure)
+    for row in session.scalars(
+        select(m.ErrorQueue).where(
+            m.ErrorQueue.cve_id == cve_id, m.ErrorQueue.component == AGENT, m.ErrorQueue.status == "pending"
+        )
+    ):
+        resolve(session, row)  # a retry that works closes its queue item in the same transaction
     output = result.outcome.output
     vector = output["inferred_cvss_vector"] or None
     analysis = m.CveAnalysis(
@@ -201,6 +228,8 @@ def pending_cves(session: Session, limit: int = 50) -> list[str]:
         text(
             "SELECT g.cve_id FROM finding_group g JOIN finding_group_status s ON s.finding_group_id = g.id "
             "AND s.status = 'active' WHERE NOT EXISTS (SELECT 1 FROM cve_analysis a WHERE a.cve_id = g.cve_id) "
+            "AND NOT EXISTS (SELECT 1 FROM error_queue q WHERE q.cve_id = g.cve_id AND q.component = 'cve_analyst' "
+            "AND q.status = 'pending' AND q.next_attempt_at IS NULL) "
             "GROUP BY g.cve_id ORDER BY min(g.created_at), g.cve_id LIMIT :n"
         ),
         {"n": limit},
@@ -212,8 +241,10 @@ def analyze_pending_cves(
     session: Session, client: LlmClient, options: CveOptions | None = None, limit: int = 50
 ) -> list[CveResult]:
     """Analyze the pending CVEs one by one; a failing CVE never stops the next one. Commits per CVE."""
+    options = options or CveOptions()
+    shared = replace(options, seams=options.seams or default_seams())  # one circuit breaker for the whole batch
     results = []
     for cve_id in pending_cves(session, limit):
-        results.append(analyze_cve(session, client, cve_id, options))
+        results.append(analyze_cve(session, client, cve_id, shared))
         session.commit()
     return results
