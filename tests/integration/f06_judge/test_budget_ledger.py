@@ -84,7 +84,11 @@ def test_daily_budget_from_the_ledger_and_the_parameters(engine: Engine) -> None
         budget = load_daily_budget(session, PRICE, TODAY)
         assert budget.allows(critical=False)  # 3.90 + 0.015 <= 4.00
         spend(session, "0.10", datetime(2026, 11, 22, 11, 0, tzinfo=UTC))
-        assert not budget.allows(critical=False)  # read live: 4.00 + 0.015 > 4.00
+        assert budget.allows(critical=False)  # read once when loaded: no query between turns (F12.2 #105)
+        assert budget.allows(critical=False, pending_usd=Decimal("0.085"))  # the review's own spending counts
+        assert not budget.allows(critical=False, pending_usd=Decimal("0.09"))
+        budget = load_daily_budget(session, PRICE, TODAY)
+        assert not budget.allows(critical=False)  # loaded again: 4.00 + 0.015 > 4.00
         assert budget.allows(critical=True)  # the 20% reserve is for critical work
         session.execute(
             text(

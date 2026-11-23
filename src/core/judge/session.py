@@ -3,8 +3,10 @@
 One `JudgeSession` reviews one package in one independent conversation. The model answers each turn with one
 tool call; code executes it and answers with `accepted`/`rejected` plus the broken rule. Limits (JUE-02): at most
 `max_calls` tool calls and `max_rejections` rejected reasons, after which the review closes with the reasons
-accepted so far (`partial_review`). Any provider failure, or format errors beyond the retry policy, falls back to
-`final = base` with `no_judge_review` (L11, EVA-04). The judge never touches iTop or Slack (L8).
+accepted so far (`partial_review`). An answer that breaks the tool's format is retried with only the error and is
+logged in `calls` as an `error` with rule VAL-02; it does not count as a tool call. Any provider failure, or format
+errors beyond the retry policy, falls back to `final = base` with `no_judge_review` (L11, EVA-04). The judge never
+touches iTop or Slack (L8).
 """
 
 from __future__ import annotations
@@ -60,6 +62,7 @@ class Failure(StrEnum):
     BUDGET = "budget"
     LADDER = "ladder"
     LIMIT = "limit"
+    STALE = "stale"  # what the answer rests on changed while the model answered: never applied (F12.2 #105)
 
 
 class ToolCaller(Protocol):
@@ -173,7 +176,8 @@ MAX_STORED_POINTS = 1000  # rejected proposals keep their points (smallint colum
 class _State:
     accepted: list[AcceptedReason] = field(default_factory=list)
     records: list[ReasonRecord] = field(default_factory=list)
-    calls: list[CallRecord] = field(default_factory=list)
+    calls: list[CallRecord] = field(default_factory=list)  # tool calls and format errors, in order (F6.1 #70)
+    tool_calls: int = 0  # JUE-02 counts only the tool calls code executed, not the format errors
     rejections: int = 0
     finalized: tuple[str, MitigationResult] | None = None
 
@@ -243,7 +247,7 @@ class JudgeSession:
         last_turn_tokens = 0
         state = self._state
         while True:
-            if len(state.calls) >= self._settings.max_calls or state.rejections >= self._settings.max_rejections:
+            if state.tool_calls >= self._settings.max_calls or state.rejections >= self._settings.max_rejections:
                 return self._close(self._partial_status(), Failure.LIMIT)
             if self._attempts and not self._can_afford(last_turn_tokens):  # every turn after the first, even retries
                 return self._close(self._partial_status(), Failure.BUDGET)
@@ -255,6 +259,7 @@ class JudgeSession:
                 last_turn_tokens = exc.usage.input + exc.usage.output + exc.usage.reasoning
                 format_failures += 1
                 error = str(exc)
+                self._record_format_error(exc)
                 if format_failures > self._settings.format_retries or error == last_error:
                     return self._fallback(Failure.FORMAT)
                 last_error = error
@@ -290,9 +295,16 @@ class JudgeSession:
     def _finished_status(self) -> ReviewStatus:
         return ReviewStatus.SUGGESTION if self._env.ladder_level >= LADDER_SUGGESTION else ReviewStatus.APPLIED
 
+    def _record_format_error(self, exc: LlmError) -> None:
+        """F6.1 #70: an answer that broke the tool's format is an `error` entry of `calls` with rule VAL-02, so the
+        audit shows every invalid answer (the model's raw output is never stored: only the error, with field paths)."""
+        tool = exc.tool_name if isinstance(exc, ToolArgumentsError) else ""
+        self._state.calls.append(CallRecord(len(self._state.calls) + 1, tool, {}, "error", "VAL-02", str(exc)))
+
     # --- tools -----------------------------------------------------------------------------------------------
     def _dispatch(self, call: ToolCall) -> dict[str, Any]:
         result, rule, reason = self._handlers()[call.name](call.arguments)
+        self._state.tool_calls += 1
         self._state.calls.append(
             CallRecord(len(self._state.calls) + 1, call.name, call.arguments, str(result["result"]), rule, reason)
         )

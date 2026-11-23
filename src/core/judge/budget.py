@@ -41,8 +41,9 @@ class UnlimitedDailyBudget:
 
 @dataclass(frozen=True)
 class OffsetDailyBudget:
-    """A daily budget that also counts reviews of the same package that ran but are not stored yet (the first of a
-    double review, docs/07 §6)."""
+    """A daily budget that also counts what the day's reading does not include: reviews that ran but are not stored
+    yet (the first of a double review, docs/07 §6), and reviews the same caller stored after the day's spending was
+    read (an evaluation that judges a changed package again, F12.2 #105)."""
 
     inner: DailyBudget
     already_usd: Decimal

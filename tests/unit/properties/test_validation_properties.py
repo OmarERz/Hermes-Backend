@@ -9,9 +9,13 @@ from hypothesis import strategies as st
 
 from core.scoring.cvss import parse_cvss31
 from core.validation.content import (
+    CVE_FORMAT,
+    _mentions_cve,
+    _plain,
     check_cve,
     check_cvss_vector,
     check_quote,
+    cve_candidates,
     normalize_text,
     quote_in_text,
 )
@@ -184,3 +188,29 @@ def test_digits_of_other_scripts_never_make_a_cve_identifier(year: str, number: 
 
 def test_arabic_indic_digits_are_not_a_cve_identifier() -> None:
     assert check_cve("CVE-\u0662\u0660\u0662\u0666-\u0661\u0662\u0663\u0664", "cve", lambda _cve: True)
+
+
+_CVE_PIECES = st.lists(
+    st.one_of(
+        st.sampled_from(["CVE-", "cve-", "CVE" + chr(0x2011), "-", chr(0x2013), " ", "\n", "x", "9"]),
+        st.text(alphabet="0123456789", min_size=1, max_size=9),
+        st.text(max_size=3),
+    ),
+    max_size=12,
+)
+
+
+@given(_CVE_PIECES, st.data())
+def test_every_cve_a_verbatim_quote_can_name_is_a_candidate(pieces: list[str], data: st.DataObject) -> None:
+    """F12.2 #105: the analysts look up only `cve_candidates(text)` before the call; that is enough because any CVE
+    a verbatim quote of the text names (as VAL-03.cve_in_quote reads it) is among them."""
+    text = "".join(pieces)
+    start = data.draw(st.integers(0, len(text)))
+    quote = text[start : data.draw(st.integers(start, len(text)))]
+    found = cve_candidates(text)
+    plain = _plain(quote)  # what `_mentions_cve` reads
+    for size in range(4, 8):
+        for index in range(len(plain)):
+            cve = plain[index : index + 9 + size]
+            if CVE_FORMAT.fullmatch(cve) and _mentions_cve(quote, cve):
+                assert cve in found

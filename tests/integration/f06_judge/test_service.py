@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import uuid
 from collections.abc import Iterator
 from datetime import UTC, date, datetime
 from pathlib import Path
@@ -23,7 +24,7 @@ from core.judge.catalog import JudgeSettings, ReasonCatalog, SensitivityProfile
 from core.judge.package import ReviewPackage
 from core.judge.service import JudgeService
 from core.judge.session import Failure, JudgeEnvironment, ReviewStatus
-from core.judge.store import ReviewTarget
+from core.judge.store import ReviewTarget, sync_error_queue
 from doubles.llm import LlmDouble, tool_call_completion
 from harness.judge import double_llm_client, finding_package
 
@@ -162,3 +163,94 @@ def test_a_failed_second_review_queues_the_package(engine: Engine) -> None:
         assert first.mitigation_status == "absent"  # JUE-MIT-09: no drafted mitigation without the judge
         assert session.scalars(select(m.MitigationDraftStep)).all() == []
         assert session.scalars(select(m.ErrorQueue.status)).all() == ["pending"]
+
+
+STEP = {
+    "order": 1,
+    "ci_id": "",
+    "action": "Actualizar Example HTTP Server a 2.4.60 o posterior.",
+    "element_id": "cve-1",
+    "quote": "A heap overflow in Example HTTP Server before 2.4.60 allows remote attackers",
+}
+
+
+def package_row(session: Session, content: dict[str, Any]) -> uuid.UUID:
+    group_id = session.scalars(select(m.FindingGroup.id).limit(1)).one()
+    row = m.ReviewPackage(
+        id=new_id(),
+        kind="finding",
+        finding_group_id=group_id,
+        fingerprint=content["fingerprint"],
+        content=content,
+        built_at=NOW,
+    )
+    session.add(row)
+    session.flush()
+    return row.id
+
+
+def test_a_stale_double_review_is_stored_as_not_applied(engine: Engine) -> None:
+    """F12.2 #105: the package changed while the model answered; both reviews are kept, neither looks applied, and
+    an earlier failure of that package is resolved without queueing anything new."""
+    drafted = tool_call_completion("finalize_review", {"summary": "Resumen.", "mitigation_steps": [STEP]})
+    mass = tool_call_completion("propose_reason", MASS, call_id="a")
+    content = finding_package()
+    judge = service([mass, drafted, mass, drafted])  # +18: a blind second review that agrees
+    result = judge.evaluate(ReviewPackage.from_content(content))
+    assert (result.status, result.second is not None) == (ReviewStatus.APPLIED, True)
+    with Session(engine) as session, session.begin():
+        row_id = package_row(session, content)
+        sync_error_queue(session, row_id, Failure.TRANSPORT, NOW)  # an earlier run failed on this package
+        stored = judge.store(session, ReviewTarget(row_id, "r", NOW), result, stale=True)
+    assert (stored.result.status, stored.result.adjustment, stored.queued) == (
+        ReviewStatus.NO_JUDGE_REVIEW,
+        None,
+        False,
+    )
+    assert stored.second_review_id is not None
+    with Session(engine) as session:
+        first = session.get_one(m.LlmReview, stored.review_id)
+        second = session.get_one(m.LlmReview, stored.second_review_id)
+        assert (first.status, first.parameters["failure"], first.mitigation_status) == (
+            "no_judge_review",
+            "stale",
+            "absent",
+        )
+        assert (second.status, second.parameters["failure"], second.mitigation_status) == (
+            "no_judge_review",
+            "stale",
+            "absent",
+        )
+        steps = session.scalars(select(m.MitigationDraftStep)).all()
+        assert steps == []  # JUE-MIT-09: no draft from a review that never reached a score
+        assert session.scalars(select(m.ErrorQueue.status)).all() == ["resolved"]
+
+
+def test_a_stale_review_that_failed_keeps_its_real_cause(engine: Engine) -> None:
+    judge = service([])  # the provider is down
+    content = finding_package()
+    result = judge.evaluate(ReviewPackage.from_content(content))
+    with Session(engine) as session, session.begin():
+        row_id = package_row(session, content)
+        stored = judge.store(session, ReviewTarget(row_id, "r", NOW), result, stale=True)
+    assert not stored.queued
+    with Session(engine) as session:
+        review = session.get_one(m.LlmReview, stored.review_id)
+        assert (review.status, review.parameters["failure"]) == ("no_judge_review", "transport")  # L13
+        assert session.scalars(select(m.ErrorQueue)).all() == []  # the outdated package is not queued
+
+
+def test_a_stale_review_whose_blind_review_failed_keeps_that_cause(engine: Engine) -> None:
+    drafted = tool_call_completion("finalize_review", {"summary": "Resumen.", "mitigation_steps": [STEP]})
+    judge = service([tool_call_completion("propose_reason", MASS, call_id="a"), drafted])  # nothing for the second
+    content = finding_package()
+    result = judge.evaluate(ReviewPackage.from_content(content))
+    assert (result.adjustment, result.failure) == (None, Failure.TRANSPORT)
+    with Session(engine) as session, session.begin():
+        stored = judge.store(session, ReviewTarget(package_row(session, content), "r", NOW), result, stale=True)
+    assert stored.second_review_id is not None
+    with Session(engine) as session:
+        for review_id in (stored.review_id, stored.second_review_id):
+            review = session.get_one(m.LlmReview, review_id)
+            assert (review.status, review.parameters["failure"]) == ("no_judge_review", "transport")
+        assert session.scalars(select(m.ErrorQueue)).all() == []

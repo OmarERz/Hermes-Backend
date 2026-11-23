@@ -25,7 +25,6 @@ from core.judge.catalog import JudgeSettings, ReasonCatalog, SensitivityProfile
 from core.judge.package import ReviewPackage
 from core.judge.session import Failure, JudgeEnvironment, JudgeSession, ReviewOutcome, ReviewStatus
 from core.judge.store import (
-    JudgeStoreError,
     ReviewTarget,
     load_judge_settings,
     resolve_assets,
@@ -259,28 +258,35 @@ def test_second_review_is_linked(engine: Engine) -> None:
         assert session.scalars(select(m.ErrorQueue)).all() == []
 
 
-def test_unknown_cited_ci_cannot_be_stored(engine: Engine) -> None:
+def test_a_ci_missing_from_the_inventory_never_loses_the_paid_review(engine: Engine) -> None:
+    """F6.1 #69: the CI left the inventory while the model answered; the review (tokens, cost) is still stored."""
     content = finding_package()
     content["group"]["cis"][1]["ci_id"] = "CI-404"
     outcome = run(
         [
+            tool_call_completion("propose_reason", MASS, call_id="m"),
             tool_call_completion("propose_reason", CRITICAL_ASSET, call_id="a"),
-            tool_call_completion("finalize_review", {"summary": "Uno.", "mitigation_steps": []}),
-        ],
-        content,
-    )
-    with Session(engine) as session, pytest.raises(JudgeStoreError, match="more_critical_asset"):
-        save_review(session, outcome, ReviewTarget(None, "ref", NOW))
-    step_only = run(
-        [
             tool_call_completion(
                 "finalize_review", {"summary": "Uno.", "mitigation_steps": [{**STEP, "ci_id": "CI-404"}]}
-            )
+            ),
         ],
         content,
     )
-    with Session(engine) as session, pytest.raises(JudgeStoreError, match="mitigation step"):
-        save_review(session, step_only, ReviewTarget(None, "ref", NOW))
+    assert [r.status for r in outcome.reasons] == ["accepted", "accepted"]
+    assert outcome.mitigation.status.value == "accepted"
+    with Session(engine) as session, session.begin():
+        review_id = save_review(session, outcome, ReviewTarget(None, "ref", NOW))
+    with Session(engine) as session:
+        review = session.get_one(m.LlmReview, review_id)
+        assert (review.status, review.tokens_input, review.attempts) == ("applied", 30, 3)
+        assert (review.mitigation_status, review.mitigation_discard_rule) == ("discarded", "JUE-MIT-04")
+        reasons = session.scalars(select(m.JudgeReason).where(m.JudgeReason.llm_review_id == review_id)).all()
+        assert [r.reason_code for r in reasons] == ["mass_exploitation"]  # the CI-less one stays only in calls
+        assert [c["tool"] for c in review.calls] == ["propose_reason", "propose_reason", "finalize_review"]
+        steps = session.scalars(
+            select(m.MitigationDraftStep).where(m.MitigationDraftStep.llm_review_id == review_id)
+        ).all()
+        assert steps == []
 
 
 def test_assets_resolve_by_itop_id_or_uuid(engine: Engine) -> None:

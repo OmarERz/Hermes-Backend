@@ -15,7 +15,7 @@ from sqlalchemy.orm import Session, sessionmaker
 from core.correlation.engine import Placed, StoryOutcome
 from core.db import models as m
 from core.pipeline.cycles import NewsCycleOutput, Pipeline, ScanCycleOutput, Steps
-from core.pipeline.judging import JudgeFn
+from core.pipeline.judging import PipelineJudge
 from core.pipeline.locks import cycle_lock
 from doubles.llm import tool_call_completion
 from harness.judge import dismissal_package, finding_package
@@ -51,13 +51,14 @@ class Recorder:
         return []
 
     def evaluate(
-        self, _session: Session, group_id: uuid.UUID, run_id: uuid.UUID, trigger: str, judge: JudgeFn | None
+        self, _session: Session, group_id: uuid.UUID, run_id: uuid.UUID, trigger: str, judge: PipelineJudge | None
     ) -> uuid.UUID | None:
         if group_id == self.fail_group:
             raise RuntimeError("broken group")
         self.evaluations.append((group_id, trigger, judge is not None))
         if judge is not None:
-            self.verdicts.append(judge(finding_package(package_id=str(group_id))).adjustment)
+            package = finding_package(package_id=str(group_id))
+            self.verdicts.append(judge.record(_session, package, judge.assess(package)).adjustment)
         assert run_id == self.run_id
         return self.assessment_for.get(group_id)
 
