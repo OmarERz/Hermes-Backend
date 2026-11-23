@@ -19,6 +19,7 @@ from workers.jobs import (
     run_jobs,
     run_jobs_in_threads,
 )
+from workers.pipeline_jobs import NEWS_SECONDS, NIGHTLY_RECALC_SECONDS, SCAN_REQUEST_SECONDS
 
 pytestmark = pytest.mark.unit
 SETTINGS = Settings(
@@ -77,11 +78,20 @@ def test_a_stop_during_a_round_skips_the_remaining_jobs() -> None:
     assert runs == ["a"]
 
 
-def test_without_itop_the_dispatcher_metrics_and_calibration_run() -> None:
+PIPELINE = [
+    ("news_cycle", NEWS_SECONDS, "pipeline"),
+    ("scan_requests", SCAN_REQUEST_SECONDS, "pipeline"),
+    ("nightly_recalculation", NIGHTLY_RECALC_SECONDS, "pipeline"),
+    ("vulndata_refresh", 24 * 3600.0, "pipeline"),
+]
+
+
+def test_without_itop_the_dispatcher_metrics_calibration_and_pipeline_run() -> None:
     assert [(job.name, job.interval, job.lane) for job in build_jobs(SETTINGS, MagicMock())] == [
         ("notification_dispatch", DISPATCH_SECONDS, "notifications"),
         ("nightly_metrics", NIGHTLY_SECONDS, "nightly"),
         ("weekly_calibration", NIGHTLY_SECONDS, "nightly"),
+        *PIPELINE,
     ]
 
 
@@ -92,6 +102,8 @@ def test_with_itop_the_outbox_and_the_sync_run() -> None:
         ("notification_dispatch", DISPATCH_SECONDS),
         ("nightly_metrics", NIGHTLY_SECONDS),
         ("weekly_calibration", NIGHTLY_SECONDS),
+        *[(name, interval) for name, interval, _ in PIPELINE],
+        ("inventory_refresh", 6 * 3600.0),
         ("itop_outbox", ITOP_OUTBOX_SECONDS),
         ("ticket_sync", TICKET_SYNC_SECONDS),
     ]

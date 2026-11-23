@@ -498,8 +498,9 @@ def test_a_recalculation_without_judge_after_an_unreviewed_assessment_stays_unre
 def test_a_recalculation_commits_unless_told_not_to(session: Session, monkeypatch: pytest.MonkeyPatch) -> None:
     commits: list[int] = []
     monkeypatch.setattr(session, "commit", lambda: commits.append(1))
-    recalculate_open_groups(session, "nightly", EvaluationOptions(now=NOW))
-    assert commits == [1]
+    report = recalculate_open_groups(session, "nightly", EvaluationOptions(now=NOW))
+    assert report.groups >= 1
+    assert len(commits) == report.groups + 2  # the run, one per group, then the finished run
 
 
 def test_a_ci_that_appeared_after_the_last_assessment_is_not_simulated(session: Session) -> None:

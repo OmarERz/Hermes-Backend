@@ -16,6 +16,7 @@ from api.routes._auth import guard
 from api.routes._config_support import CurrentUserDep, app_user_id, now, to_api_error
 from api.routes._db import SessionDep
 from api.routes.models import (
+    MAX_VERSION,
     CompanyProfile,
     ConfigDocument,
     ConfigParameter,
@@ -33,6 +34,8 @@ from core.configuration.errors import ConfigError, Problem, ValidationFailedErro
 
 router = APIRouter(tags=["configuration"])
 PeerId = Annotated[str, Path(alias="id")]
+# Any PostgreSQL `integer` is a version that may not exist (404); only a number outside that range is a 422.
+VersionPath = Annotated[int, Path(ge=-MAX_VERSION - 1, le=MAX_VERSION)]
 
 
 def _actor(session: SessionDep, user: CurrentUserDep) -> service.Actor:
@@ -104,7 +107,9 @@ def config_versions(params: PageQuery, signer: Signer, session: SessionDep) -> P
 
 
 @router.post("/api/config/versions/{v}/restore", dependencies=[guard("POST", "/api/config/versions/{v}/restore")])
-def restore_version(v: int, request: RestoreRequest, session: SessionDep, user: CurrentUserDep) -> ConfigDocument:
+def restore_version(
+    v: VersionPath, request: RestoreRequest, session: SessionDep, user: CurrentUserDep
+) -> ConfigDocument:
     """Restores a version as a new one without calling the judge (FRO-08).
 
     Like every configuration write it carries the expected current version (API-03): 409 if it changed.

@@ -49,6 +49,10 @@ x-backend: &backend
     # Non-secret connection settings of docs/11 §2 (blank means not configured)
     ITOP_URL: ${ITOP_URL:-}
     ITOP_SYSTEM_USER: ${ITOP_SYSTEM_USER:-}
+    ITOP_ORG_ID: ${ITOP_ORG_ID:-}
+    ITOP_CALLER_ID: ${ITOP_CALLER_ID:-}
+    ITOP_SERVICE_ID: ${ITOP_SERVICE_ID:-}
+    SCAN_INTERVAL_HOURS: ${SCAN_INTERVAL_HOURS:-0}
     LLM_BASE_URL_JUDGE: ${LLM_BASE_URL_JUDGE:-}
     LLM_BASE_URL_ANALYSTS: ${LLM_BASE_URL_ANALYSTS:-}
   secrets:

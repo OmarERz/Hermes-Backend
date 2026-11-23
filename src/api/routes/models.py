@@ -21,6 +21,9 @@ def _whole_number(value: Any) -> Any:
 
 
 Version = Annotated[int, Field(ge=1), BeforeValidator(_whole_number)]
+# Configuration versions are a PostgreSQL `integer` column: a larger number is a 422, never a database error.
+MAX_VERSION = 2_147_483_647
+ConfigVersionNumber = Annotated[int, Field(ge=1, le=MAX_VERSION), BeforeValidator(_whole_number)]
 Score = Annotated[int, Field(ge=0, le=100), BeforeValidator(_whole_number)]
 
 
@@ -50,12 +53,14 @@ class ConfigDocument(_Model):
 
 
 class ConfigUpdate(_Model):
-    expected_version: Version = Field(description="Version the client read; 409 if it changed (API-03)")
+    expected_version: ConfigVersionNumber = Field(description="Version the client read; 409 if it changed (API-03)")
     changes: dict[str, str] = Field(min_length=1)
 
 
 class RestoreRequest(_Model):
-    expected_version: Version = Field(description="Current version the client read; 409 if it changed (API-03)")
+    expected_version: ConfigVersionNumber = Field(
+        description="Current version the client read; 409 if it changed (API-03)"
+    )
 
 
 class ConfigVersion(_Model):

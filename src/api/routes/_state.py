@@ -9,15 +9,10 @@ from typing import Annotated
 from fastapi import Depends, Request
 from sqlalchemy.orm import Session, sessionmaker
 
-from api.routes.models import PeerCompany, Run, Source
+from api.routes.models import PeerCompany, Source
 from core.metrics.dashboard import Dashboard, build_dashboard
 
 DashboardSource = Callable[[datetime], Dashboard]
-
-
-def get_runs(request: Request) -> list[Run]:
-    runs: list[Run] = request.app.state.runs
-    return runs
 
 
 def get_peers(request: Request) -> list[PeerCompany]:
@@ -41,7 +36,6 @@ def get_dashboard_source(request: Request) -> DashboardSource:
     return read
 
 
-RunStore = Annotated[list[Run], Depends(get_runs)]
 PeerStore = Annotated[list[PeerCompany], Depends(get_peers)]
 SourceStore = Annotated[list[Source], Depends(get_sources)]
 MetricsSource = Annotated[DashboardSource, Depends(get_dashboard_source)]
