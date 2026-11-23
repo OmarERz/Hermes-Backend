@@ -5,10 +5,12 @@
         "additionalProperties": false,
         "properties": {
           "ci_id": {
+            "description": "Id del CI en iTop.",
             "title": "Ci Id",
             "type": "string"
           },
           "classification": {
+            "description": "Clasificación del activo (la más restrictiva si son varios). Valores: `public`: Información pública; `classified`: Clasificada; `highly_classified`: Altamente clasificada (se puede excluir de las exportaciones); `unclassified`: Sin clasificación asignada en iTop.",
             "enum": [
               "public",
               "classified",
@@ -19,6 +21,7 @@
             "type": "string"
           },
           "classification_at_evaluation": {
+            "description": "Clasificación que tenía el activo cuando se hizo la evaluación. Valores: `public`: Información pública; `classified`: Clasificada; `highly_classified`: Altamente clasificada (se puede excluir de las exportaciones); `unclassified`: Sin clasificación asignada en iTop.",
             "enum": [
               "public",
               "classified",
@@ -29,6 +32,7 @@
             "type": "string"
           },
           "criticality": {
+            "description": "Criticidad del activo en iTop.",
             "title": "Criticality",
             "type": "string"
           },
@@ -41,13 +45,16 @@
                 "type": "null"
               }
             ],
+            "description": "Equipo custodio del activo.",
             "title": "Custodian"
           },
           "exposed": {
+            "description": "Si está expuesto a internet.",
             "title": "Exposed",
             "type": "boolean"
           },
           "finding_status": {
+            "description": "Estado del hallazgo en ese activo. Valores: `new`: Apareció en el último escaneo; `persistent`: Sigue presente desde un escaneo anterior; `reopened`: Estaba corregido y volvió a aparecer; `fixed`: Ya no aparece; `no_data`: No hay datos suficientes para decidir.",
             "enum": [
               "new",
               "persistent",
@@ -59,10 +66,12 @@
             "type": "string"
           },
           "itop_url": {
+            "description": "Enlace al activo en iTop.",
             "title": "Itop Url",
             "type": "string"
           },
           "name": {
+            "description": "Nombre del activo.",
             "title": "Name",
             "type": "string"
           },
@@ -75,9 +84,11 @@
                 "type": "null"
               }
             ],
+            "description": "Responsable del activo.",
             "title": "Owner"
           },
           "score": {
+            "description": "Puntaje final del activo (0 a 100).",
             "maximum": 100.0,
             "minimum": 0.0,
             "title": "Score",
@@ -102,6 +113,19 @@
       },
       "Alert": {
         "additionalProperties": false,
+        "examples": [
+          {
+            "actor": "Grupo Ejemplo",
+            "ci_id": "CI-0003",
+            "created_at": "2026-11-22T08:00:00Z",
+            "id": "0192f3a7-3e4f-7051-9c6d-7e8f9a0b1c2d",
+            "inferred": false,
+            "relevance": "R2",
+            "summary": "Campaña contra servidores Redis expuestos; la empresa usa Redis 7.0.",
+            "vector": "Credenciales expuestas",
+            "victim": null
+          }
+        ],
         "properties": {
           "actor": {
             "anyOf": [
@@ -112,6 +136,7 @@
                 "type": "null"
               }
             ],
+            "description": "Actor de amenazas mencionado, o quien hizo la acción (`sistema` si fue automática).",
             "title": "Actor"
           },
           "ci_id": {
@@ -123,21 +148,26 @@
                 "type": "null"
               }
             ],
+            "description": "Id del CI en iTop.",
             "title": "Ci Id"
           },
           "created_at": {
+            "description": "Cuándo se creó la alerta (UTC).",
             "title": "Created At",
             "type": "string"
           },
           "id": {
+            "description": "Id de la alerta.",
             "title": "Id",
             "type": "string"
           },
           "inferred": {
+            "description": "Si la relación la infirió la IA.",
             "title": "Inferred",
             "type": "boolean"
           },
           "relevance": {
+            "description": "Por qué es relevante la alerta. Valores: `R2`: La noticia menciona un producto del inventario; `R3`: Una empresa par, del mismo sector o con el mismo vector, fue atacada; `inferred`: Relación inferida por la IA; verificar su presencia.",
             "enum": [
               "R2",
               "R3",
@@ -147,6 +177,7 @@
             "type": "string"
           },
           "summary": {
+            "description": "Resumen de la noticia, en español.",
             "title": "Summary",
             "type": "string"
           },
@@ -159,6 +190,7 @@
                 "type": "null"
               }
             ],
+            "description": "Vector de ataque mencionado.",
             "title": "Vector"
           },
           "victim": {
@@ -170,6 +202,7 @@
                 "type": "null"
               }
             ],
+            "description": "Víctima mencionada.",
             "title": "Victim"
           }
         },
@@ -191,10 +224,12 @@
         "additionalProperties": false,
         "properties": {
           "ci_id": {
+            "description": "Id del CI en iTop.",
             "title": "Ci Id",
             "type": "string"
           },
           "classification": {
+            "description": "Clasificación del activo (la más restrictiva si son varios). Valores: `public`: Información pública; `classified`: Clasificada; `highly_classified`: Altamente clasificada (se puede excluir de las exportaciones); `unclassified`: Sin clasificación asignada en iTop.",
             "enum": [
               "public",
               "classified",
@@ -213,9 +248,11 @@
                 "type": "null"
               }
             ],
+            "description": "Equipo custodio del activo.",
             "title": "Custodian"
           },
           "findings": {
+            "description": "Hallazgos del activo.",
             "items": {
               "$ref": "#/components/schemas/VulnerabilityGroup"
             },
@@ -223,6 +260,7 @@
             "type": "array"
           },
           "name": {
+            "description": "Nombre.",
             "title": "Name",
             "type": "string"
           },
@@ -235,9 +273,11 @@
                 "type": "null"
               }
             ],
+            "description": "Responsable del activo.",
             "title": "Owner"
           },
           "risk": {
+            "description": "Riesgo del activo: el mayor final de sus hallazgos.",
             "title": "Risk",
             "type": "integer"
           }
@@ -258,10 +298,12 @@
         "additionalProperties": false,
         "properties": {
           "ci_id": {
+            "description": "Id del CI en iTop.",
             "title": "Ci Id",
             "type": "string"
           },
           "classification": {
+            "description": "Clasificación del activo (la más restrictiva si son varios). Valores: `public`: Información pública; `classified`: Clasificada; `highly_classified`: Altamente clasificada (se puede excluir de las exportaciones); `unclassified`: Sin clasificación asignada en iTop.",
             "enum": [
               "public",
               "classified",
@@ -280,9 +322,11 @@
                 "type": "null"
               }
             ],
+            "description": "Equipo custodio del activo.",
             "title": "Custodian"
           },
           "exposed": {
+            "description": "Si está expuesto a internet.",
             "title": "Exposed",
             "type": "boolean"
           },
@@ -290,18 +334,22 @@
             "additionalProperties": {
               "type": "integer"
             },
+            "description": "Cantidad de hallazgos por nivel.",
             "title": "Findings By Level",
             "type": "object"
           },
           "in_kev": {
+            "description": "Cantidad de hallazgos del activo en el catálogo KEV.",
             "title": "In Kev",
             "type": "integer"
           },
           "last_seen": {
+            "description": "Última vez que se vio un hallazgo en el activo (UTC).",
             "title": "Last Seen",
             "type": "string"
           },
           "name": {
+            "description": "Nombre del activo.",
             "title": "Name",
             "type": "string"
           },
@@ -314,6 +362,7 @@
                 "type": "null"
               }
             ],
+            "description": "Responsable del activo.",
             "title": "Owner"
           },
           "risk": {
@@ -324,6 +373,7 @@
             "type": "integer"
           },
           "status": {
+            "description": "Estado. Valores: `new`: Apareció en el último escaneo; `persistent`: Sigue presente desde un escaneo anterior; `reopened`: Estaba corregido y volvió a aparecer; `fixed`: Ya no aparece; `no_data`: No hay datos suficientes para decidir.",
             "enum": [
               "new",
               "persistent",
@@ -355,22 +405,27 @@
         "additionalProperties": false,
         "properties": {
           "action": {
+            "description": "Acción registrada, por ejemplo `source.enable`.",
             "title": "Action",
             "type": "string"
           },
           "actor": {
+            "description": "Actor de amenazas mencionado, o quien hizo la acción (`sistema` si fue automática).",
             "title": "Actor",
             "type": "string"
           },
           "created_at": {
+            "description": "Fecha y hora de creación (UTC).",
             "title": "Created At",
             "type": "string"
           },
           "id": {
+            "description": "Id del registro.",
             "title": "Id",
             "type": "string"
           },
           "target": {
+            "description": "Qué se cambió, por ejemplo `source:cisa_kev`.",
             "title": "Target",
             "type": "string"
           }
@@ -389,6 +444,7 @@
         "additionalProperties": false,
         "properties": {
           "assessment_id": {
+            "description": "Id de la evaluación.",
             "title": "Assessment Id",
             "type": "string"
           },
@@ -405,6 +461,7 @@
             "title": "Ci Id"
           },
           "final": {
+            "description": "Puntaje final (0 a 100) tras el juez y el piso KEV.",
             "title": "Final",
             "type": "integer"
           },
@@ -454,6 +511,7 @@
             "title": "Backtest"
           },
           "created_at": {
+            "description": "Cuándo se generó (UTC).",
             "title": "Created At",
             "type": "string"
           },
@@ -466,6 +524,7 @@
                 "type": "null"
               }
             ],
+            "description": "Cuándo decidió un administrador.",
             "title": "Decided At"
           },
           "evidence": {
@@ -477,13 +536,16 @@
                 "type": "null"
               }
             ],
+            "description": "Evidencia que sustenta la propuesta.",
             "title": "Evidence"
           },
           "id": {
+            "description": "Id de la propuesta.",
             "title": "Id",
             "type": "string"
           },
           "kind": {
+            "description": "Qué clase de ajuste propone. Valores: `source_level`: Cambiar el nivel de confianza de una fuente; `reason_threshold`: Ajustar el umbral de un motivo del juez; `formula_weight`: Cambiar el peso de un factor de la fórmula.",
             "enum": [
               "source_level",
               "reason_threshold",
@@ -502,6 +564,7 @@
                 "type": "null"
               }
             ],
+            "description": "Valor actual antes del cambio propuesto.",
             "title": "Previous Value"
           },
           "proposed_value": {
@@ -514,9 +577,11 @@
                 "type": "null"
               }
             ],
+            "description": "Valor propuesto.",
             "title": "Proposed Value"
           },
           "status": {
+            "description": "Estado de la decisión. Valores: `pending`: Espera la decisión de un administrador; `approved`: Aprobada y aplicada; `rejected`: Rechazada.",
             "enum": [
               "pending",
               "approved",
@@ -526,6 +591,7 @@
             "type": "string"
           },
           "summary": {
+            "description": "Resumen de la propuesta, en español.",
             "title": "Summary",
             "type": "string"
           },
@@ -554,8 +620,22 @@
       },
       "CompanyProfile": {
         "additionalProperties": false,
+        "examples": [
+          {
+            "countries": [
+              "MX"
+            ],
+            "language": "es",
+            "sector": "fintech",
+            "subsectors": [
+              "payments"
+            ],
+            "version": 2
+          }
+        ],
         "properties": {
           "countries": {
+            "description": "Países de operación (códigos ISO de dos letras).",
             "items": {
               "type": "string"
             },
@@ -563,14 +643,17 @@
             "type": "array"
           },
           "language": {
+            "description": "Idioma de salida (por ejemplo `es`).",
             "title": "Language",
             "type": "string"
           },
           "sector": {
+            "description": "Sector de la empresa (código del catálogo).",
             "title": "Sector",
             "type": "string"
           },
           "subsectors": {
+            "description": "Subsectores (códigos del catálogo).",
             "items": {
               "type": "string"
             },
@@ -578,6 +661,7 @@
             "type": "array"
           },
           "version": {
+            "description": "Versión del perfil; mándala como `expected_version` al guardar.",
             "title": "Version",
             "type": "integer"
           }
@@ -596,14 +680,17 @@
         "additionalProperties": false,
         "properties": {
           "base": {
+            "description": "Puntaje base antes del juez.",
             "title": "Base",
             "type": "integer"
           },
           "ci_id": {
+            "description": "Id del CI en iTop.",
             "title": "Ci Id",
             "type": "string"
           },
           "cve": {
+            "description": "Identificador CVE.",
             "title": "Cve",
             "type": "string"
           },
@@ -616,29 +703,36 @@
                 "type": "null"
               }
             ],
+            "description": "Puntaje CVSS del CVE, como texto.",
             "title": "Cvss"
           },
           "delta": {
+            "description": "Final menos crudo: cuánto movió Hermes la prioridad.",
             "title": "Delta",
             "type": "integer"
           },
           "final": {
+            "description": "Puntaje final de Hermes.",
             "title": "Final",
             "type": "integer"
           },
           "judge_adjustment": {
+            "description": "Ajuste del juez en puntos (puede ser negativo).",
             "title": "Judge Adjustment",
             "type": "integer"
           },
           "main_cause": {
+            "description": "Qué factor movió más el puntaje.",
             "title": "Main Cause",
             "type": "string"
           },
           "product": {
+            "description": "Producto de software afectado.",
             "title": "Product",
             "type": "string"
           },
           "raw": {
+            "description": "Valor crudo: 100 x S, lo que diría un escáner con solo CVSS.",
             "title": "Raw",
             "type": "integer"
           }
@@ -662,6 +756,7 @@
         "additionalProperties": false,
         "properties": {
           "avoided_noise": {
+            "description": "Hallazgos de CVSS alto que Hermes bajó de prioridad.",
             "title": "Avoided Noise",
             "type": "integer"
           },
@@ -669,14 +764,17 @@
             "additionalProperties": {
               "type": "integer"
             },
+            "description": "Embudo: cuántos hallazgos quedan en cada etapa.",
             "title": "Funnel",
             "type": "object"
           },
           "hidden_criticals": {
+            "description": "Hallazgos críticos que un escáner con solo CVSS no habría marcado.",
             "title": "Hidden Criticals",
             "type": "integer"
           },
           "rank_correlation": {
+            "description": "Correlación de rangos entre el orden crudo y el final, como texto.",
             "title": "Rank Correlation",
             "type": "string"
           },
@@ -687,10 +785,12 @@
               },
               "type": "object"
             },
+            "description": "Nivel por CVSS -> nivel de Hermes -> cantidad.",
             "title": "Reclassification Matrix",
             "type": "object"
           },
           "reclassified_percent": {
+            "description": "Porcentaje de hallazgos que cambiaron de nivel, como texto.",
             "title": "Reclassified Percent",
             "type": "string"
           }
@@ -708,15 +808,27 @@
       },
       "ConfigDocument": {
         "additionalProperties": false,
+        "examples": [
+          {
+            "values": {
+              "dead_zone": "4",
+              "notifications.consumer": "log",
+              "weights.S": "0.30"
+            },
+            "version": 4
+          }
+        ],
         "properties": {
           "values": {
             "additionalProperties": {
               "type": "string"
             },
+            "description": "Valores vigentes: clave -> valor, como texto.",
             "title": "Values",
             "type": "object"
           },
           "version": {
+            "description": "Versión vigente de la configuración.",
             "title": "Version",
             "type": "integer"
           }
@@ -732,22 +844,27 @@
         "additionalProperties": false,
         "properties": {
           "default": {
+            "description": "Valor de fábrica, como texto.",
             "title": "Default",
             "type": "string"
           },
           "description": {
+            "description": "Descripción para personas.",
             "title": "Description",
             "type": "string"
           },
           "group": {
+            "description": "Grupo del parámetro, por ejemplo `formula` o `judge`.",
             "title": "Group",
             "type": "string"
           },
           "key": {
+            "description": "Clave del parámetro, por ejemplo `weights.S` o `dead_zone`.",
             "title": "Key",
             "type": "string"
           },
           "level": {
+            "description": "Qué tan libremente se cambia. Valores: `free`: Se cambia libremente; `validated`: Se cambia con validaciones; `blocked`: No se puede cambiar.",
             "enum": [
               "free",
               "validated",
@@ -765,6 +882,7 @@
                 "type": "null"
               }
             ],
+            "description": "Valor máximo permitido, como texto.",
             "title": "Max"
           },
           "min": {
@@ -776,9 +894,11 @@
                 "type": "null"
               }
             ],
+            "description": "Valor mínimo permitido, como texto.",
             "title": "Min"
           },
           "min_role": {
+            "description": "Rol mínimo para cambiar el parámetro. Valores: `reader`: Solo lectura; `analyst`: Lee, da feedback, lanza escaneos y exporta; `admin`: Además configura el sistema y administra usuarios.",
             "enum": [
               "reader",
               "analyst",
@@ -796,6 +916,7 @@
             "type": "array"
           },
           "type": {
+            "description": "Tipo del valor. Valores: `decimal`: Número decimal (como texto); `integer`: Número entero; `boolean`: `true` o `false`; `string`: Texto; `enum`: Uno de `options`.",
             "enum": [
               "decimal",
               "integer",
@@ -807,6 +928,7 @@
             "type": "string"
           },
           "validations": {
+            "description": "Reglas de validación del parámetro, en texto.",
             "items": {
               "type": "string"
             },
@@ -828,11 +950,21 @@
       },
       "ConfigUpdate": {
         "additionalProperties": false,
+        "examples": [
+          {
+            "changes": {
+              "weights.D": "0.10",
+              "weights.S": "0.30"
+            },
+            "expected_version": 3
+          }
+        ],
         "properties": {
           "changes": {
             "additionalProperties": {
               "type": "string"
             },
+            "description": "Parámetros a cambiar: clave -> valor nuevo, como texto.",
             "minProperties": 1,
             "title": "Changes",
             "type": "object"
@@ -856,18 +988,22 @@
         "additionalProperties": false,
         "properties": {
           "author": {
+            "description": "Quién hizo el cambio.",
             "title": "Author",
             "type": "string"
           },
           "created_at": {
+            "description": "Cuándo se guardó (UTC).",
             "title": "Created At",
             "type": "string"
           },
           "summary": {
+            "description": "Qué cambió, en español.",
             "title": "Summary",
             "type": "string"
           },
           "version": {
+            "description": "Número de la versión.",
             "title": "Version",
             "type": "integer"
           }
@@ -919,6 +1055,7 @@
                 "type": "null"
               }
             ],
+            "description": "Latencia de la comprobación en milisegundos.",
             "title": "Latency Ms"
           },
           "message": {
@@ -946,6 +1083,7 @@
             "title": "Missing Variable"
           },
           "name": {
+            "description": "Conexión comprobada. Valores: `itop`: CMDB y tickets de iTop; `deepseek`: Juez y analistas de IA; `nvd`: Base de vulnerabilidades NVD; `abusech`: Indicadores de abuse.ch; `ransomwarelive`: Víctimas de ransomware.live; `firebase`: Inicio de sesión.",
             "enum": [
               "itop",
               "deepseek",
@@ -958,6 +1096,7 @@
             "type": "string"
           },
           "ok": {
+            "description": "Si la conexión funciona.",
             "title": "Ok",
             "type": "boolean"
           }
@@ -973,6 +1112,14 @@
       },
       "ConnectionTestRequest": {
         "additionalProperties": false,
+        "examples": [
+          {
+            "names": [
+              "itop",
+              "nvd"
+            ]
+          }
+        ],
         "properties": {
           "names": {
             "anyOf": [
@@ -994,6 +1141,7 @@
                 "type": "null"
               }
             ],
+            "description": "Conexiones a probar; todas si se omite.",
             "title": "Names"
           }
         },
@@ -1004,14 +1152,17 @@
         "additionalProperties": false,
         "properties": {
           "cpe": {
+            "description": "Identificador CPE 2.3 del software.",
             "title": "Cpe",
             "type": "string"
           },
           "score": {
+            "description": "Qué tan bien coincide (0 a 1).",
             "title": "Score",
             "type": "number"
           },
           "title": {
+            "description": "Nombre del producto en el diccionario CPE.",
             "title": "Title",
             "type": "string"
           }
@@ -1036,16 +1187,20 @@
                 "type": "null"
               }
             ],
+            "description": "Nombre para mostrar, si existe.",
             "title": "Display Name"
           },
           "email": {
+            "description": "Correo del usuario.",
             "title": "Email",
             "type": "string"
           },
           "role": {
-            "$ref": "#/components/schemas/Role"
+            "$ref": "#/components/schemas/Role",
+            "description": "Rol del usuario."
           },
           "uid": {
+            "description": "Identificador del usuario en Firebase.",
             "title": "Uid",
             "type": "string"
           }
@@ -1067,6 +1222,7 @@
             "type": "string"
           },
           "details": {
+            "description": "Problemas concretos: campo y regla que falló.",
             "items": {
               "$ref": "#/components/schemas/ErrorDetail"
             },
@@ -1109,9 +1265,24 @@
       },
       "ErrorResponse": {
         "description": "Body of every non-2xx response (API-02).",
+        "examples": [
+          {
+            "error": {
+              "code": "validation_error",
+              "details": [
+                {
+                  "field": "body.changes",
+                  "issue": "missing"
+                }
+              ],
+              "message": "La solicitud no es válida."
+            }
+          }
+        ],
         "properties": {
           "error": {
-            "$ref": "#/components/schemas/ErrorBody"
+            "$ref": "#/components/schemas/ErrorBody",
+            "description": "Detalle del error."
           }
         },
         "required": [
@@ -1124,10 +1295,12 @@
         "additionalProperties": false,
         "properties": {
           "active": {
+            "description": "Si es el feedback vigente de la persona (uno por evaluación).",
             "title": "Active",
             "type": "boolean"
           },
           "channel": {
+            "description": "Canal por el que llegó: `frontend` o `slack`. Valores: `frontend`: Dado desde el front; `slack`: Dado desde Slack.",
             "enum": [
               "frontend",
               "slack"
@@ -1144,13 +1317,16 @@
                 "type": "null"
               }
             ],
+            "description": "Comentario de la persona.",
             "title": "Comment"
           },
           "created_at": {
+            "description": "Cuándo se dio (UTC).",
             "title": "Created At",
             "type": "string"
           },
           "on_older_version": {
+            "description": "Si el feedback se dio sobre una versión anterior de la evaluación.",
             "title": "On Older Version",
             "type": "boolean"
           },
@@ -1169,6 +1345,7 @@
                 "type": "null"
               }
             ],
+            "description": "Nivel propuesto por la persona. Valores: `critical`: Crítica (urgencia 1); `high`: Alta (urgencia 2); `medium`: Media (urgencia 3); `low`: Baja (urgencia 4).",
             "title": "Proposed Level"
           },
           "proposed_score": {
@@ -1180,13 +1357,16 @@
                 "type": "null"
               }
             ],
+            "description": "Puntaje propuesto por la persona.",
             "title": "Proposed Score"
           },
           "user": {
+            "description": "Correo o nombre de quien dio el feedback.",
             "title": "User",
             "type": "string"
           },
           "verdict": {
+            "description": "Veredicto dado.",
             "title": "Verdict",
             "type": "string"
           }
@@ -1208,6 +1388,15 @@
       "FeedbackRequest": {
         "additionalProperties": false,
         "description": "Body of POST /api/feedback. The user and channel come from the token, never from the body.",
+        "examples": [
+          {
+            "assessment_id": "0192f3a4-7b1e-7c2d-8a5f-3e4d5c6b7a89",
+            "comment": "El servidor no está expuesto a internet.",
+            "proposed_level": "high",
+            "ticket_itop_id": "1234",
+            "verdict": "wrong_priority"
+          }
+        ],
         "if": {
           "properties": {
             "verdict": {
@@ -1220,6 +1409,7 @@
         },
         "properties": {
           "assessment_id": {
+            "description": "Id de la evaluación.",
             "title": "Assessment Id",
             "type": "string"
           },
@@ -1233,6 +1423,7 @@
                 "type": "null"
               }
             ],
+            "description": "Comentario libre (hasta 2000 caracteres); se guarda como dato, nunca se interpreta.",
             "title": "Comment"
           },
           "proposed_level": {
@@ -1250,6 +1441,7 @@
                 "type": "null"
               }
             ],
+            "description": "Nivel que propone la persona; obligatorio si el veredicto es `wrong_priority`. Valores: `critical`: Crítica (urgencia 1); `high`: Alta (urgencia 2); `medium`: Media (urgencia 3); `low`: Baja (urgencia 4).",
             "title": "Proposed Level"
           },
           "proposed_score": {
@@ -1263,6 +1455,7 @@
                 "type": "null"
               }
             ],
+            "description": "Puntaje que propone la persona (0 a 100), opcional.",
             "title": "Proposed Score"
           },
           "ticket_itop_id": {
@@ -1279,6 +1472,7 @@
             "title": "Ticket Itop Id"
           },
           "verdict": {
+            "description": "Veredicto de la persona. Valores: `relevant`: La recomendación es útil; `false_positive`: No aplica: suprime los hallazgos evaluados hasta que cambien; `wrong_priority`: Prioridad incorrecta; exige `proposed_level`; `investigating`: Se está investigando; `stop_suggestions`: No sugerir más en el ticket.",
             "enum": [
               "relevant",
               "false_positive",
@@ -1310,8 +1504,15 @@
       "FeedbackResult": {
         "additionalProperties": false,
         "description": "Outcome of FeedbackService.record (schemas/feedback_result.schema.json).",
+        "examples": [
+          {
+            "feedback_id": "0192f3a5-1c2d-7e3f-9a4b-5c6d7e8f9a0b",
+            "replaced_previous": false
+          }
+        ],
         "properties": {
           "feedback_id": {
+            "description": "Id del feedback guardado.",
             "format": "uuid",
             "maxLength": 36,
             "pattern": "^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$",
@@ -1335,14 +1536,17 @@
         "additionalProperties": false,
         "properties": {
           "ci_id": {
+            "description": "Id del CI en iTop.",
             "title": "Ci Id",
             "type": "string"
           },
           "detail": {
+            "description": "Dato que ayuda a identificar el pendiente.",
             "title": "Detail",
             "type": "string"
           },
           "name": {
+            "description": "Nombre del activo o del software.",
             "title": "Name",
             "type": "string"
           }
@@ -1359,6 +1563,7 @@
         "additionalProperties": false,
         "properties": {
           "outside_delivery_model": {
+            "description": "Activos fuera del modelo de entrega de Hermes.",
             "items": {
               "$ref": "#/components/schemas/InventoryItem"
             },
@@ -1366,6 +1571,7 @@
             "type": "array"
           },
           "software_without_cpe": {
+            "description": "Software que aún no tiene CPE.",
             "items": {
               "$ref": "#/components/schemas/InventoryItem"
             },
@@ -1373,6 +1579,7 @@
             "type": "array"
           },
           "without_classification": {
+            "description": "Activos sin clasificación.",
             "items": {
               "$ref": "#/components/schemas/InventoryItem"
             },
@@ -1380,6 +1587,7 @@
             "type": "array"
           },
           "without_custodian": {
+            "description": "Activos sin equipo custodio.",
             "items": {
               "$ref": "#/components/schemas/InventoryItem"
             },
@@ -1387,6 +1595,7 @@
             "type": "array"
           },
           "without_exposure": {
+            "description": "Activos sin dato de exposición.",
             "items": {
               "$ref": "#/components/schemas/InventoryItem"
             },
@@ -1394,6 +1603,7 @@
             "type": "array"
           },
           "without_owner": {
+            "description": "Activos sin responsable.",
             "items": {
               "$ref": "#/components/schemas/InventoryItem"
             },
@@ -1418,6 +1628,7 @@
         "properties": {
           "class": {
             "const": "UserRequest",
+            "description": "Clase del objeto de iTop; hoy solo `UserRequest`.",
             "title": "Class",
             "type": "string"
           },
@@ -1437,6 +1648,7 @@
                 "type": "null"
               }
             ],
+            "description": "Referencia del ticket en iTop.",
             "title": "Ref"
           }
         },
@@ -1451,10 +1663,12 @@
         "additionalProperties": false,
         "properties": {
           "cpe": {
+            "description": "Identificador CPE 2.3 del software.",
             "title": "Cpe",
             "type": "string"
           },
           "software": {
+            "description": "Nombre del software en el inventario.",
             "title": "Software",
             "type": "string"
           }
@@ -1470,6 +1684,7 @@
         "additionalProperties": false,
         "properties": {
           "cpe": {
+            "description": "Identificador CPE 2.3 del software.",
             "pattern": "^cpe:2\\.3:",
             "title": "Cpe",
             "type": "string"
@@ -1485,10 +1700,12 @@
         "additionalProperties": false,
         "properties": {
           "key": {
+            "description": "Clave estable de la métrica.",
             "title": "Key",
             "type": "string"
           },
           "label": {
+            "description": "Nombre de la métrica, en español.",
             "title": "Label",
             "type": "string"
           },
@@ -1501,9 +1718,11 @@
                 "type": "null"
               }
             ],
+            "description": "Unidad de la métrica.",
             "title": "Unit"
           },
           "value": {
+            "description": "Valor de la métrica, como texto.",
             "title": "Value",
             "type": "string"
           }
@@ -1521,10 +1740,12 @@
         "additionalProperties": false,
         "properties": {
           "generated_at": {
+            "description": "Cuándo se generó el tablero (UTC).",
             "title": "Generated At",
             "type": "string"
           },
           "metrics": {
+            "description": "Métricas del tablero.",
             "items": {
               "$ref": "#/components/schemas/Metric"
             },
@@ -1543,14 +1764,17 @@
         "additionalProperties": false,
         "properties": {
           "attempts": {
+            "description": "Intentos de entrega hechos.",
             "title": "Attempts",
             "type": "integer"
           },
           "created_at": {
+            "description": "Cuándo se generó (UTC).",
             "title": "Created At",
             "type": "string"
           },
           "id": {
+            "description": "Id del evento.",
             "title": "Id",
             "type": "string"
           },
@@ -1563,9 +1787,11 @@
                 "type": "null"
               }
             ],
+            "description": "Último error de entrega, sin datos sensibles.",
             "title": "Last Error"
           },
           "priority": {
+            "description": "Prioridad de entrega. Valores: `immediate`: Se entrega al momento; `normal`: Se entrega en el siguiente ciclo; `digest`: Va en el resumen periódico.",
             "enum": [
               "immediate",
               "normal",
@@ -1575,6 +1801,7 @@
             "type": "string"
           },
           "status": {
+            "description": "Estado de la entrega. Valores: `pending`: Aún no se entrega; `delivered`: Entregado; `error`: Falló; se puede reintentar.",
             "enum": [
               "pending",
               "delivered",
@@ -1584,6 +1811,7 @@
             "type": "string"
           },
           "type": {
+            "description": "Tipo de evento, por ejemplo `new_ticket` o `level_up`.",
             "title": "Type",
             "type": "string"
           }
@@ -1603,6 +1831,7 @@
       "Page_Alert_": {
         "properties": {
           "items": {
+            "description": "Elementos de la página.",
             "items": {
               "$ref": "#/components/schemas/Alert"
             },
@@ -1631,6 +1860,7 @@
       "Page_AuditEntry_": {
         "properties": {
           "items": {
+            "description": "Elementos de la página.",
             "items": {
               "$ref": "#/components/schemas/AuditEntry"
             },
@@ -1659,6 +1889,7 @@
       "Page_CalibrationProposal_": {
         "properties": {
           "items": {
+            "description": "Elementos de la página.",
             "items": {
               "$ref": "#/components/schemas/CalibrationProposal"
             },
@@ -1687,6 +1918,7 @@
       "Page_ComparisonRow_": {
         "properties": {
           "items": {
+            "description": "Elementos de la página.",
             "items": {
               "$ref": "#/components/schemas/ComparisonRow"
             },
@@ -1715,6 +1947,7 @@
       "Page_ConfigVersion_": {
         "properties": {
           "items": {
+            "description": "Elementos de la página.",
             "items": {
               "$ref": "#/components/schemas/ConfigVersion"
             },
@@ -1743,6 +1976,7 @@
       "Page_NotificationEventRow_": {
         "properties": {
           "items": {
+            "description": "Elementos de la página.",
             "items": {
               "$ref": "#/components/schemas/NotificationEventRow"
             },
@@ -1771,6 +2005,7 @@
       "Page_PeerCompany_": {
         "properties": {
           "items": {
+            "description": "Elementos de la página.",
             "items": {
               "$ref": "#/components/schemas/PeerCompany"
             },
@@ -1799,6 +2034,7 @@
       "Page_Recommendation_": {
         "properties": {
           "items": {
+            "description": "Elementos de la página.",
             "items": {
               "$ref": "#/components/schemas/Recommendation"
             },
@@ -1827,6 +2063,7 @@
       "Page_Run_": {
         "properties": {
           "items": {
+            "description": "Elementos de la página.",
             "items": {
               "$ref": "#/components/schemas/Run"
             },
@@ -1855,6 +2092,7 @@
       "Page_Source_": {
         "properties": {
           "items": {
+            "description": "Elementos de la página.",
             "items": {
               "$ref": "#/components/schemas/Source"
             },
@@ -1883,6 +2121,7 @@
       "Page_Ticket_": {
         "properties": {
           "items": {
+            "description": "Elementos de la página.",
             "items": {
               "$ref": "#/components/schemas/Ticket"
             },
@@ -1912,6 +2151,7 @@
         "additionalProperties": false,
         "properties": {
           "aliases": {
+            "description": "Otros nombres con los que aparece la empresa en las noticias.",
             "items": {
               "type": "string"
             },
@@ -1919,6 +2159,7 @@
             "type": "array"
           },
           "country": {
+            "description": "País (código ISO de dos letras).",
             "maxLength": 2,
             "minLength": 2,
             "title": "Country",
@@ -1933,18 +2174,22 @@
                 "type": "null"
               }
             ],
+            "description": "Dominio web de la empresa.",
             "title": "Domain"
           },
           "id": {
+            "description": "Id de la empresa par.",
             "title": "Id",
             "type": "string"
           },
           "name": {
+            "description": "Nombre.",
             "minLength": 1,
             "title": "Name",
             "type": "string"
           },
           "sector": {
+            "description": "Sector de la empresa (código del catálogo).",
             "title": "Sector",
             "type": "string"
           }
@@ -1960,8 +2205,20 @@
       },
       "PeerCompanyInput": {
         "additionalProperties": false,
+        "examples": [
+          {
+            "aliases": [
+              "PagosEj"
+            ],
+            "country": "MX",
+            "domain": "pagos-ejemplo.example.test",
+            "name": "Pagos Ejemplo",
+            "sector": "fintech"
+          }
+        ],
         "properties": {
           "aliases": {
+            "description": "Otros nombres con los que aparece la empresa en las noticias.",
             "items": {
               "type": "string"
             },
@@ -1969,6 +2226,7 @@
             "type": "array"
           },
           "country": {
+            "description": "País (código ISO de dos letras).",
             "maxLength": 2,
             "minLength": 2,
             "title": "Country",
@@ -1983,14 +2241,17 @@
                 "type": "null"
               }
             ],
+            "description": "Dominio web de la empresa.",
             "title": "Domain"
           },
           "name": {
+            "description": "Nombre.",
             "minLength": 1,
             "title": "Name",
             "type": "string"
           },
           "sector": {
+            "description": "Sector de la empresa (código del catálogo).",
             "title": "Sector",
             "type": "string"
           }
@@ -2005,8 +2266,22 @@
       },
       "ProfileUpdate": {
         "additionalProperties": false,
+        "examples": [
+          {
+            "countries": [
+              "MX"
+            ],
+            "expected_version": 2,
+            "language": "es",
+            "sector": "fintech",
+            "subsectors": [
+              "payments"
+            ]
+          }
+        ],
         "properties": {
           "countries": {
+            "description": "Países de operación (códigos ISO de dos letras).",
             "items": {
               "type": "string"
             },
@@ -2014,22 +2289,26 @@
             "type": "array"
           },
           "expected_version": {
+            "description": "Versión del perfil que el cliente leyó; 409 si cambió.",
             "minimum": 1.0,
             "title": "Expected Version",
             "type": "integer"
           },
           "language": {
+            "description": "Idioma de salida (por ejemplo `es`).",
             "maxLength": 5,
             "minLength": 2,
             "title": "Language",
             "type": "string"
           },
           "sector": {
+            "description": "Sector de la empresa (código del catálogo).",
             "minLength": 1,
             "title": "Sector",
             "type": "string"
           },
           "subsectors": {
+            "description": "Subsectores (códigos del catálogo).",
             "items": {
               "type": "string"
             },
@@ -2049,8 +2328,31 @@
       },
       "Recommendation": {
         "additionalProperties": false,
+        "examples": [
+          {
+            "assessment_id": "0192f3a4-7b1e-7c2d-8a5f-3e4d5c6b7a89",
+            "asset": null,
+            "base": 82,
+            "created_at": "2026-11-23T10:35:00Z",
+            "cve": "CVE-2026-10001",
+            "feedback_count": 1,
+            "final": 90,
+            "judge_adjustment": 8,
+            "justification": "Vulnerabilidad explotada activamente en un servidor expuesto, impulsada por srv-pagos-01.",
+            "level": "critical",
+            "mitigation": "Actualizar OpenSSL a la versión 3.0.8 o superior.",
+            "mitigation_draft": [
+              "Aislar el servidor de la red pública.",
+              "Aplicar el parche del fabricante."
+            ],
+            "previous_final": null,
+            "product": "OpenSSL 3.0.7",
+            "ticket_url": null
+          }
+        ],
         "properties": {
           "assessment_id": {
+            "description": "Id de la evaluación.",
             "title": "Assessment Id",
             "type": "string"
           },
@@ -2062,13 +2364,16 @@
               {
                 "type": "null"
               }
-            ]
+            ],
+            "description": "Activo que impulsa la recomendación."
           },
           "base": {
+            "description": "Puntaje base (0 a 100) calculado por la fórmula, antes del juez.",
             "title": "Base",
             "type": "integer"
           },
           "created_at": {
+            "description": "Cuándo se hizo la evaluación (UTC).",
             "title": "Created At",
             "type": "string"
           },
@@ -2081,25 +2386,31 @@
                 "type": "null"
               }
             ],
+            "description": "CVE; nulo en alertas inferidas por la IA.",
             "title": "Cve"
           },
           "feedback_count": {
+            "description": "Cantidad de feedbacks activos de la evaluación.",
             "title": "Feedback Count",
             "type": "integer"
           },
           "final": {
+            "description": "Puntaje final (0 a 100) tras el juez y el piso KEV.",
             "title": "Final",
             "type": "integer"
           },
           "judge_adjustment": {
+            "description": "Ajuste del juez en puntos (puede ser negativo).",
             "title": "Judge Adjustment",
             "type": "integer"
           },
           "justification": {
+            "description": "Por qué tiene esta prioridad, en español.",
             "title": "Justification",
             "type": "string"
           },
           "level": {
+            "description": "Nivel de la evaluación. Valores: `critical`: Crítica (urgencia 1); `high`: Alta (urgencia 2); `medium`: Media (urgencia 3); `low`: Baja (urgencia 4).",
             "enum": [
               "critical",
               "high",
@@ -2118,6 +2429,7 @@
                 "type": "null"
               }
             ],
+            "description": "Mitigación redactada, si existe.",
             "title": "Mitigation"
           },
           "mitigation_draft": {
@@ -2132,6 +2444,7 @@
                 "type": "null"
               }
             ],
+            "description": "Pasos de mitigación sugeridos, si existen.",
             "title": "Mitigation Draft"
           },
           "previous_final": {
@@ -2143,6 +2456,7 @@
                 "type": "null"
               }
             ],
+            "description": "Puntaje final de la evaluación anterior, si hubo.",
             "title": "Previous Final"
           },
           "product": {
@@ -2154,6 +2468,7 @@
                 "type": "null"
               }
             ],
+            "description": "Producto afectado; nulo en alertas inferidas.",
             "title": "Product"
           },
           "ticket_url": {
@@ -2165,6 +2480,7 @@
                 "type": "null"
               }
             ],
+            "description": "Enlace al ticket de iTop, si existe.",
             "title": "Ticket Url"
           }
         },
@@ -2217,17 +2533,21 @@
       "RoleAssigned": {
         "properties": {
           "known_user": {
+            "description": "Si el usuario ya existía en Hermes.",
             "title": "Known User",
             "type": "boolean"
           },
           "role": {
-            "$ref": "#/components/schemas/Role"
+            "$ref": "#/components/schemas/Role",
+            "description": "Rol asignado."
           },
           "sessions_revoked": {
+            "description": "Si se revocaron las sesiones activas del usuario.",
             "title": "Sessions Revoked",
             "type": "boolean"
           },
           "uid": {
+            "description": "Identificador del usuario en Firebase.",
             "title": "Uid",
             "type": "string"
           }
@@ -2243,9 +2563,15 @@
       },
       "RoleAssignment": {
         "additionalProperties": false,
+        "examples": [
+          {
+            "role": "analyst"
+          }
+        ],
         "properties": {
           "role": {
-            "$ref": "#/components/schemas/Role"
+            "$ref": "#/components/schemas/Role",
+            "description": "Rol que se asigna."
           }
         },
         "required": [
@@ -2256,6 +2582,16 @@
       },
       "Run": {
         "additionalProperties": false,
+        "examples": [
+          {
+            "finished_at": null,
+            "id": "0192f3a6-2d3e-7f40-8b5c-6d7e8f9a0b1c",
+            "kind": "scan",
+            "progress": 40,
+            "started_at": "2026-11-23T10:30:00Z",
+            "status": "running"
+          }
+        ],
         "properties": {
           "finished_at": {
             "anyOf": [
@@ -2266,13 +2602,16 @@
                 "type": "null"
               }
             ],
+            "description": "Cuándo terminó (UTC); nulo si sigue en curso.",
             "title": "Finished At"
           },
           "id": {
+            "description": "Id de la corrida.",
             "title": "Id",
             "type": "string"
           },
           "kind": {
+            "description": "Qué clase de corrida es. Valores: `scan`: Escaneo simulado de vulnerabilidades; `ingestion`: Ingesta y análisis de noticias; `recalculation`: Recálculo por un cambio de fórmula, sin juez; `nightly`: Recálculo nocturno por el paso del tiempo.",
             "enum": [
               "scan",
               "ingestion",
@@ -2283,16 +2622,19 @@
             "type": "string"
           },
           "progress": {
+            "description": "Avance de 0 a 100.",
             "maximum": 100.0,
             "minimum": 0.0,
             "title": "Progress",
             "type": "integer"
           },
           "started_at": {
+            "description": "Cuándo empezó (UTC).",
             "title": "Started At",
             "type": "string"
           },
           "status": {
+            "description": "Estado de la corrida. Valores: `queued`: En cola; el worker aún no la toma; `running`: En ejecución; `succeeded`: Terminó bien; `failed`: Terminó con error.",
             "enum": [
               "queued",
               "running",
@@ -2316,10 +2658,16 @@
       },
       "ScanRequest": {
         "additionalProperties": false,
+        "examples": [
+          {
+            "kind": "scan"
+          }
+        ],
         "properties": {
           "kind": {
             "const": "scan",
             "default": "scan",
+            "description": "Siempre `scan`.",
             "title": "Kind",
             "type": "string"
           }
@@ -2331,18 +2679,22 @@
         "additionalProperties": false,
         "properties": {
           "base": {
+            "description": "Puntaje base ese día.",
             "title": "Base",
             "type": "integer"
           },
           "date": {
+            "description": "Fecha de la evaluación (UTC).",
             "title": "Date",
             "type": "string"
           },
           "final": {
+            "description": "Puntaje final (0 a 100) tras el juez y el piso KEV.",
             "title": "Final",
             "type": "integer"
           },
           "judge_adjustment": {
+            "description": "Ajuste del juez en puntos (puede ser negativo).",
             "title": "Judge Adjustment",
             "type": "integer"
           }
@@ -2360,18 +2712,22 @@
         "additionalProperties": false,
         "properties": {
           "done": {
+            "description": "Si el paso está hecho.",
             "title": "Done",
             "type": "boolean"
           },
           "n": {
+            "description": "Número del paso.",
             "title": "N",
             "type": "integer"
           },
           "name": {
+            "description": "Nombre del paso.",
             "title": "Name",
             "type": "string"
           },
           "skipped": {
+            "description": "Si el paso se omitió.",
             "title": "Skipped",
             "type": "boolean"
           }
@@ -2387,14 +2743,22 @@
       },
       "SetupStepUpdate": {
         "additionalProperties": false,
+        "examples": [
+          {
+            "done": true,
+            "skipped": false
+          }
+        ],
         "properties": {
           "done": {
             "default": true,
+            "description": "Si el paso está hecho.",
             "title": "Done",
             "type": "boolean"
           },
           "skipped": {
             "default": false,
+            "description": "Si el paso se omitió.",
             "title": "Skipped",
             "type": "boolean"
           }
@@ -2404,11 +2768,20 @@
       },
       "SimulationRequest": {
         "additionalProperties": false,
+        "examples": [
+          {
+            "changes": {
+              "weights.P": "0.25",
+              "weights.S": "0.35"
+            }
+          }
+        ],
         "properties": {
           "changes": {
             "additionalProperties": {
               "type": "string"
             },
+            "description": "Parámetros a cambiar: clave -> valor nuevo, como texto.",
             "minProperties": 1,
             "title": "Changes",
             "type": "object"
@@ -2422,12 +2795,33 @@
       },
       "SimulationResult": {
         "additionalProperties": false,
+        "examples": [
+          {
+            "changed_findings": 2,
+            "last_30_days_effect": "2 de 15 hallazgos abiertos cambiarían de nivel con la fórmula propuesta.",
+            "level_matrix": {
+              "high": {
+                "critical": 1,
+                "high": 5
+              },
+              "medium": {
+                "high": 1,
+                "medium": 8
+              }
+            },
+            "top_movers": [
+              "CVE-2026-10001 en srv-pagos-01: 70 a 82"
+            ]
+          }
+        ],
         "properties": {
           "changed_findings": {
+            "description": "Cuántos hallazgos abiertos cambiarían de nivel.",
             "title": "Changed Findings",
             "type": "integer"
           },
           "last_30_days_effect": {
+            "description": "Resumen del impacto sobre los hallazgos abiertos de hoy, en español.",
             "title": "Last 30 Days Effect",
             "type": "string"
           },
@@ -2443,6 +2837,7 @@
             "type": "object"
           },
           "top_movers": {
+            "description": "Hasta 5 hallazgos que más cambian de puntaje.",
             "items": {
               "type": "string"
             },
@@ -2461,12 +2856,27 @@
       },
       "Source": {
         "additionalProperties": false,
+        "examples": [
+          {
+            "active": true,
+            "health": "ok",
+            "id": "cisa_kev",
+            "items_per_run": 12,
+            "last_capture": "2026-11-23T06:00:00Z",
+            "level": "N1",
+            "name": "CISA KEV",
+            "structural": true,
+            "type": "official"
+          }
+        ],
         "properties": {
           "active": {
+            "description": "Si está activo.",
             "title": "Active",
             "type": "boolean"
           },
           "health": {
+            "description": "Salud de la fuente. Valores: `ok`: Responde bien; `degraded`: Responde con fallas; `failing`: No responde.",
             "enum": [
               "ok",
               "degraded",
@@ -2476,10 +2886,12 @@
             "type": "string"
           },
           "id": {
+            "description": "Id de la fuente.",
             "title": "Id",
             "type": "string"
           },
           "items_per_run": {
+            "description": "Elementos que trae la fuente por corrida.",
             "title": "Items Per Run",
             "type": "integer"
           },
@@ -2492,9 +2904,11 @@
                 "type": "null"
               }
             ],
+            "description": "Última captura de la fuente (UTC).",
             "title": "Last Capture"
           },
           "level": {
+            "description": "Nivel de confianza. Valores: `N1`: Oficial (máxima confianza); `N2`: Investigación o proveedor reconocido; `N3`: Medios especializados; `N4`: Feed propio o sin verificar (mínima confianza).",
             "enum": [
               "N1",
               "N2",
@@ -2505,14 +2919,17 @@
             "type": "string"
           },
           "name": {
+            "description": "Nombre de la fuente.",
             "title": "Name",
             "type": "string"
           },
           "structural": {
+            "description": "Si es una fuente estructural: no se puede apagar.",
             "title": "Structural",
             "type": "boolean"
           },
           "type": {
+            "description": "Clase de fuente. Valores: `official`: Fuente oficial; `research`: Investigación; `media`: Medio; `feed`: Feed propio.",
             "enum": [
               "official",
               "research",
@@ -2539,10 +2956,17 @@
       },
       "SourceCreate": {
         "additionalProperties": false,
+        "examples": [
+          {
+            "kind": "rss",
+            "name": "Boletín de seguridad de ejemplo",
+            "url": "https://feeds.example.test/seguridad.xml"
+          }
+        ],
         "properties": {
           "kind": {
             "default": "rss",
-            "description": "How the feed is read",
+            "description": "How the feed is read Valores: `rss`: Feed RSS; `atom`: Feed Atom; `json`: Documento JSON; `csv`: Archivo CSV; `api`: API.",
             "enum": [
               "rss",
               "atom",
@@ -2554,6 +2978,7 @@
             "type": "string"
           },
           "name": {
+            "description": "Nombre.",
             "minLength": 1,
             "title": "Name",
             "type": "string"
@@ -2574,6 +2999,11 @@
       },
       "SourcePatch": {
         "additionalProperties": false,
+        "examples": [
+          {
+            "active": true
+          }
+        ],
         "properties": {
           "active": {
             "anyOf": [
@@ -2584,6 +3014,7 @@
                 "type": "null"
               }
             ],
+            "description": "Si está activo.",
             "title": "Active"
           },
           "level": {
@@ -2601,7 +3032,7 @@
                 "type": "null"
               }
             ],
-            "description": "Admin only",
+            "description": "Admin only Valores: `N1`: Oficial (máxima confianza); `N2`: Investigación o proveedor reconocido; `N3`: Medios especializados; `N4`: Feed propio o sin verificar (mínima confianza).",
             "title": "Level"
           }
         },
@@ -2612,10 +3043,12 @@
         "additionalProperties": false,
         "properties": {
           "id": {
+            "description": "Id del bundle (`bundle--` y un UUID).",
             "title": "Id",
             "type": "string"
           },
           "objects": {
+            "description": "Objetos STIX del bundle.",
             "items": {
               "additionalProperties": true,
               "type": "object"
@@ -2625,6 +3058,7 @@
           },
           "type": {
             "const": "bundle",
+            "description": "Siempre `bundle`.",
             "title": "Type",
             "type": "string"
           }
@@ -2639,6 +3073,13 @@
       },
       "StixExportRequest": {
         "additionalProperties": false,
+        "examples": [
+          {
+            "exclude_ultra_classified": true,
+            "scope": "vulnerability",
+            "vulnerability_id": "0192f3a4-7b1e-7c2d-8a5f-3e4d5c6b7a89"
+          }
+        ],
         "properties": {
           "date_from": {
             "anyOf": [
@@ -2649,6 +3090,7 @@
                 "type": "null"
               }
             ],
+            "description": "Inicio del rango (UTC).",
             "title": "Date From"
           },
           "date_to": {
@@ -2660,10 +3102,12 @@
                 "type": "null"
               }
             ],
+            "description": "Fin del rango (UTC).",
             "title": "Date To"
           },
           "exclude_ultra_classified": {
             "default": false,
+            "description": "Deja fuera los activos altamente clasificados del bundle y de su TLP.",
             "title": "Exclude Ultra Classified",
             "type": "boolean"
           },
@@ -2676,9 +3120,11 @@
                 "type": "null"
               }
             ],
+            "description": "Id de la corrida cuyo resultado se exporta.",
             "title": "Run Id"
           },
           "scope": {
+            "description": "Qué se exporta. Valores: `vulnerability`: Una vulnerabilidad (`vulnerability_id`); `run`: Lo que produjo una corrida (`run_id`); `date_range`: Un rango de fechas (`date_from` y `date_to`).",
             "enum": [
               "vulnerability",
               "run",
@@ -2696,6 +3142,7 @@
                 "type": "null"
               }
             ],
+            "description": "Id del grupo de vulnerabilidad a exportar.",
             "title": "Vulnerability Id"
           }
         },
@@ -2707,38 +3154,58 @@
       },
       "Ticket": {
         "additionalProperties": false,
+        "examples": [
+          {
+            "custodian": "Infraestructura Linux",
+            "cve": "CVE-2026-10001",
+            "fixed_cis": 1,
+            "itop_id": "1234",
+            "status": "En atención",
+            "total_cis": 3,
+            "urgency": 1,
+            "url": "https://itop.example.test/pages/UI.php?operation=details&class=UserRequest&id=1234"
+          }
+        ],
         "properties": {
           "custodian": {
+            "description": "Equipo custodio del ticket.",
             "title": "Custodian",
             "type": "string"
           },
           "cve": {
+            "description": "CVE del ticket.",
             "title": "Cve",
             "type": "string"
           },
           "fixed_cis": {
+            "description": "Activos ya corregidos.",
             "title": "Fixed Cis",
             "type": "integer"
           },
           "itop_id": {
+            "description": "Id del ticket en iTop.",
             "title": "Itop Id",
             "type": "string"
           },
           "status": {
+            "description": "Estado del ticket en iTop.",
             "title": "Status",
             "type": "string"
           },
           "total_cis": {
+            "description": "Activos totales del ticket.",
             "title": "Total Cis",
             "type": "integer"
           },
           "urgency": {
+            "description": "Urgencia de iTop: 1 (crítica) a 4 (baja).",
             "maximum": 4.0,
             "minimum": 1.0,
             "title": "Urgency",
             "type": "integer"
           },
           "url": {
+            "description": "Enlace.",
             "title": "Url",
             "type": "string"
           }
@@ -2760,10 +3227,12 @@
         "additionalProperties": false,
         "properties": {
           "count": {
+            "description": "Cantidad de grupos de la banda en todo el resultado filtrado.",
             "title": "Count",
             "type": "integer"
           },
           "groups": {
+            "description": "Grupos de vulnerabilidad.",
             "items": {
               "$ref": "#/components/schemas/VulnerabilityGroup"
             },
@@ -2771,6 +3240,7 @@
             "type": "array"
           },
           "level": {
+            "description": "Nivel de la banda. Valores: `critical`: Crítica (urgencia 1); `high`: Alta (urgencia 2); `medium`: Media (urgencia 3); `low`: Baja (urgencia 4).",
             "enum": [
               "critical",
               "high",
@@ -2793,6 +3263,7 @@
         "additionalProperties": false,
         "properties": {
           "assets": {
+            "description": "Activos afectados.",
             "items": {
               "$ref": "#/components/schemas/AffectedAsset"
             },
@@ -2800,11 +3271,12 @@
             "type": "array"
           },
           "ci_count": {
+            "description": "Cantidad de activos afectados.",
             "title": "Ci Count",
             "type": "integer"
           },
           "classification": {
-            "description": "The most restrictive among its assets (FRO-13)",
+            "description": "The most restrictive among its assets (FRO-13) Valores: `public`: Información pública; `classified`: Clasificada; `highly_classified`: Altamente clasificada (se puede excluir de las exportaciones); `unclassified`: Sin clasificación asignada en iTop.",
             "enum": [
               "public",
               "classified",
@@ -2815,6 +3287,7 @@
             "type": "string"
           },
           "custodians": {
+            "description": "Equipos custodios de los activos afectados.",
             "items": {
               "type": "string"
             },
@@ -2822,36 +3295,44 @@
             "type": "array"
           },
           "cve": {
+            "description": "Identificador CVE.",
             "title": "Cve",
             "type": "string"
           },
           "description": {
+            "description": "Descripción del CVE.",
             "title": "Description",
             "type": "string"
           },
           "exposed": {
+            "description": "Si está expuesto a internet.",
             "title": "Exposed",
             "type": "boolean"
           },
           "final": {
+            "description": "Puntaje final (0 a 100) tras el juez y el piso KEV.",
             "maximum": 100.0,
             "minimum": 0.0,
             "title": "Final",
             "type": "integer"
           },
           "group_id": {
+            "description": "Id del grupo de vulnerabilidad (CVE por producto).",
             "title": "Group Id",
             "type": "string"
           },
           "in_kev": {
+            "description": "Si está en el catálogo KEV de CISA (explotación conocida).",
             "title": "In Kev",
             "type": "boolean"
           },
           "last_seen": {
+            "description": "Última vez que se vio el hallazgo (UTC).",
             "title": "Last Seen",
             "type": "string"
           },
           "level": {
+            "description": "Nivel. Valores: `critical`: Crítica (urgencia 1); `high`: Alta (urgencia 2); `medium`: Media (urgencia 3); `low`: Baja (urgencia 4).",
             "enum": [
               "critical",
               "high",
@@ -2862,6 +3343,7 @@
             "type": "string"
           },
           "owners": {
+            "description": "Responsables de los activos afectados.",
             "items": {
               "type": "string"
             },
@@ -2869,10 +3351,12 @@
             "type": "array"
           },
           "product": {
+            "description": "Producto de software afectado.",
             "title": "Product",
             "type": "string"
           },
           "status": {
+            "description": "Estado. Valores: `new`: Apareció en el último escaneo; `persistent`: Sigue presente desde un escaneo anterior; `reopened`: Estaba corregido y volvió a aparecer; `fixed`: Ya no aparece; `no_data`: No hay datos suficientes para decidir.",
             "enum": [
               "new",
               "persistent",
@@ -2884,6 +3368,7 @@
             "type": "string"
           },
           "tickets": {
+            "description": "Tickets de iTop del grupo.",
             "items": {
               "type": "string"
             },
@@ -2916,11 +3401,12 @@
         "additionalProperties": false,
         "properties": {
           "ci_count": {
+            "description": "Cantidad de activos afectados.",
             "title": "Ci Count",
             "type": "integer"
           },
           "classification": {
-            "description": "The most restrictive among its assets (FRO-13)",
+            "description": "The most restrictive among its assets (FRO-13) Valores: `public`: Información pública; `classified`: Clasificada; `highly_classified`: Altamente clasificada (se puede excluir de las exportaciones); `unclassified`: Sin clasificación asignada en iTop.",
             "enum": [
               "public",
               "classified",
@@ -2931,6 +3417,7 @@
             "type": "string"
           },
           "custodians": {
+            "description": "Equipos custodios de los activos afectados.",
             "items": {
               "type": "string"
             },
@@ -2938,32 +3425,39 @@
             "type": "array"
           },
           "cve": {
+            "description": "Identificador CVE.",
             "title": "Cve",
             "type": "string"
           },
           "exposed": {
+            "description": "Si está expuesto a internet.",
             "title": "Exposed",
             "type": "boolean"
           },
           "final": {
+            "description": "Puntaje final más alto entre sus activos.",
             "maximum": 100.0,
             "minimum": 0.0,
             "title": "Final",
             "type": "integer"
           },
           "group_id": {
+            "description": "Id del grupo de vulnerabilidad (CVE por producto).",
             "title": "Group Id",
             "type": "string"
           },
           "in_kev": {
+            "description": "Si está en el catálogo KEV de CISA (explotación conocida).",
             "title": "In Kev",
             "type": "boolean"
           },
           "last_seen": {
+            "description": "Última vez que se vio el hallazgo (UTC).",
             "title": "Last Seen",
             "type": "string"
           },
           "level": {
+            "description": "Nivel del puntaje final. Valores: `critical`: Crítica (urgencia 1); `high`: Alta (urgencia 2); `medium`: Media (urgencia 3); `low`: Baja (urgencia 4).",
             "enum": [
               "critical",
               "high",
@@ -2974,6 +3468,7 @@
             "type": "string"
           },
           "owners": {
+            "description": "Responsables de los activos afectados.",
             "items": {
               "type": "string"
             },
@@ -2981,10 +3476,12 @@
             "type": "array"
           },
           "product": {
+            "description": "Producto de software afectado.",
             "title": "Product",
             "type": "string"
           },
           "status": {
+            "description": "Estado del hallazgo. Valores: `new`: Apareció en el último escaneo; `persistent`: Sigue presente desde un escaneo anterior; `reopened`: Estaba corregido y volvió a aparecer; `fixed`: Ya no aparece; `no_data`: No hay datos suficientes para decidir.",
             "enum": [
               "new",
               "persistent",
@@ -2996,6 +3493,7 @@
             "type": "string"
           },
           "tickets": {
+            "description": "Tickets de iTop del grupo.",
             "items": {
               "type": "string"
             },
@@ -3037,6 +3535,7 @@
                 "type": "null"
               }
             ],
+            "description": "Activos de la página (vista `asset`).",
             "title": "Assets"
           },
           "bands": {
@@ -3051,6 +3550,7 @@
                 "type": "null"
               }
             ],
+            "description": "Una banda por nivel con su conteo y los grupos de la página.",
             "title": "Bands"
           },
           "groups": {
@@ -3065,6 +3565,7 @@
                 "type": "null"
               }
             ],
+            "description": "Grupos de la página (vistas `vulnerability`).",
             "title": "Groups"
           },
           "next_cursor": {
@@ -3076,9 +3577,11 @@
                 "type": "null"
               }
             ],
+            "description": "Cursor de la página siguiente; nulo en la última.",
             "title": "Next Cursor"
           },
           "view": {
+            "description": "Vista que se devuelve. Valores: `vulnerability`: Una fila por vulnerabilidad (CVE por producto); `criticality`: Agrupada por nivel de criticidad; `asset`: Una fila por activo, con su mayor riesgo.",
             "enum": [
               "vulnerability",
               "criticality",
@@ -3099,6 +3602,7 @@
           "status": {
             "const": "accepted",
             "default": "accepted",
+            "description": "Siempre `accepted`.",
             "title": "Status",
             "type": "string"
           }
@@ -3116,6 +3620,15 @@
     }
   },
   "info": {
+    "contact": {
+      "email": "hermes@example.test",
+      "name": "Equipo Hermes"
+    },
+    "description": "API del backend de Hermes: inteligencia de amenazas personalizada. Cruza las vulnerabilidades de los activos de la empresa con noticias de amenazas, las prioriza con un motor determinista y un juez de IA, y las lleva a tickets de iTop.\n\n**Autenticación:** todas las rutas (salvo `GET /api/health` y el webhook de iTop) exigen `Authorization: Bearer <ID token de Firebase>`. Tres roles: `reader` < `analyst` < `admin`.\n\n**Errores:** toda respuesta que no sea 2xx usa el sobre `{ \"error\": { \"code\", \"message\", \"details\" } }`.\n\n**Paginación:** las listas devuelven `{ \"items\": [...], \"next_cursor\": \"...\" }`; manda `cursor` y `limit` para pedir la siguiente página.\n\n**Fechas:** ISO 8601 en UTC.\n\n**Nombres de operación:** cada operación tiene un `operationId` estable en `snake_case` (`verbo_sustantivo`) que los generadores de clientes usan como nombre de función.",
+    "license": {
+      "identifier": "Apache-2.0",
+      "name": "Apache-2.0"
+    },
     "title": "Hermes API",
     "version": "0.1.0"
   },
@@ -3123,10 +3636,11 @@
   "paths": {
     "/api/admin/users/{uid}/role": {
       "put": {
-        "description": "Assign a role as a Firebase custom claim, revoke the user's sessions and audit the change (D-030).",
-        "operationId": "assign_role_api_admin_users__uid__role_put",
+        "description": "Asigna un rol a un usuario y revoca sus sesiones. Solo `admin`.",
+        "operationId": "assign_user_role",
         "parameters": [
           {
+            "description": "Identificador del usuario en Firebase.",
             "in": "path",
             "name": "uid",
             "required": true,
@@ -3264,7 +3778,7 @@
             "HTTPBearer": []
           }
         ],
-        "summary": "Assign Role",
+        "summary": "Asignar rol",
         "tags": [
           "admin"
         ]
@@ -3272,8 +3786,8 @@
     },
     "/api/alerts": {
       "get": {
-        "description": "Threat alerts without a finding: R2 and R3 packages and mode 2 inferences, newest first.",
-        "operationId": "list_alerts_api_alerts_get",
+        "description": "Alertas de amenazas (R2, R3 o inferidas) con actor, víctima y vector.",
+        "operationId": "list_alerts",
         "parameters": [
           {
             "description": "Opaque cursor from `next_cursor`: base64url(payload).base64url(signature). A cursor that is not ours or was altered is answered with 400 `invalid_cursor`.",
@@ -3417,18 +3931,19 @@
             "HTTPBearer": []
           }
         ],
-        "summary": "List Alerts",
+        "summary": "Listar alertas",
         "tags": [
-          "findings"
+          "tickets"
         ]
       }
     },
     "/api/assessments/{id}/breakdown": {
       "get": {
-        "description": "Waterfall of the change from the raw value to the final for one CI of the assessment (EVA-12).",
-        "operationId": "assessment_breakdown_api_assessments__id__breakdown_get",
+        "description": "Cascada de barras desde el valor crudo hasta el final (EVA-12).",
+        "operationId": "get_assessment_breakdown",
         "parameters": [
           {
+            "description": "Identificador del recurso.",
             "in": "path",
             "name": "id",
             "required": true,
@@ -3564,18 +4079,19 @@
             "HTTPBearer": []
           }
         ],
-        "summary": "Assessment Breakdown",
+        "summary": "Desglose de una evaluación",
         "tags": [
-          "findings"
+          "recommendations"
         ]
       }
     },
     "/api/assets/{ci_id}": {
       "get": {
-        "description": "A live CI and its vulnerabilities; each one carries this CI's final, level and status (D-035).",
-        "operationId": "asset_detail_api_assets__ci_id__get",
+        "description": "Un activo (CI de iTop) con sus hallazgos; su riesgo es el mayor de sus hallazgos, nunca una suma.",
+        "operationId": "get_asset",
         "parameters": [
           {
+            "description": "Id del CI en iTop (por ejemplo `CI-0001`).",
             "in": "path",
             "name": "ci_id",
             "required": true,
@@ -3692,16 +4208,16 @@
             "HTTPBearer": []
           }
         ],
-        "summary": "Asset Detail",
+        "summary": "Detalle de un activo",
         "tags": [
-          "findings"
+          "vulnerabilities"
         ]
       }
     },
     "/api/audit": {
       "get": {
-        "description": "Changes made from the front and by the system, newest first. Never shows the values changed.",
-        "operationId": "audit_api_audit_get",
+        "description": "Cambios hechos por personas y por el sistema, con filtros opcionales. Solo `admin`.",
+        "operationId": "list_audit_entries",
         "parameters": [
           {
             "description": "E-mail or display name; 'sistema' for none",
@@ -3921,7 +4437,7 @@
             "HTTPBearer": []
           }
         ],
-        "summary": "Audit",
+        "summary": "Bitácora de auditoría",
         "tags": [
           "operations"
         ]
@@ -3929,8 +4445,8 @@
     },
     "/api/calibration/proposals": {
       "get": {
-        "description": "Mode 4 proposals, newest first. They are only ever applied when an admin approves them (D-020).",
-        "operationId": "list_proposals_api_calibration_proposals_get",
+        "description": "Propuestas semanales de ajuste, con su evidencia y la repetición de 30 días.",
+        "operationId": "list_calibration_proposals",
         "parameters": [
           {
             "description": "Opaque cursor from `next_cursor`: base64url(payload).base64url(signature). A cursor that is not ours or was altered is answered with 400 `invalid_cursor`.",
@@ -4074,18 +4590,19 @@
             "HTTPBearer": []
           }
         ],
-        "summary": "List Proposals",
+        "summary": "Listar propuestas de calibración",
         "tags": [
-          "operations"
+          "calibration"
         ]
       }
     },
     "/api/calibration/proposals/{id}/approve": {
       "post": {
-        "description": "Applies the proposal as a new formula version or a source level change, audited; 409 if it went stale.",
-        "operationId": "approve_proposal_api_calibration_proposals__id__approve_post",
+        "description": "Aplica la propuesta por el servicio de configuración. Solo `admin`.",
+        "operationId": "approve_calibration_proposal",
         "parameters": [
           {
+            "description": "Identificador del recurso.",
             "in": "path",
             "name": "id",
             "required": true,
@@ -4202,17 +4719,19 @@
             "HTTPBearer": []
           }
         ],
-        "summary": "Approve Proposal",
+        "summary": "Aprobar una propuesta",
         "tags": [
-          "operations"
+          "calibration"
         ]
       }
     },
     "/api/calibration/proposals/{id}/reject": {
       "post": {
-        "operationId": "reject_proposal_api_calibration_proposals__id__reject_post",
+        "description": "Descarta la propuesta. Solo `admin`.",
+        "operationId": "reject_calibration_proposal",
         "parameters": [
           {
+            "description": "Identificador del recurso.",
             "in": "path",
             "name": "id",
             "required": true,
@@ -4329,16 +4848,16 @@
             "HTTPBearer": []
           }
         ],
-        "summary": "Reject Proposal",
+        "summary": "Rechazar una propuesta",
         "tags": [
-          "operations"
+          "calibration"
         ]
       }
     },
     "/api/comparison/summary": {
       "get": {
-        "description": "Raw vs processed over the current scored findings (D-039, MET-24 to MET-27). The matrix crosses the CVSS\nlevel of the raw snapshot (rows) with the final level (columns); findings without CVSS stay out of the matrix\nand the indicators. `rank_correlation` is Kendall's tau-b, \"0.00\" when it is undefined.",
-        "operationId": "comparison_summary_api_comparison_summary_get",
+        "description": "Matriz de reclasificación, embudo y métricas de ruido evitado y críticos ocultos.",
+        "operationId": "get_comparison_summary",
         "responses": {
           "200": {
             "content": {
@@ -4446,16 +4965,16 @@
             "HTTPBearer": []
           }
         ],
-        "summary": "Comparison Summary",
+        "summary": "Resumen de la comparación",
         "tags": [
-          "findings"
+          "comparison"
         ]
       }
     },
     "/api/comparison/table": {
       "get": {
-        "description": "One row per current scored finding, largest change against the raw value first (EVA-11, EVA-12).",
-        "operationId": "comparison_table_api_comparison_table_get",
+        "description": "Una fila por CVE y activo: valor crudo, base, ajuste del juez, final y la causa principal.",
+        "operationId": "list_comparison_rows",
         "parameters": [
           {
             "description": "Opaque cursor from `next_cursor`: base64url(payload).base64url(signature). A cursor that is not ours or was altered is answered with 400 `invalid_cursor`.",
@@ -4599,15 +5118,16 @@
             "HTTPBearer": []
           }
         ],
-        "summary": "Comparison Table",
+        "summary": "Tabla de la comparación",
         "tags": [
-          "findings"
+          "comparison"
         ]
       }
     },
     "/api/config": {
       "get": {
-        "operationId": "get_config_api_config_get",
+        "description": "Valores actuales y número de versión.",
+        "operationId": "get_config",
         "responses": {
           "200": {
             "content": {
@@ -4715,14 +5235,14 @@
             "HTTPBearer": []
           }
         ],
-        "summary": "Get Config",
+        "summary": "Configuración vigente",
         "tags": [
           "configuration"
         ]
       },
       "put": {
-        "description": "Optimistic concurrency: `expected_version` must be the current one, else 409 (API-03).\n\nThe change is one new version, validated per parameter and, for the formula, against FRO-05; each parameter\ncarries its own minimum role (API-05).",
-        "operationId": "put_config_api_config_put",
+        "description": "Aplica un cambio como una versión nueva. Exige la versión que el cliente leyó (`expected_version`): 409 si cambió. Un cambio de fórmula encola un recálculo sin llamar al juez.",
+        "operationId": "update_config",
         "requestBody": {
           "content": {
             "application/json": {
@@ -4840,7 +5360,7 @@
             "HTTPBearer": []
           }
         ],
-        "summary": "Put Config",
+        "summary": "Guardar configuración",
         "tags": [
           "configuration"
         ]
@@ -4848,8 +5368,8 @@
     },
     "/api/config/schema": {
       "get": {
-        "description": "Parameter schema the frontend builds its forms from (API-05): the formula and the settings catalog.",
-        "operationId": "config_schema_api_config_schema_get",
+        "description": "Lista de parámetros con su tipo, rango y rol mínimo; con ella el front arma sus formularios.",
+        "operationId": "get_config_schema",
         "responses": {
           "200": {
             "content": {
@@ -4961,7 +5481,7 @@
             "HTTPBearer": []
           }
         ],
-        "summary": "Config Schema",
+        "summary": "Esquema de parámetros",
         "tags": [
           "configuration"
         ]
@@ -4969,7 +5489,8 @@
     },
     "/api/config/versions": {
       "get": {
-        "operationId": "config_versions_api_config_versions_get",
+        "description": "Versiones de la configuración con quién y cuándo.",
+        "operationId": "list_config_versions",
         "parameters": [
           {
             "description": "Opaque cursor from `next_cursor`: base64url(payload).base64url(signature). A cursor that is not ours or was altered is answered with 400 `invalid_cursor`.",
@@ -5113,7 +5634,7 @@
             "HTTPBearer": []
           }
         ],
-        "summary": "Config Versions",
+        "summary": "Historial de versiones",
         "tags": [
           "configuration"
         ]
@@ -5121,10 +5642,11 @@
     },
     "/api/config/versions/{v}/restore": {
       "post": {
-        "description": "Restores a version as a new one without calling the judge (FRO-08).\n\nLike every configuration write it carries the expected current version (API-03): 409 if it changed.",
-        "operationId": "restore_version_api_config_versions__v__restore_post",
+        "description": "Hace vigente una versión anterior como una nueva. Solo `admin`.",
+        "operationId": "restore_config_version",
         "parameters": [
           {
+            "description": "Número de versión de la configuración.",
             "in": "path",
             "name": "v",
             "required": true,
@@ -5253,7 +5775,7 @@
             "HTTPBearer": []
           }
         ],
-        "summary": "Restore Version",
+        "summary": "Restaurar una versión",
         "tags": [
           "configuration"
         ]
@@ -5261,8 +5783,8 @@
     },
     "/api/connections/status": {
       "get": {
-        "description": "iTop, DeepSeek, NVD, abuse.ch, ransomware.live and Firebase: configured or not, latency and a generic message.\n\nResults are reused for 5 minutes, so this route does not spend quota. Never includes a key, not even a partial\none, nor the body of an error (SEG-23).",
-        "operationId": "connections_status_api_connections_status_get",
+        "description": "Último resultado de cada conexión externa (iTop, DeepSeek, NVD, abuse.ch, ransomware.live, Firebase). Nunca devuelve llaves. Solo `admin`.",
+        "operationId": "get_connections_status",
         "responses": {
           "200": {
             "content": {
@@ -5374,7 +5896,7 @@
             "HTTPBearer": []
           }
         ],
-        "summary": "Connections Status",
+        "summary": "Estado de las conexiones",
         "tags": [
           "operations"
         ]
@@ -5382,8 +5904,8 @@
     },
     "/api/connections/test": {
       "post": {
-        "description": "Checks again (\"Probar de nuevo\"); a service checked in the last 30 seconds keeps its result.",
-        "operationId": "connections_test_api_connections_test_post",
+        "description": "Comprueba las conexiones pedidas (o todas) y devuelve el resultado. Solo `admin`.",
+        "operationId": "test_connections",
         "requestBody": {
           "content": {
             "application/json": {
@@ -5505,7 +6027,7 @@
             "HTTPBearer": []
           }
         ],
-        "summary": "Connections Test",
+        "summary": "Probar conexiones",
         "tags": [
           "operations"
         ]
@@ -5513,10 +6035,11 @@
     },
     "/api/cpe/candidates": {
       "get": {
-        "description": "Candidate CPE vendor and product pairs for a software name: NVD's dictionary plus what is already loaded.",
-        "operationId": "cpe_candidates_api_cpe_candidates_get",
+        "description": "Candidatos de CPE para un software, con su puntaje de coincidencia. Rol mínimo: `analyst`.",
+        "operationId": "list_cpe_candidates",
         "parameters": [
           {
+            "description": "Texto a buscar (por ejemplo el nombre del software).",
             "in": "query",
             "name": "q",
             "required": true,
@@ -5639,16 +6162,16 @@
             "HTTPBearer": []
           }
         ],
-        "summary": "Cpe Candidates",
+        "summary": "Candidatos de CPE",
         "tags": [
-          "sources and inventory"
+          "sources"
         ]
       }
     },
     "/api/feedback": {
       "post": {
-        "description": "Same `FeedbackService` as Slack (NOT-06). The user comes from the token, never from the body; it never\nchanges the score by itself.",
-        "operationId": "post_feedback_api_feedback_post",
+        "description": "Registra el feedback del usuario del token sobre una evaluación; es el mismo servicio que usa Slack. Nunca cambia el puntaje por sí mismo. Rol mínimo: `analyst`.",
+        "operationId": "create_feedback",
         "requestBody": {
           "content": {
             "application/json": {
@@ -5766,18 +6289,19 @@
             "HTTPBearer": []
           }
         ],
-        "summary": "Post Feedback",
+        "summary": "Dar feedback",
         "tags": [
-          "findings"
+          "recommendations"
         ]
       }
     },
     "/api/findings/{id}/history": {
       "get": {
-        "description": "Score of the finding's CI in each assessment of its group, oldest first (EVA-05). The judge adjustment\nshown is the group's plus the CI's own.",
-        "operationId": "finding_history_api_findings__id__history_get",
+        "description": "Evolución del puntaje (base, ajuste del juez y final) de un hallazgo.",
+        "operationId": "get_finding_history",
         "parameters": [
           {
+            "description": "Identificador del recurso.",
             "in": "path",
             "name": "id",
             "required": true,
@@ -5898,16 +6422,16 @@
             "HTTPBearer": []
           }
         ],
-        "summary": "Finding History",
+        "summary": "Historial de un hallazgo",
         "tags": [
-          "findings"
+          "vulnerabilities"
         ]
       }
     },
     "/api/formula/simulate": {
       "post": {
-        "description": "Preview only: it never changes data (FRO-06). The proposed formula is validated (FRO-05) and compared with\nthe last assessment of every open finding, keeping the stored judge adjustments (no judge call).",
-        "operationId": "simulate_api_formula_simulate_post",
+        "description": "Vista previa sin guardar nada: cuántos hallazgos abiertos cambiarían de nivel con la fórmula propuesta. Solo `admin`.",
+        "operationId": "simulate_formula",
         "requestBody": {
           "content": {
             "application/json": {
@@ -6025,7 +6549,7 @@
             "HTTPBearer": []
           }
         ],
-        "summary": "Simulate",
+        "summary": "Simular la fórmula",
         "tags": [
           "configuration"
         ]
@@ -6033,8 +6557,8 @@
     },
     "/api/health": {
       "get": {
-        "description": "Liveness check; the only route without authentication (API-01).",
-        "operationId": "health_api_health_get",
+        "description": "Comprobación de vida. Es la única ruta sin autenticación.",
+        "operationId": "get_health",
         "responses": {
           "200": {
             "content": {
@@ -6141,18 +6665,19 @@
             "description": "Error interno del servidor."
           }
         },
-        "summary": "Health",
+        "summary": "Estado del servicio",
         "tags": [
-          "operations"
+          "system"
         ]
       }
     },
     "/api/itop/webhook": {
       "post": {
-        "description": "Doorbell from iTop: re-read the ticket in the background (ARQ-02). Not for the frontend.",
-        "operationId": "itop_webhook_api_itop_webhook_post",
+        "description": "iTop avisa que un ticket cambió. Usa su propio token Bearer (no el de Firebase); responde 202.",
+        "operationId": "receive_itop_webhook",
         "parameters": [
           {
+            "description": "Token de Firebase: `Bearer <ID token>`.",
             "in": "header",
             "name": "authorization",
             "required": false,
@@ -6291,7 +6816,7 @@
             "description": "Webhook or iTop not configured"
           }
         },
-        "summary": "Itop Webhook",
+        "summary": "Webhook de iTop",
         "tags": [
           "itop"
         ]
@@ -6299,10 +6824,11 @@
     },
     "/api/mappings/{software}": {
       "put": {
-        "description": "Maps a software product (its identifier) to the vendor and product of a CPE name (ESC-05, ESC-06).",
-        "operationId": "put_mapping_api_mappings__software__put",
+        "description": "Fija el CPE de un software del inventario. Rol mínimo: `analyst`.",
+        "operationId": "set_cpe_mapping",
         "parameters": [
           {
+            "description": "Nombre del software del inventario.",
             "in": "path",
             "name": "software",
             "required": true,
@@ -6429,16 +6955,16 @@
             "HTTPBearer": []
           }
         ],
-        "summary": "Put Mapping",
+        "summary": "Mapear software a CPE",
         "tags": [
-          "sources and inventory"
+          "sources"
         ]
       }
     },
     "/api/me": {
       "get": {
-        "description": "Current user and role (API-01).",
-        "operationId": "me_api_me_get",
+        "description": "Devuelve el correo, el nombre y el rol del usuario del token.",
+        "operationId": "get_current_user",
         "responses": {
           "200": {
             "content": {
@@ -6556,16 +7082,16 @@
             "HTTPBearer": []
           }
         ],
-        "summary": "Me",
+        "summary": "Usuario actual",
         "tags": [
-          "auth"
+          "system"
         ]
       }
     },
     "/api/metrics": {
       "get": {
-        "description": "Dashboards of docs/10 (FRO-21): the latest nightly value of each metric and the judge ladder level.",
-        "operationId": "metrics_api_metrics_get",
+        "description": "Tablero de métricas del sistema.",
+        "operationId": "get_metrics",
         "responses": {
           "200": {
             "content": {
@@ -6673,7 +7199,7 @@
             "HTTPBearer": []
           }
         ],
-        "summary": "Metrics",
+        "summary": "Métricas",
         "tags": [
           "operations"
         ]
@@ -6681,10 +7207,11 @@
     },
     "/api/notifications/events": {
       "get": {
-        "description": "Notification events of the outbox (NOT-02); `error` lists those that exhausted their retries.",
-        "operationId": "notification_events_api_notifications_events_get",
+        "description": "Eventos que el módulo de Slack entrega, con su estado e intentos. Solo `admin`.",
+        "operationId": "list_notification_events",
         "parameters": [
           {
+            "description": "Estado del hallazgo. Valores: `pending`: Aún no se entrega; `delivered`: Entregado; `error`: Falló; se puede reintentar.",
             "in": "query",
             "name": "status",
             "required": false,
@@ -6841,7 +7368,7 @@
             "HTTPBearer": []
           }
         ],
-        "summary": "Notification Events",
+        "summary": "Eventos de notificación",
         "tags": [
           "operations"
         ]
@@ -6849,10 +7376,11 @@
     },
     "/api/notifications/events/{id}/retry": {
       "post": {
-        "description": "Put an event in error back in the queue with a fresh attempt budget.",
-        "operationId": "retry_event_api_notifications_events__id__retry_post",
+        "description": "Vuelve a poner un evento con error en `pending`. Solo `admin`.",
+        "operationId": "retry_notification_event",
         "parameters": [
           {
+            "description": "Identificador del recurso.",
             "in": "path",
             "name": "id",
             "required": true,
@@ -6969,7 +7497,7 @@
             "HTTPBearer": []
           }
         ],
-        "summary": "Retry Event",
+        "summary": "Reintentar un evento",
         "tags": [
           "operations"
         ]
@@ -6977,7 +7505,8 @@
     },
     "/api/peer-companies": {
       "get": {
-        "operationId": "list_peers_api_peer_companies_get",
+        "description": "Empresas del mismo sector que Hermes vigila en las noticias.",
+        "operationId": "list_peer_companies",
         "parameters": [
           {
             "description": "Opaque cursor from `next_cursor`: base64url(payload).base64url(signature). A cursor that is not ours or was altered is answered with 400 `invalid_cursor`.",
@@ -7121,13 +7650,14 @@
             "HTTPBearer": []
           }
         ],
-        "summary": "List Peers",
+        "summary": "Listar empresas pares",
         "tags": [
           "configuration"
         ]
       },
       "post": {
-        "operationId": "create_peer_api_peer_companies_post",
+        "description": "Agrega una empresa par. Solo `admin`.",
+        "operationId": "create_peer_company",
         "requestBody": {
           "content": {
             "application/json": {
@@ -7245,7 +7775,7 @@
             "HTTPBearer": []
           }
         ],
-        "summary": "Create Peer",
+        "summary": "Crear empresa par",
         "tags": [
           "configuration"
         ]
@@ -7253,9 +7783,11 @@
     },
     "/api/peer-companies/{id}": {
       "delete": {
-        "operationId": "delete_peer_api_peer_companies__id__delete",
+        "description": "Quita una empresa par. Solo `admin`.",
+        "operationId": "delete_peer_company",
         "parameters": [
           {
+            "description": "Identificador del recurso.",
             "in": "path",
             "name": "id",
             "required": true,
@@ -7365,15 +7897,17 @@
             "HTTPBearer": []
           }
         ],
-        "summary": "Delete Peer",
+        "summary": "Eliminar empresa par",
         "tags": [
           "configuration"
         ]
       },
       "put": {
-        "operationId": "update_peer_api_peer_companies__id__put",
+        "description": "Reemplaza los datos de una empresa par. Solo `admin`.",
+        "operationId": "update_peer_company",
         "parameters": [
           {
+            "description": "Identificador del recurso.",
             "in": "path",
             "name": "id",
             "required": true,
@@ -7500,7 +8034,7 @@
             "HTTPBearer": []
           }
         ],
-        "summary": "Update Peer",
+        "summary": "Actualizar empresa par",
         "tags": [
           "configuration"
         ]
@@ -7508,8 +8042,8 @@
     },
     "/api/pending/inventory": {
       "get": {
-        "description": "Inventory items waiting for a person, up to 200 per type (FRO-17); `outside_delivery_model` is not modelled.",
-        "operationId": "pending_inventory_api_pending_inventory_get",
+        "description": "Activos y software con datos faltantes: sin CPE, sin clasificación, sin exposición o sin responsable.",
+        "operationId": "get_pending_inventory",
         "responses": {
           "200": {
             "content": {
@@ -7617,16 +8151,16 @@
             "HTTPBearer": []
           }
         ],
-        "summary": "Pending Inventory",
+        "summary": "Pendientes de inventario",
         "tags": [
-          "sources and inventory"
+          "sources"
         ]
       }
     },
     "/api/profile": {
       "get": {
-        "description": "The company profile; sector and subsectors are catalog codes.",
-        "operationId": "get_profile_api_profile_get",
+        "description": "Sector, subsectores, países e idioma de salida.",
+        "operationId": "get_profile",
         "responses": {
           "200": {
             "content": {
@@ -7734,13 +8268,14 @@
             "HTTPBearer": []
           }
         ],
-        "summary": "Get Profile",
+        "summary": "Perfil de la empresa",
         "tags": [
           "configuration"
         ]
       },
       "put": {
-        "operationId": "put_profile_api_profile_put",
+        "description": "Reemplaza el perfil; exige `expected_version`. Solo `admin`.",
+        "operationId": "update_profile",
         "requestBody": {
           "content": {
             "application/json": {
@@ -7858,7 +8393,7 @@
             "HTTPBearer": []
           }
         ],
-        "summary": "Put Profile",
+        "summary": "Guardar el perfil de la empresa",
         "tags": [
           "configuration"
         ]
@@ -7866,8 +8401,8 @@
     },
     "/api/recommendations": {
       "get": {
-        "description": "Recommendation feed, newest first (FRO-12); `group_id` or `ci_id` narrow it to one timeline.\n\nThe score is the assessment's highest final (EVA-07); the CI shown is the most restrictive one at evaluation\ntime, with its classification, owner and custodian of that moment (FRO-13).",
-        "operationId": "list_recommendations_api_recommendations_get",
+        "description": "Historial de evaluaciones, de la más reciente a la más antigua. Se puede acotar a un grupo o a un activo.",
+        "operationId": "list_recommendations",
         "parameters": [
           {
             "description": "Timeline of one vulnerability group",
@@ -8049,17 +8584,19 @@
             "HTTPBearer": []
           }
         ],
-        "summary": "List Recommendations",
+        "summary": "Listar recomendaciones",
         "tags": [
-          "findings"
+          "recommendations"
         ]
       }
     },
     "/api/recommendations/{assessment_id}": {
       "get": {
-        "operationId": "get_recommendation_api_recommendations__assessment_id__get",
+        "description": "Una evaluación con su justificación y su mitigación.",
+        "operationId": "get_recommendation",
         "parameters": [
           {
+            "description": "Id de la evaluación.",
             "in": "path",
             "name": "assessment_id",
             "required": true,
@@ -8176,18 +8713,19 @@
             "HTTPBearer": []
           }
         ],
-        "summary": "Get Recommendation",
+        "summary": "Detalle de una recomendación",
         "tags": [
-          "findings"
+          "recommendations"
         ]
       }
     },
     "/api/recommendations/{id}/feedback": {
       "get": {
-        "description": "Feedback received on one assessment, from Slack and the front, newest first, superseded ones included\n(FRO-15). `on_older_version`: a newer assessment of the same group changed the score.",
-        "operationId": "recommendation_feedback_api_recommendations__id__feedback_get",
+        "description": "Los feedbacks dados a una evaluación, con el activo de cada uno.",
+        "operationId": "list_recommendation_feedback",
         "parameters": [
           {
+            "description": "Identificador del recurso.",
             "in": "path",
             "name": "id",
             "required": true,
@@ -8308,16 +8846,16 @@
             "HTTPBearer": []
           }
         ],
-        "summary": "Recommendation Feedback",
+        "summary": "Feedback de una recomendación",
         "tags": [
-          "findings"
+          "recommendations"
         ]
       }
     },
     "/api/runs": {
       "get": {
-        "description": "Scans, news runs and recalculations, newest first (ARQ-04).",
-        "operationId": "list_runs_api_runs_get",
+        "description": "Corridas de escaneo, ingesta, recálculo y nocturnas, las más recientes primero.",
+        "operationId": "list_runs",
         "parameters": [
           {
             "description": "Opaque cursor from `next_cursor`: base64url(payload).base64url(signature). A cursor that is not ours or was altered is answered with 400 `invalid_cursor`.",
@@ -8461,18 +8999,19 @@
             "HTTPBearer": []
           }
         ],
-        "summary": "List Runs",
+        "summary": "Listar corridas",
         "tags": [
-          "operations"
+          "runs"
         ]
       }
     },
     "/api/runs/{id}/events": {
       "get": {
-        "description": "Progress of a run until it ends (ARQ-05): one event each time its status or progress changes.",
-        "operationId": "run_events_api_runs__id__events_get",
+        "description": "Flujo `text/event-stream` con el progreso hasta que la corrida termina. Si se corta, reconecta con `Last-Event-ID`.",
+        "operationId": "stream_run_events",
         "parameters": [
           {
+            "description": "Identificador del recurso.",
             "in": "path",
             "name": "id",
             "required": true,
@@ -8605,16 +9144,16 @@
             "HTTPBearer": []
           }
         ],
-        "summary": "Run Events",
+        "summary": "Progreso de una corrida (SSE)",
         "tags": [
-          "operations"
+          "runs"
         ]
       }
     },
     "/api/scans": {
       "post": {
-        "description": "Queues a simulated scan; the worker runs it on this run row and its progress streams from the run events\n(FRO-19). The run shows up in GET /api/runs.",
-        "operationId": "launch_scan_api_scans_post",
+        "description": "Encola un escaneo; el worker lo toma en segundos. Devuelve la corrida en estado `queued`. Rol mínimo: `analyst`.",
+        "operationId": "create_scan",
         "requestBody": {
           "content": {
             "application/json": {
@@ -8732,16 +9271,16 @@
             "HTTPBearer": []
           }
         ],
-        "summary": "Launch Scan",
+        "summary": "Lanzar un escaneo",
         "tags": [
-          "operations"
+          "runs"
         ]
       }
     },
     "/api/setup/status": {
       "get": {
-        "description": "The seven steps of the first-run wizard (D-042). A step is done when the data shows it or an admin marked\nit; step 1 uses the last connection checks without running new ones.",
-        "operationId": "setup_status_api_setup_status_get",
+        "description": "Pasos del asistente de instalación y cuáles están hechos. Solo `admin`.",
+        "operationId": "get_setup_status",
         "responses": {
           "200": {
             "content": {
@@ -8853,7 +9392,7 @@
             "HTTPBearer": []
           }
         ],
-        "summary": "Setup Status",
+        "summary": "Estado de la instalación",
         "tags": [
           "operations"
         ]
@@ -8861,10 +9400,11 @@
     },
     "/api/setup/steps/{n}": {
       "put": {
-        "description": "Marks a step done or skipped (skipping wins); the mark is audited. The wizard never stores a key.",
-        "operationId": "setup_step_api_setup_steps__n__put",
+        "description": "Marca un paso del asistente como hecho u omitido. Solo `admin`.",
+        "operationId": "update_setup_step",
         "parameters": [
           {
+            "description": "Número del paso del asistente de instalación.",
             "in": "path",
             "name": "n",
             "required": true,
@@ -8991,7 +9531,7 @@
             "HTTPBearer": []
           }
         ],
-        "summary": "Setup Step",
+        "summary": "Marcar un paso de instalación",
         "tags": [
           "operations"
         ]
@@ -8999,7 +9539,8 @@
     },
     "/api/sources": {
       "get": {
-        "operationId": "list_sources_api_sources_get",
+        "description": "Fuentes de noticias con su nivel de confianza (N1 a N4), estado y salud.",
+        "operationId": "list_sources",
         "parameters": [
           {
             "description": "Opaque cursor from `next_cursor`: base64url(payload).base64url(signature). A cursor that is not ours or was altered is answered with 400 `invalid_cursor`.",
@@ -9143,14 +9684,14 @@
             "HTTPBearer": []
           }
         ],
-        "summary": "List Sources",
+        "summary": "Listar fuentes",
         "tags": [
-          "sources and inventory"
+          "sources"
         ]
       },
       "post": {
-        "description": "Own feeds enter as N4 and inactive until an analyst switches them on (D-041); the change is audited.",
-        "operationId": "create_source_api_sources_post",
+        "description": "Agrega un feed propio; entra como N4 e inactivo. Debe usar HTTPS. Solo `admin`.",
+        "operationId": "create_source",
         "requestBody": {
           "content": {
             "application/json": {
@@ -9268,18 +9809,19 @@
             "HTTPBearer": []
           }
         ],
-        "summary": "Create Source",
+        "summary": "Agregar una fuente",
         "tags": [
-          "sources and inventory"
+          "sources"
         ]
       }
     },
     "/api/sources/{id}": {
       "patch": {
-        "description": "Analysts switch a source on or off; only an admin changes its level (D-041); structural ones stay on.",
-        "operationId": "patch_source_api_sources__id__patch",
+        "description": "Enciende o apaga una fuente o cambia su nivel (el nivel, solo `admin`). Las fuentes estructurales no se apagan.",
+        "operationId": "update_source",
         "parameters": [
           {
+            "description": "Identificador del recurso.",
             "in": "path",
             "name": "id",
             "required": true,
@@ -9406,16 +9948,16 @@
             "HTTPBearer": []
           }
         ],
-        "summary": "Patch Source",
+        "summary": "Editar una fuente",
         "tags": [
-          "sources and inventory"
+          "sources"
         ]
       }
     },
     "/api/stix/export": {
       "post": {
-        "description": "Exports a STIX 2.1 bundle with TLP marking (STX-03, STX-06). The scope needs its identifier or range.",
-        "operationId": "stix_export_api_stix_export_post",
+        "description": "Bundle STIX 2.1 de una vulnerabilidad, una corrida o un rango de fechas, respetando el TLP. Rol mínimo: `analyst`.",
+        "operationId": "export_stix",
         "requestBody": {
           "content": {
             "application/json": {
@@ -9533,18 +10075,19 @@
             "HTTPBearer": []
           }
         ],
-        "summary": "Stix Export",
+        "summary": "Exportar STIX",
         "tags": [
-          "operations"
+          "stix"
         ]
       }
     },
     "/api/tickets": {
       "get": {
-        "description": "Tickets already created in iTop (D-036), most urgent first, then newest. Before the first sync with iTop\nthe urgency is the band of the ticket score (TIC-03). A CI counts as fixed when none of its linked findings\nis current or it was decommissioned.",
-        "operationId": "list_tickets_api_tickets_get",
+        "description": "Tickets ya creados en iTop, los más urgentes primero.",
+        "operationId": "list_tickets",
         "parameters": [
           {
+            "description": "Urgencia del ticket: 1 (crítica) a 4 (baja).",
             "in": "query",
             "name": "urgency",
             "required": false,
@@ -9704,18 +10247,19 @@
             "HTTPBearer": []
           }
         ],
-        "summary": "List Tickets",
+        "summary": "Listar tickets",
         "tags": [
-          "findings"
+          "tickets"
         ]
       }
     },
     "/api/vulnerabilities": {
       "get": {
-        "description": "Grouped views resolved by the backend (FRO-09). The FRO-10 filters and cursor/limit apply to every view.\n\nGroups are ordered by their final (the highest among their current CIs) and CIs by their risk (the highest\nfinal of their findings, never a sum, FRO-11). In the `criticality` view the page is cut over the groups\nordered by their final; each band reports the number of groups of the whole filtered result and only the\ngroups that fall in the page. Only scored findings on live CIs are listed.",
-        "operationId": "list_vulnerabilities_api_vulnerabilities_get",
+        "description": "Vista agrupada por `vulnerability`, `criticality` o `asset` con los filtros de FRO-10. Pagina por cursor. Rol mínimo: `reader`.",
+        "operationId": "list_vulnerabilities",
         "parameters": [
           {
+            "description": "Nivel de la vulnerabilidad: filtra por banda. Valores: `critical`: Crítica (urgencia 1); `high`: Alta (urgencia 2); `medium`: Media (urgencia 3); `low`: Baja (urgencia 4).",
             "in": "query",
             "name": "band",
             "required": false,
@@ -9738,6 +10282,7 @@
             }
           },
           {
+            "description": "Equipo custodio del activo (texto exacto).",
             "in": "query",
             "name": "custodian",
             "required": false,
@@ -9755,6 +10300,7 @@
             }
           },
           {
+            "description": "Responsable del activo (texto exacto).",
             "in": "query",
             "name": "owner",
             "required": false,
@@ -9772,6 +10318,7 @@
             }
           },
           {
+            "description": "Clasificación de los activos afectados. Valores: `public`: Información pública; `classified`: Clasificada; `highly_classified`: Altamente clasificada (se puede excluir de las exportaciones); `unclassified`: Sin clasificación asignada en iTop.",
             "in": "query",
             "name": "classification",
             "required": false,
@@ -9794,6 +10341,7 @@
             }
           },
           {
+            "description": "Solo activos expuestos a internet (`true`) o no (`false`).",
             "in": "query",
             "name": "exposed",
             "required": false,
@@ -9810,6 +10358,7 @@
             }
           },
           {
+            "description": "Solo vulnerabilidades del catálogo KEV de CISA (`true`) o no.",
             "in": "query",
             "name": "in_kev",
             "required": false,
@@ -9826,6 +10375,7 @@
             }
           },
           {
+            "description": "Estado del hallazgo. Valores: `new`: Apareció en el último escaneo; `persistent`: Sigue presente desde un escaneo anterior; `reopened`: Estaba corregido y volvió a aparecer; `fixed`: Ya no aparece; `no_data`: No hay datos suficientes para decidir.",
             "in": "query",
             "name": "status",
             "required": false,
@@ -9887,6 +10437,7 @@
             }
           },
           {
+            "description": "Vista agrupada: `vulnerability`, `criticality` o `asset`. Valores: `vulnerability`: Una fila por vulnerabilidad (CVE por producto); `criticality`: Agrupada por nivel de criticidad; `asset`: Una fila por activo, con su mayor riesgo.",
             "in": "query",
             "name": "view",
             "required": false,
@@ -10043,18 +10594,19 @@
             "HTTPBearer": []
           }
         ],
-        "summary": "List Vulnerabilities",
+        "summary": "Listar vulnerabilidades",
         "tags": [
-          "findings"
+          "vulnerabilities"
         ]
       }
     },
     "/api/vulnerabilities/{group_id}": {
       "get": {
-        "description": "A vulnerability group with each scored CI and that CI's own score (D-035).",
-        "operationId": "vulnerability_detail_api_vulnerabilities__group_id__get",
+        "description": "Un grupo CVE por producto con todos sus activos afectados.",
+        "operationId": "get_vulnerability",
         "parameters": [
           {
+            "description": "Id del grupo de vulnerabilidad (CVE por producto).",
             "in": "path",
             "name": "group_id",
             "required": true,
@@ -10171,11 +10723,71 @@
             "HTTPBearer": []
           }
         ],
-        "summary": "Vulnerability Detail",
+        "summary": "Detalle de una vulnerabilidad",
         "tags": [
-          "findings"
+          "vulnerabilities"
         ]
       }
     }
-  }
+  },
+  "servers": [
+    {
+      "description": "Desarrollo local (Docker Compose)",
+      "url": "http://127.0.0.1:8000"
+    }
+  ],
+  "tags": [
+    {
+      "description": "Sistema. Salud del servicio y usuario actual.",
+      "name": "system"
+    },
+    {
+      "description": "Vulnerabilidades. Vistas agrupadas por vulnerabilidad, criticidad o activo, detalle e historial.",
+      "name": "vulnerabilities"
+    },
+    {
+      "description": "Comparación. Valor crudo (CVSS) frente al valor procesado por Hermes.",
+      "name": "comparison"
+    },
+    {
+      "description": "Recomendaciones. Historial de recomendaciones, su desglose y el feedback de las personas.",
+      "name": "recommendations"
+    },
+    {
+      "description": "Tickets y alertas. Tickets creados en iTop y alertas de amenazas.",
+      "name": "tickets"
+    },
+    {
+      "description": "Configuración. Parámetros, versiones, simulación de la fórmula, perfil de empresa y empresas pares.",
+      "name": "configuration"
+    },
+    {
+      "description": "Fuentes e inventario. Fuentes de noticias, pendientes de inventario y mapeo a CPE.",
+      "name": "sources"
+    },
+    {
+      "description": "Corridas y escaneos. Escaneos, corridas del pipeline y su progreso en vivo.",
+      "name": "runs"
+    },
+    {
+      "description": "Exportación STIX. Exportación de hallazgos como bundle STIX 2.1.",
+      "name": "stix"
+    },
+    {
+      "description": "Calibración. Propuestas de ajuste supervisadas por un administrador.",
+      "name": "calibration"
+    },
+    {
+      "description": "Operación. Métricas, eventos de notificación, conexiones, instalación y auditoría.",
+      "name": "operations"
+    },
+    {
+      "description": "Administración. Gestión de roles de usuario.",
+      "name": "admin"
+    },
+    {
+      "description": "iTop. Webhook que iTop llama cuando cambia un ticket.",
+      "name": "itop"
+    }
+  ]
 }

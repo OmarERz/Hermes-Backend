@@ -21,7 +21,16 @@ con `openapi-typescript` u `orval`); no escribas tipos a mano.
    interactiva en `http://127.0.0.1:8000/api/docs`, pon `API_DOCS_ENABLED=true` (solo desarrollo).
 2. **Obtén un token de prueba** por rol: `make emulator-token ROLE=admin` (o `analyst`, `reader`). Imprime un
    *ID token* del emulador con el claim `role` ya puesto.
-3. **Genera el cliente** desde `openapi/openapi.json`.
+3. **Genera el cliente** desde `openapi/openapi.json`. Generador recomendado: `openapi-typescript` (probado con la
+   versión 7.9.1; el resultado compila con `tsc --strict`), por ejemplo
+   `npx openapi-typescript@7.9.1 openapi/openapi.json -o src/api/schema.d.ts`; con `orval` o `openapi-generator`
+   funciona igual. El documento declara `servers` (`http://127.0.0.1:8000`, desarrollo local), `tags` por pantalla
+   y descripciones en español en cada operación, parámetro y campo, con `examples` en los cuerpos principales.
+   **Convención de `operationId`:** cada operación tiene uno explícito y estable en `snake_case`, de la forma
+   `verbo_sustantivo` (`list_vulnerabilities`, `get_config`, `update_config`, `create_feedback`, `simulate_formula`).
+   Los generadores lo usan como nombre de función. Verbos: `list_` (colecciones paginadas), `get_` (uno),
+   `create_`, `update_`, `delete_`, `restore_`, `approve_`/`reject_`, `stream_` (SSE). Un `operationId` publicado no
+   se renombra sin versionar la ruta.
 4. **Configura Firebase en el front** contra el emulador en desarrollo (`connectAuthEmulator(auth,
    "http://127.0.0.1:9099")`, proyecto `demo-hermes`) y contra el proyecto real en producción.
 5. **Prueba el recorrido** con las colecciones de Bruno de `bruno/` (`make bruno` con `TEST_TOKEN` de admin):

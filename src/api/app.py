@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from typing import Annotated
+from typing import Annotated, Any
 
 import httpx
 from fastapi import Depends, FastAPI
@@ -15,6 +15,7 @@ from api.auth.directory import SqlUserDirectory
 from api.auth.role_admin import FirebaseRoleManager, RoleManager
 from api.errors import ERROR_RESPONSES, ErrorResponse, UnhandledErrorMiddleware, install_error_handlers
 from api.itop_webhook import build_itop_webhook_router
+from api.openapi_docs import apply as apply_documentation
 from api.pagination import CursorSigner
 from api.request_limits import BodySizeLimitMiddleware
 from api.routes import routers
@@ -30,6 +31,15 @@ from core.tickets.sync import TicketStateSync
 from core.vulndata.nvd import nvd_client
 
 
+class DocumentedApp(FastAPI):
+    """FastAPI whose OpenAPI document carries the documentation layer (`api.openapi_docs`, F10.6)."""
+
+    def openapi(self) -> dict[str, Any]:
+        if self.openapi_schema is None:
+            apply_documentation(super().openapi())
+        return super().openapi()
+
+
 def create_app(
     settings: Settings | None = None,
     token_verifier: TokenVerifier | None = None,
@@ -41,7 +51,7 @@ def create_app(
     settings = settings or Settings()
     configure_logging(settings.secret_values())
     docs = settings.api_docs_enabled
-    app = FastAPI(
+    app = DocumentedApp(
         title="Hermes API",
         version="0.1.0",
         docs_url="/api/docs" if docs else None,
