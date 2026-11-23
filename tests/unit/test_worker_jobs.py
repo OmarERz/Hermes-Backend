@@ -2,13 +2,16 @@
 
 from __future__ import annotations
 
+import logging
 import threading
+import time
 from unittest.mock import MagicMock
 
 import pytest
 from pydantic import SecretStr
 
 from core.config import Settings
+from core.shutdown import StopSignal
 from workers.jobs import (
     DISPATCH_SECONDS,
     ITOP_OUTBOX_SECONDS,
@@ -145,3 +148,72 @@ def test_registered_consumers_are_used_by_name() -> None:
     job = build_jobs(SETTINGS, MagicMock(), {"slack": consumer})[0]
     assert job.lane == "notifications"
     assert job.run.consumers == {"slack": consumer}
+
+
+def test_a_shutdown_inside_a_job_ends_its_lane_quietly(caplog: pytest.LogCaptureFixture) -> None:
+    stop = threading.Event()
+    runs: list[str] = []
+
+    def stopping() -> None:
+        runs.append("stopping")
+        stop.set()
+        StopSignal(stop).check()  # what a cycle's fetcher, source or LLM call raises (#170)
+
+    jobs = [PeriodicJob("cycle", 1, stopping), PeriodicJob("after", 1, lambda: runs.append("after"))]
+    with caplog.at_level(logging.INFO, logger="workers.jobs"):
+        run_jobs(stop, jobs, tick=0)
+    assert runs == ["stopping"]
+    assert "job cycle stopped: the worker is shutting down" in caplog.text
+    assert "failed" not in caplog.text
+
+
+def test_a_cycle_waiting_on_the_network_stops_within_a_second() -> None:
+    stop = threading.Event()
+    signal = StopSignal(stop)
+    started = threading.Event()
+
+    def cycle() -> None:
+        started.set()
+        signal.sleep(300)  # a rate-limit pause or a retry backoff of a long cycle
+
+    timer = threading.Timer(0.1, lambda: started.wait(5) and stop.set())
+    timer.start()
+    begin = time.monotonic()
+    run_jobs_in_threads(stop, [PeriodicJob("news_cycle", 3600, cycle, lane="pipeline")], tick=0.01, grace=8)
+    assert time.monotonic() - begin < 1.5
+
+
+def test_a_lane_stuck_in_a_request_is_left_to_the_process_exit(caplog: pytest.LogCaptureFixture) -> None:
+    stop = threading.Event()
+    release = threading.Event()
+    started = threading.Event()
+
+    def stuck() -> None:
+        started.set()
+        release.wait(30)  # a request already on the wire ignores the stop signal until its own timeout
+
+    timer = threading.Timer(0.05, lambda: started.wait(5) and stop.set())
+    timer.start()
+    begin = time.monotonic()
+    with caplog.at_level(logging.WARNING, logger="workers.jobs"):
+        run_jobs_in_threads(stop, [PeriodicJob("vulndata_refresh", 60, stuck, lane="pipeline")], tick=0.01, grace=0.2)
+    elapsed = time.monotonic() - begin
+    release.set()
+    assert elapsed < 2
+    assert "shutdown: lane-pipeline still busy after 0.2s; it ends with the process" in caplog.text
+
+
+def test_the_pipeline_jobs_receive_the_worker_stop_signal(monkeypatch: pytest.MonkeyPatch) -> None:
+    seen: list[object] = []
+
+    def fake_pipeline_jobs(settings: object, factory: object, job: object, stop: object = None) -> list[PeriodicJob]:
+        seen.append(stop)
+        return []
+
+    monkeypatch.setattr("workers.jobs.pipeline_jobs", fake_pipeline_jobs)
+    stop = threading.Event()
+    build_jobs(SETTINGS, MagicMock(), stop=stop)
+    build_jobs(SETTINGS, MagicMock())
+    assert isinstance(seen[0], StopSignal)
+    assert seen[0].event is stop
+    assert seen[1] is None

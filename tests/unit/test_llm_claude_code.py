@@ -36,6 +36,7 @@ from core.llm import (
     make_tool,
 )
 from core.llm.claude_code import FIXED_ENV, PASSTHROUGH_ENV, child_environment
+from core.llm.stoppable import StoppableCaller
 from core.validation.retry import CircuitBreaker, Timing
 from core.validation.violations import Violation
 from harness.judge import finding_package
@@ -542,8 +543,9 @@ def test_the_worker_wires_claude_code_without_a_deepseek_key(
     executable.chmod(0o755)
     monkeypatch.setenv("PATH", str(tmp_path))
     steps = build_pipeline(settings.model_copy(update={"llm_provider": "claude-code"}), _factory()).steps
-    assert isinstance(steps.judge_caller, ClaudeCodeClient)
-    assert steps.judge_caller.model == "opus"
+    assert isinstance(steps.judge_caller, StoppableCaller)  # every call checks the worker's stop signal (#170)
+    assert isinstance(steps.judge_caller.inner, ClaudeCodeClient)
+    assert steps.judge_caller.inner.model == "opus"
     assert steps.analyze_cves is not None
 
 

@@ -12,7 +12,7 @@ from collections.abc import Callable
 from dataclasses import dataclass
 from datetime import UTC, datetime
 
-from sqlalchemy import select
+from sqlalchemy import select, update
 from sqlalchemy.dialects.postgresql import insert
 from sqlalchemy.orm import Session
 
@@ -24,6 +24,7 @@ from core.ingestion.cleaning import clean_html, clean_plain
 from core.ingestion.connectors import FeedItem, FormatChangedError, parse_feed
 from core.ingestion.fetcher import ARTICLE_CONTENT_TYPES, Fetcher, FetchError
 from core.ingestion.urls import InvalidUrlError, canonicalize_url
+from core.shutdown import ShutdownRequested
 
 log = logging.getLogger("ingestion")
 
@@ -160,7 +161,16 @@ def run_news_ingestion(
     )
     session.add(run)
     session.commit()
-    results = [ingest_source(session, source, fetcher, run.id, clock) for source in news_sources(session)]
+    run_id = run.id
+    try:
+        results = [ingest_source(session, source, fetcher, run_id, clock) for source in news_sources(session)]
+    except ShutdownRequested:
+        # The worker is stopping (#170): the source in hand is rolled back (its articles come again next cycle) and
+        # the run is closed as failed instead of staying `running`.
+        session.rollback()
+        session.execute(update(m.Run).where(m.Run.id == run_id).values(status="failed", finished_at=clock()))
+        session.commit()
+        raise
     run.status = "failed" if results and all(r.status != "ok" for r in results) else "succeeded"
     run.progress, run.finished_at = 100, clock()
     session.commit()
