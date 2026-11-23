@@ -42,7 +42,8 @@ solo escuchan en `127.0.0.1`.
    catálogos, parámetros y fuentes por defecto). `bootstrap` solo carga lo que falta, así que repetir `make up`
    no cambia nada. Después arrancan el servicio de *embeddings* (`embeddings`, modelo local en CPU para deduplicar
    noticias, sin puerto publicado), la API (`http://127.0.0.1:8000`) y los trabajos periódicos (`workers`).
-   La primera construcción descarga el modelo dentro de la imagen; después no vuelve a usar la red.
+   La primera construcción descarga el modelo dentro de la imagen, fijado a un commit de Hugging Face y con el
+   SHA-256 de cada archivo; al arrancar el servicio lo verifica y no arranca si algo cambió. Después no usa la red.
 
 ### 2. Llaves y conexiones
 

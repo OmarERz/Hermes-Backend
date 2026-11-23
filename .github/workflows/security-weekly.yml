@@ -170,6 +170,9 @@ jobs:
     name: zap
     runs-on: ubuntu-latest
     timeout-minutes: 30
+    env:
+      # ZAP scans the API: the embeddings service runs as its fake (compose.ci.yaml); the trivy job scans the real one.
+      COMPOSE_FILE: compose.yaml:compose.ci.yaml
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
