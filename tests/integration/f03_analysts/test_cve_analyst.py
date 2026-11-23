@@ -328,3 +328,28 @@ def test_one_circuit_breaker_serves_the_whole_cve_batch(session: Session, monkey
     results = analyze_pending_cves(session, double_llm_client(down), CveOptions(now=NOW))
     assert len(results) == 7
     assert down.call_count == 5  # five failures open the circuit; the other two make no call
+
+
+def test_a_redirect_to_a_host_off_the_allowlist_stops_the_download() -> None:
+    web = FakeWeb()
+    web.redirect("https://vendor.example.com/a", "https://elsewhere.example.org/landing")
+    web.serve(
+        "https://elsewhere.example.org/landing",
+        b"<html><body><article><p>" + b"text " * 200 + b"</p></article></body></html>",
+        "text/html",
+    )
+    web.redirect("https://vendor.example.com/b", "https://docs.vendor.example.com/ok")
+    web.serve(
+        "https://docs.vendor.example.com/ok",
+        b"<html><body><article><p>" + b"Fixed in the new build. " * 40 + b"</p></article></body></html>",
+        "text/html",
+    )
+    web.redirect("https://vendor.example.com/c", "https://127.0.0.1/admin")
+    fetcher = Fetcher(transport=web.transport(), resolver=lambda _h: ["93.184.216.34"])
+    provider = web_advisory_provider(fetcher, ("vendor.example.com",))
+    assert provider(["https://vendor.example.com/a"]) is None
+    assert [r.headers["host"] for r in web.requests] == ["vendor.example.com"]  # the foreign host was never requested
+    assert provider(["https://vendor.example.com/c"]) is None  # the SSRF guard still stops a private target
+    text = provider(["https://vendor.example.com/b"])  # a subdomain of an allowed domain is fine
+    assert text is not None
+    assert "Fixed in the new build" in text

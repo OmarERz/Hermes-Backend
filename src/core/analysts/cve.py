@@ -66,13 +66,16 @@ def web_advisory_provider(fetcher: Fetcher, allowed: tuple[str, ...] | None = No
 
     domains = advisory_domains() if allowed is None else allowed
 
+    def host_allowed(host: str) -> bool:
+        name = host.lower()
+        return any(name == d or name.endswith("." + d) for d in domains)
+
     def provide(urls: list[str]) -> str | None:
         for url in urls:
-            host = (urlsplit(url).hostname or "").lower()
-            if not any(host == d or host.endswith("." + d) for d in domains):
+            if not host_allowed(urlsplit(url).hostname or ""):
                 continue
             try:
-                page = fetcher.get(url, ARTICLE_CONTENT_TYPES)
+                page = fetcher.get(url, ARTICLE_CONTENT_TYPES, host_allowed)  # every redirect hop is checked too
             except FetchError as exc:
                 log.info("advisory not downloaded: %s", exc)
                 continue

@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from collections.abc import Callable
 from dataclasses import dataclass
 from urllib.parse import urljoin
 
@@ -89,13 +90,21 @@ class Fetcher:
     def close(self) -> None:
         self._client.close()
 
-    def get(self, url: str, accepted_types: frozenset[str] = FEED_CONTENT_TYPES) -> FetchedDocument:
+    def get(
+        self,
+        url: str,
+        accepted_types: frozenset[str] = FEED_CONTENT_TYPES,
+        host_allowed: Callable[[str], bool] | None = None,
+    ) -> FetchedDocument:
+        """GET with limits. `host_allowed` (an allowlist) is checked on the first URL and on every redirect hop."""
         current = url
         for _ in range(self._limits.max_redirects + 1):
             try:
-                validate_public_url(current, self._resolver)
+                host = validate_public_url(current, self._resolver)
             except UnsafeUrlError as exc:
                 raise FetchError(f"Refused target: {exc}") from exc
+            if host_allowed is not None and not host_allowed(host):
+                raise FetchError("Refused target: host is not on the allowlist")
             try:
                 with self._client.stream("GET", current) as response:
                     if response.status_code in REDIRECT_STATUSES:
