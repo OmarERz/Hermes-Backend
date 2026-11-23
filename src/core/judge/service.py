@@ -11,6 +11,7 @@ from __future__ import annotations
 import uuid
 from collections.abc import Mapping
 from dataclasses import dataclass, replace
+from decimal import Decimal
 
 from sqlalchemy.orm import Session
 
@@ -71,16 +72,18 @@ class JudgeService:
         self._env = env
         self._tools = tools
 
-    def _session(self, package: ReviewPackage) -> JudgeSession:
-        """A fresh, independent conversation: the second review never sees the first one (blind)."""
-        return JudgeSession(self._caller, package, self._env, self._tools)
-
-    def evaluate(self, package: ReviewPackage) -> JudgeResult:
-        first = self._session(package).run()
-        if not needs_double_review(first, package, self._env.settings):
+    def evaluate(self, package: ReviewPackage, spent_usd: Decimal = Decimal(0)) -> JudgeResult:
+        """The model's review(s) of the package; never touches the database (F12.2 #105). `spent_usd`: what earlier
+        reviews of this caller cost since its environment read the day's spending (they count against the day)."""
+        env = self._env
+        if spent_usd:
+            env = replace(env, daily_budget=OffsetDailyBudget(env.daily_budget, spent_usd))
+        first = JudgeSession(self._caller, package, env, self._tools).run()  # each review: a fresh conversation
+        if not needs_double_review(first, package, env.settings):
             return JudgeResult(first.status, first.adjustment, first.ci_adjustments, first)
-        # the first review is not stored yet: the blind one counts its cost against the day (L12)
-        offset = replace(self._env, daily_budget=OffsetDailyBudget(self._env.daily_budget, first.cost_usd))
+        # blind: the second conversation never sees the first one, which is not stored yet and so counts against the
+        # day through the offset (L12)
+        offset = replace(env, daily_budget=OffsetDailyBudget(env.daily_budget, first.cost_usd))
         second = JudgeSession(self._caller, package, offset, self._tools).run()
         if second.adjustment is None:  # any failure of the second review: final = base (L11)
             return JudgeResult(ReviewStatus.NO_JUDGE_REVIEW, None, {}, first, second)
@@ -94,9 +97,13 @@ class JudgeService:
         return JudgeResult(status, combined.adjustment, combined.ci_adjustments, first, second)
 
     def review(self, session: Session, package: ReviewPackage, target: ReviewTarget) -> StoredJudgeResult:
-        """Evaluate and store: the first review carries the final status, the blind one links to it (A-2); the
+        """`evaluate` then `store` (tools and tests). The pipeline calls the two steps itself, with no transaction
+        open in between (`core.pipeline.judging`)."""
+        return self.store(session, target, self.evaluate(package))
+
+    def store(self, session: Session, target: ReviewTarget, result: JudgeResult) -> StoredJudgeResult:
+        """Store an evaluation: the first review carries the final status, the blind one links to it (A-2); the
         package is queued for a later run when the result fell back to the base (PRE-01)."""
-        result = self.evaluate(package)
         first = result.first
         if result.status is ReviewStatus.NO_JUDGE_REVIEW and first.adjustment is not None:
             # the blind review failed: final = base, so no drafted mitigation is kept (JUE-MIT-09); record the cause

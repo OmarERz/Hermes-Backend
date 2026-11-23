@@ -9,7 +9,7 @@ from typing import Any
 
 import pytest
 from pipeline_support import NOW, judge_caller
-from sqlalchemy import func, select
+from sqlalchemy import Engine, func, select, update
 from sqlalchemy.orm import Session, sessionmaker
 
 from core.configuration import formula_store
@@ -28,6 +28,7 @@ from core.scoring.queue import queue_recalculation
 from core.tickets.content import ItopIdentity
 from core.tickets.lifecycle import TicketLifecycle
 from doubles.llm import tool_call_completion
+from harness.transactions import open_transactions
 
 pytestmark = pytest.mark.integration
 
@@ -271,3 +272,57 @@ def test_a_group_that_stops_being_active_mid_pass_is_skipped_and_the_run_still_s
             )
             == 1
         )
+
+
+def describe(engine: Engine, text: str) -> None:
+    """A committed iTop change to the first demo CI: its description is part of the package fingerprint."""
+    with Session(engine) as session, session.begin():
+        session.execute(update(m.Asset).where(m.Asset.itop_ci_id == "CI-1").values(description=text))
+
+
+def test_no_transaction_is_open_while_the_judge_answers_and_a_stale_review_is_judged_again(
+    factory: sessionmaker[Session], engine: Engine
+) -> None:
+    """F12.2 #105 with real commits: the read transaction is committed before every judge call, and a CI that
+    changed during the first review makes the evaluation judge the new package (the first review is kept)."""
+    describe(engine, "Servidor de pagos (revision 1)")  # a package the judge has not reviewed yet
+    caller, double = judge_caller(finalize_only(), finalize_only())
+    seen: list[list[tuple[int, str, int]]] = []
+
+    def meanwhile() -> None:
+        seen.append(open_transactions(engine))
+        if len(seen) == 1:
+            describe(engine, "Servidor de pagos (revision 2)")  # nothing blocks this write while the model answers
+
+    double.on_request = meanwhile
+    with factory() as session, session.begin():
+        run_id = scan_run(session, "persistent")
+    steps = Steps(
+        news=lambda _s, _reason: NewsCycleOutput(None, []),
+        scan=lambda _queued, _reason: ScanCycleOutput(run_id),
+        evaluate=engine_evaluate,
+        judge_caller=caller,
+    )
+    steps.correlate_groups = lambda _s, _g, _n: []
+
+    report = Pipeline(factory, steps, clock=lambda: NOW).scan_cycle()
+
+    assert (report.assessments, report.failures) == (1, 0)
+    assert seen == [[], []]  # two reviews, neither inside a transaction
+    double.assert_calls(2)
+    with factory() as session:
+        assessment = session.scalars(
+            select(m.Assessment)
+            .where(m.Assessment.finding_group_id == demo_group(session))
+            .order_by(m.Assessment.assessed_at.desc(), m.Assessment.id.desc())
+        ).first()
+        assert assessment is not None
+        review = session.get_one(m.LlmReview, assessment.llm_review_id)
+        package = session.get_one(m.ReviewPackage, review.review_package_id)
+        ci = next(c for c in package.content["group"]["cis"] if c["ci_id"] == "CI-1")
+        assert ci["description"] == "Servidor de pagos (revision 2)"  # the applied review saw the CI as it is now
+        stale = session.scalars(
+            select(m.ReviewPackage).where(m.ReviewPackage.content["group"]["cis"].astext.contains("revision 1"))
+        ).all()
+        assert len(stale) == 1  # the first package and its review are kept (its tokens were paid)
+        assert session.scalars(select(m.LlmReview).where(m.LlmReview.review_package_id == stale[0].id)).all()

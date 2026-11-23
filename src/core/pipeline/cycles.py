@@ -9,7 +9,8 @@
 * Nightly: recalculation of every open group **without the judge** (COR-05).
 
 The cycles never overlap: each takes the pipeline lock and is skipped when another cycle holds it (the scan also
-keeps its own lock). Every group is evaluated in its own transaction, so one failing group never stops the rest.
+keeps its own lock). Every group is evaluated in its own session, so one failing group never stops the rest; no
+transaction is open while a model answers (the analysts and the judge commit their read step first, F12.2 #105).
 Events are written by the ticket lifecycle; the dispatcher delivers them on its own.
 
 Scoring (`evaluate`, `recalculate`) and the package scorer of mode 2 (`dismissal_package`) come from F4.3: they are
@@ -32,7 +33,7 @@ from core.correlation.engine import StoryOutcome, correlate_new_groups, correlat
 from core.db import models as m
 from core.ingestion.embeddings import EmbeddingError
 from core.judge.session import ToolCaller
-from core.pipeline.judging import JudgeFn, dismiss_story, judge_for
+from core.pipeline.judging import PipelineJudge, dismiss_story, judge_for
 from core.pipeline.locks import cycle_lock
 from core.scoring.queue import (
     claim_recalculation,
@@ -47,7 +48,7 @@ SCAN_EVALUATED_STATUSES: Final = ("new", "reopened", "fixed", "persistent")
 SCAN_CORRELATED_STATUSES: Final = ("new", "reopened")
 
 # (session, group_id, run_id, trigger, judge or None) -> the stored assessment id, None when nothing changed.
-Evaluator = Callable[[Session, uuid.UUID, uuid.UUID, str, JudgeFn | None], uuid.UUID | None]
+Evaluator = Callable[[Session, uuid.UUID, uuid.UUID, str, PipelineJudge | None], uuid.UUID | None]
 # (session, story_id) -> the dismissal package of that story (F4.3 scorer).
 DismissalPackager = Callable[[Session, uuid.UUID], dict[str, Any]]
 
@@ -282,7 +283,7 @@ class Pipeline:
                 report.failures += 1
                 log.exception("mode 2 on story %s failed; the next cycle retries it", story_id)
 
-    def _judge(self, session: Session) -> JudgeFn | None:
+    def _judge(self, session: Session) -> PipelineJudge | None:
         caller = self.steps.judge_caller
         return judge_for(session, caller, self.clock()) if caller is not None else None
 

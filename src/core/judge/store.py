@@ -385,14 +385,20 @@ def parse_model_price(prices: Any, model: str) -> ModelPrice | None:
 
 
 def load_daily_budget(session: Session, price: ModelPrice, today: date) -> LedgerDailyBudget:
-    """The judge's daily budget from `daily_budget_usd` and `critical_reserve` (docs/11) over `llm_usage_daily`."""
+    """The judge's daily budget from `daily_budget_usd` and `critical_reserve` (docs/11) over `llm_usage_daily`.
+
+    The day's spending is read once, here: the judge consults the budget between the turns of a review, when no
+    transaction is open (F12.2 #105), so it never queries the database then. What the review in progress spent is
+    added by the session (`pending_usd`), and the reviews stored since by the same caller through `OffsetDailyBudget`;
+    the pipeline loads a new budget for every group it evaluates."""
     values = _settings(session, _BUDGET_KEYS)
     defaults = BudgetConfig()
     config = BudgetConfig(
         daily_usd=Decimal(str(values.get("daily_budget_usd", defaults.daily_usd))),
         critical_reserve=Decimal(str(values.get("critical_reserve", defaults.critical_reserve))),
     )
-    return LedgerDailyBudget(lambda: spent_on(session, today), config, price.cost(TURN_ESTIMATE))
+    spent = spent_on(session, today)
+    return LedgerDailyBudget(lambda: spent, config, price.cost(TURN_ESTIMATE))
 
 
 def judge_environment(session: Session, today: date, ladder_level: int = 0) -> JudgeEnvironment:
