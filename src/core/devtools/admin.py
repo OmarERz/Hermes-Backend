@@ -39,7 +39,7 @@ class AdminError(RuntimeError):
     """A configuration problem the CLI reports without a traceback."""
 
 
-def _url(env_name: str, secret_name: str) -> str:
+def database_url_from_env(env_name: str, secret_name: str) -> str:
     raw = os.environ.get(env_name, "").strip()
     if not raw:
         raise AdminError(f"{env_name} is not set")
@@ -115,13 +115,18 @@ def main(argv: Sequence[str] | None = None) -> int:
     args = parser.parse_args(argv)
     try:
         if args.command == "seed":
-            run_seed(_url("MIGRATION_DATABASE_URL", "migrator_db_password"), args.scenario)
+            run_seed(database_url_from_env("MIGRATION_DATABASE_URL", "migrator_db_password"), args.scenario)
             sys.stdout.write(f"seeded scenario {args.scenario}\n")
         elif args.command == "bootstrap":
-            sys.stdout.write(run_bootstrap(_url("MIGRATION_DATABASE_URL", "migrator_db_password")) + "\n")
+            sys.stdout.write(
+                run_bootstrap(database_url_from_env("MIGRATION_DATABASE_URL", "migrator_db_password")) + "\n"
+            )
         else:
             rows = list_events(
-                _url("DATABASE_URL", "pgpassword"), limit=args.limit, status=args.status, event_type=args.event_type
+                database_url_from_env("DATABASE_URL", "pgpassword"),
+                limit=args.limit,
+                status=args.status,
+                event_type=args.event_type,
             )
             for row in rows:
                 sys.stdout.write(json.dumps(row, ensure_ascii=False) + "\n")

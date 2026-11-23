@@ -392,3 +392,26 @@ def test_a_queued_request_runs_on_its_own_run_row(world: Engine) -> None:
         assert next_queued_scan(session) is None
     with pytest.raises(ValueError, match="not a queued scan"):
         scan(world, 1, ScanOptions(run_id=queued))  # it already ran
+
+
+def test_the_scan_reads_itop_with_no_transaction_open(world: Engine, monkeypatch: pytest.MonkeyPatch) -> None:
+    """The slow iTop read keeps no snapshot nor lock in PostgreSQL; only the write is a transaction (pending #106)."""
+    seen: list[int] = []
+
+    def read(_reader: object) -> object:
+        with world.connect() as conn:
+            seen.append(
+                conn.execute(
+                    text(
+                        "SELECT count(*) FROM pg_stat_activity WHERE datname = current_database()"
+                        " AND state LIKE 'idle in transaction%' AND pid <> pg_backend_pid()"
+                    )
+                ).scalar_one()
+            )
+        raise RuntimeError("iTop is down")
+
+    monkeypatch.setattr("core.inventory.sync.read_inventory", read)
+    with pytest.raises(RuntimeError, match="iTop is down"):
+        scan(world, 0, ScanOptions(reader=ItopReader("http://localhost", "token")))
+    assert seen == [0]
+    assert rows(world, "SELECT status FROM run ORDER BY started_at DESC LIMIT 1") == [("failed",)]

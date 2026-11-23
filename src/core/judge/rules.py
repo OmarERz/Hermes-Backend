@@ -5,8 +5,8 @@ Each rejection names the broken rule (L4.*, L5.*, L6.*, L7.*) and a Spanish reas
 
 - L4: closed list; L4.disabled (reason off or lowering not allowed by the profile); L4.package_type;
   L4.repeated (each reason once per review); L4.<code> (the reason's own rule); L4.corroboration (SEG-12).
-- L5.element (ID not in this package); L5.quote (not verbatim, too short or too long); L5.reused (one quote,
-  one reason).
+- L5.element (ID not in this package); L5.asset (a CI reason that does not cite a CI); L5.quote (not verbatim, too
+  short or too long); L5.reused (one quote, or a trimmed or extended copy of it, one reason).
 - L6 (source level too low to lower, docs/09 §2); L6.suspicious (SEG-03 news cannot lower).
 - L7.direction (direction not allowed or sign mismatch); L7.points; L7.explanation.
 """
@@ -109,6 +109,8 @@ def check_reason(proposal: ReasonProposal, accepted: Sequence[AcceptedReason], c
     if verdict is not None:
         return verdict
     element = ctx.package.elements[proposal.evidence_id]
+    if spec.applies_to_asset and element.ci_id is None:  # it adds to one CI: the evidence must be that CI (#64)
+        return _reject("L5.asset", "Este motivo debe citar la descripción de un CI del paquete.")
     verdict = _check_level(proposal, spec, element, ctx) or _check_own_rule(proposal, element, ctx)
     if verdict is not None:
         return verdict
@@ -158,8 +160,11 @@ def _check_evidence(proposal: ReasonProposal, accepted: Sequence[AcceptedReason]
     quote = normalize_text(proposal.quote)
     if not MIN_QUOTE_CHARS <= len(quote) <= MAX_QUOTE_CHARS or not element.contains(quote):
         return _reject("L5.quote", "La cita no aparece textual en el elemento citado.")
-    if any(r.evidence_id == proposal.evidence_id and normalize_text(r.quote) == quote for r in accepted):
-        return _reject("L5.reused", "Esa cita ya justifica otro motivo.")
+    # One evidence, one reason: a trimmed or extended version of an accepted quote in the same element is the same
+    # evidence (pending F6.1 #61).
+    for previous in (normalize_text(r.quote) for r in accepted if r.evidence_id == proposal.evidence_id):
+        if quote in previous or previous in quote:
+            return _reject("L5.reused", "Esa cita ya justifica otro motivo.")
     return None
 
 

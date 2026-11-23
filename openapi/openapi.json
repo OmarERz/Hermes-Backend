@@ -962,10 +962,15 @@
         "properties": {
           "changes": {
             "additionalProperties": {
+              "maxLength": 1000,
               "type": "string"
             },
             "description": "Parámetros a cambiar: clave -> valor nuevo, como texto.",
+            "maxProperties": 100,
             "minProperties": 1,
+            "propertyNames": {
+              "maxLength": 100
+            },
             "title": "Changes",
             "type": "object"
           },
@@ -1135,6 +1140,7 @@
                   ],
                   "type": "string"
                 },
+                "maxItems": 10,
                 "type": "array"
               },
               {
@@ -1410,6 +1416,7 @@
         "properties": {
           "assessment_id": {
             "description": "Id de la evaluación.",
+            "maxLength": 100,
             "title": "Assessment Id",
             "type": "string"
           },
@@ -1685,6 +1692,7 @@
         "properties": {
           "cpe": {
             "description": "Identificador CPE 2.3 del software.",
+            "maxLength": 512,
             "pattern": "^cpe:2\\.3:",
             "title": "Cpe",
             "type": "string"
@@ -2220,8 +2228,10 @@
           "aliases": {
             "description": "Otros nombres con los que aparece la empresa en las noticias.",
             "items": {
+              "maxLength": 200,
               "type": "string"
             },
+            "maxItems": 50,
             "title": "Aliases",
             "type": "array"
           },
@@ -2235,6 +2245,7 @@
           "domain": {
             "anyOf": [
               {
+                "maxLength": 253,
                 "type": "string"
               },
               {
@@ -2246,12 +2257,14 @@
           },
           "name": {
             "description": "Nombre.",
+            "maxLength": 200,
             "minLength": 1,
             "title": "Name",
             "type": "string"
           },
           "sector": {
             "description": "Sector de la empresa (código del catálogo).",
+            "maxLength": 100,
             "title": "Sector",
             "type": "string"
           }
@@ -2283,8 +2296,10 @@
           "countries": {
             "description": "Países de operación (códigos ISO de dos letras).",
             "items": {
+              "maxLength": 100,
               "type": "string"
             },
+            "maxItems": 300,
             "title": "Countries",
             "type": "array"
           },
@@ -2303,6 +2318,7 @@
           },
           "sector": {
             "description": "Sector de la empresa (código del catálogo).",
+            "maxLength": 100,
             "minLength": 1,
             "title": "Sector",
             "type": "string"
@@ -2310,8 +2326,10 @@
           "subsectors": {
             "description": "Subsectores (códigos del catálogo).",
             "items": {
+              "maxLength": 100,
               "type": "string"
             },
+            "maxItems": 50,
             "title": "Subsectors",
             "type": "array"
           }
@@ -2779,10 +2797,15 @@
         "properties": {
           "changes": {
             "additionalProperties": {
+              "maxLength": 1000,
               "type": "string"
             },
             "description": "Parámetros a cambiar: clave -> valor nuevo, como texto.",
+            "maxProperties": 100,
             "minProperties": 1,
+            "propertyNames": {
+              "maxLength": 100
+            },
             "title": "Changes",
             "type": "object"
           }
@@ -2979,12 +3002,14 @@
           },
           "name": {
             "description": "Nombre.",
+            "maxLength": 200,
             "minLength": 1,
             "title": "Name",
             "type": "string"
           },
           "url": {
             "description": "Own feeds must use HTTPS; they enter as N4 (D-041)",
+            "maxLength": 2048,
             "pattern": "^https://",
             "title": "Url",
             "type": "string"
@@ -3084,6 +3109,7 @@
           "date_from": {
             "anyOf": [
               {
+                "maxLength": 100,
                 "type": "string"
               },
               {
@@ -3096,6 +3122,7 @@
           "date_to": {
             "anyOf": [
               {
+                "maxLength": 100,
                 "type": "string"
               },
               {
@@ -3114,6 +3141,7 @@
           "run_id": {
             "anyOf": [
               {
+                "maxLength": 100,
                 "type": "string"
               },
               {
@@ -3136,6 +3164,7 @@
           "vulnerability_id": {
             "anyOf": [
               {
+                "maxLength": 100,
                 "type": "string"
               },
               {

@@ -41,7 +41,7 @@ from core.correlation.packages import store_package
 from core.db import models as m
 from core.db.seeds import seed_demo_inventory
 from core.db.session import make_engine
-from core.devtools.admin import AdminError, _url
+from core.devtools.admin import AdminError, database_url_from_env
 from core.ingestion.catalog import sync_default_sources
 from core.scan.engine import ScanOptions, run_scan
 from core.scoring.evaluate import EvaluationOptions, GroupNotActiveError, JudgeFn, JudgeVerdict, evaluate_group
@@ -448,7 +448,7 @@ def run_cycle(factory: sessionmaker[Session], now: datetime | None = None) -> De
 def main(argv: Sequence[str] | None = None) -> int:
     del argv
     try:
-        engine = make_engine(_url("MIGRATION_DATABASE_URL", "migrator_db_password"))
+        engine = make_engine(database_url_from_env("MIGRATION_DATABASE_URL", "migrator_db_password"))
     except AdminError as error:
         sys.stderr.write(f"error: {error}\n")
         return 2
