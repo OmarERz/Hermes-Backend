@@ -39,7 +39,7 @@ from core.scoring.evaluate import (
     evaluate_group,
     recalculate_open_groups,
 )
-from core.scoring.formula_repo import load_active_formula
+from core.scoring.formula_repo import load_active_formula, load_formula
 from core.vulndata.epss import EpssResult, fetch_daily, load_epss
 from core.vulndata.http import JsonSource
 from core.vulndata.kev import KevResult, fetch_catalogue, load_kev
@@ -112,6 +112,36 @@ def engine_recalculate(tickets: TicketApplier | None) -> Callable[[Session], obj
         return recalculate_open_groups(session, "nightly", EvaluationOptions(tickets=tickets))
 
     return run
+
+
+def engine_recalculate_queued(tickets: TicketApplier | None) -> Callable[[Session, uuid.UUID], object]:
+    """A queued formula-change request (FRO-08): the same recalculation, on the request's own run row, with the
+    formula version the save created. A request whose version was replaced by a later save is superseded: that
+    save queued its own pass, so this one has nothing left to do."""
+
+    def run(session: Session, run_id: uuid.UUID) -> object:
+        request = session.get_one(m.Run, run_id)
+        try:
+            version_id = request.formula_version_id
+            active_id, _ = load_active_formula(session)
+            if version_id is None or version_id != active_id:
+                _finish(session, request, "succeeded", 100)
+                return None
+            # One formula for the whole pass: every assessment of this run carries the run's version (D-061); a save
+            # that lands mid-pass queues its own request, which re-evaluates with the newer version afterwards.
+            options = EvaluationOptions(tickets=tickets, formula=(version_id, load_formula(session, version_id)))
+        except Exception:
+            session.rollback()
+            _finish(session, session.get_one(m.Run, run_id), "failed", 0)  # never left running (ARQ-04)
+            raise
+        return recalculate_open_groups(session, "formula_change", options, run_id=run_id)
+
+    return run
+
+
+def _finish(session: Session, request: m.Run, status: str, progress: int) -> None:
+    request.status, request.progress, request.finished_at = status, progress, datetime.now(UTC)
+    session.commit()
 
 
 def engine_dismissal_package(session: Session, story_id: uuid.UUID) -> dict[str, Any]:

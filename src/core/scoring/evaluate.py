@@ -39,7 +39,7 @@ from core.scoring.engine import (
     ticket_score,
     urgency,
 )
-from core.scoring.formula_repo import load_active_formula
+from core.scoring.formula_repo import load_active_formula, load_formula
 
 log = logging.getLogger("scoring")
 
@@ -443,6 +443,7 @@ def recalculate_open_groups(
     trigger: str = "formula_change",
     options: EvaluationOptions | None = None,
     commit: bool = True,
+    run_id: uuid.UUID | None = None,
 ) -> RecalculationReport:
     """Recompute every active group with the formula and the clock, **without calling the judge** (COR-05): a
     weights change or the nightly decay reuses each group's last adjustment.
@@ -450,20 +451,24 @@ def recalculate_open_groups(
     With `commit` (the default) every group is its own short transaction, so a long recalculation never holds the
     locks of the groups it already finished. A failure marks the run `failed` and re-raises. With `commit=False`
     everything stays in the caller's transaction.
+
+    With `run_id` the work happens on that already claimed (`running`) request row instead of a new run, which is how
+    a queued formula-change request (`POST /api/config`) is served.
     """
     given = options or EvaluationOptions()
     moment = given.now or utc_now()
-    run = m.Run(
-        id=new_id(),
-        kind="recalculation" if trigger == "formula_change" else "nightly",
-        status="running",
-        progress=0,
-        trigger_reason="formula_change" if trigger == "formula_change" else "schedule",
-        started_at=moment,
-    )
-    session.add(run)
-    session.flush()
-    run_id = run.id
+    if run_id is None:
+        run = m.Run(
+            id=new_id(),
+            kind="recalculation" if trigger == "formula_change" else "nightly",
+            status="running",
+            progress=0,
+            trigger_reason="formula_change" if trigger == "formula_change" else "schedule",
+            started_at=moment,
+        )
+        session.add(run)
+        session.flush()
+        run_id = run.id
     if commit:
         session.commit()  # the run row exists (ARQ-04) before any work that can fail
     group_ids: list[uuid.UUID] = []
@@ -474,7 +479,12 @@ def recalculate_open_groups(
         options = EvaluationOptions(judge=None, tickets=given.tickets, formula=given.formula, now=moment)
         group_ids = [group.id for group in load_active_groups(session)]
         for group_id in group_ids:
-            changed += evaluate_group(session, group_id, run_id, trigger, options).changed
+            try:
+                changed += evaluate_group(session, group_id, run_id, trigger, options).changed
+            except GroupNotActiveError:
+                # A false positive or a fix took its last open finding after the list was read: nothing to score
+                # (the error is raised before anything is written, so the caller's transaction is untouched).
+                continue
             if commit:
                 session.commit()
         _finish_run(session, run_id, "succeeded", moment)
@@ -513,7 +523,8 @@ class SimulatedChange:
 class Simulation:
     findings: int  # current findings of open groups that have a stored assessment
     changed_level: int  # how many would move to another urgency band
-    changes: tuple[SimulatedChange, ...]
+    changes: tuple[SimulatedChange, ...]  # only the findings that move to another urgency band
+    moves: tuple[SimulatedChange, ...] = ()  # every compared finding, with or without a band change (FRO-06)
 
 
 def _last_finals(session: Session, group_id: uuid.UUID) -> tuple[m.Assessment, dict[uuid.UUID, int]] | None:
@@ -526,15 +537,14 @@ def _last_finals(session: Session, group_id: uuid.UUID) -> tuple[m.Assessment, d
     return previous, dict(rows.all())
 
 
-def simulate(
-    session: Session, proposed: Formula, current: Formula | None = None, now: datetime | None = None
-) -> Simulation:
+def simulate(session: Session, proposed: Formula, now: datetime | None = None) -> Simulation:
     """FRO-06: how many open findings would change level with `proposed`, with nothing written. The stored judge
     adjustments are kept (no judge call), the levels are the urgency bands of each formula."""
     moment = now or utc_now()
-    active = current or load_active_formula(session)[1]
     total = 0
     changes: list[SimulatedChange] = []
+    moves: list[SimulatedChange] = []
+    stored_bands: dict[uuid.UUID, Formula] = {}  # the formula each stored assessment was made with
     for group in load_active_groups(session):
         last = _last_finals(session, group.id)
         if last is None:
@@ -548,9 +558,16 @@ def simulate(
                 continue
             total += 1
             before, after = finals[ci.asset_id], ci.final.final
-            band_before, band_after = urgency(active, before), urgency(proposed, after)
+            if previous.formula_version_id not in stored_bands:
+                stored_bands[previous.formula_version_id] = load_formula(session, previous.formula_version_id)
+            # The level before is the one the stored score had under its own formula (a saved formula may still be
+            # waiting for its recalculation); the level after is the one under the proposed formula.
+            band_before, band_after = (
+                urgency(stored_bands[previous.formula_version_id], before),
+                urgency(proposed, after),
+            )
+            move = SimulatedChange(group.id, ci.asset_id, group.cve_id, before, after, band_before, band_after)
+            moves.append(move)
             if band_before != band_after:
-                changes.append(
-                    SimulatedChange(group.id, ci.asset_id, group.cve_id, before, after, band_before, band_after)
-                )
-    return Simulation(total, len(changes), tuple(changes))
+                changes.append(move)
+    return Simulation(total, len(changes), tuple(changes), tuple(moves))

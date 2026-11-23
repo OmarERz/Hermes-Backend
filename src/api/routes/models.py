@@ -317,6 +317,12 @@ class FeedbackRequest(_Model):
     proposed_level: Level | None = None
     proposed_score: Score | None = None
     comment: str | None = Field(default=None, max_length=2000)
+    ticket_itop_id: str | None = Field(
+        default=None,
+        pattern=r"^[0-9]{1,12}$",
+        description="Optional: iTop id of the ticket the user acted on; scopes ticket-level effects "
+        "(stop_suggestions, false_positive) to it instead of every ticket of the assessment (TIC-07).",
+    )
 
     @model_validator(mode="after")
     def _wrong_priority_needs_a_level(self) -> Self:

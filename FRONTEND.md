@@ -122,13 +122,20 @@ Todo error responde con:
   ruta para cambiarse**; no muestres controles para ellos.
 - **Fuentes estructurales** (🔒): no se pueden apagar (409 `structural_source`). Un feed nuevo entra como N4 e
   inactivo.
-- **Simulación antes de guardar** la fórmula o la sensibilidad: llama a `POST /api/formula/simulate` y muestra el
-  impacto; guardar recalcula sin llamar al juez. ⚠️ **Estado actual:** la simulación todavía devuelve un resultado
-  de **ejemplo** (el cálculo real existe en el backend y se está conectando a esta ruta) y guardar aún no dispara
-  el recálculo automático. Muestra el resultado marcado como "vista previa no disponible" hasta que el OpenAPI
-  o el changelog del backend indiquen lo contrario.
+- **Simulación antes de guardar** la fórmula: llama a `POST /api/formula/simulate` y muestra el impacto; guardar
+  recalcula sin llamar al juez. La simulación es real y solo acepta parámetros de la fórmula (los demás, como la
+  sensibilidad del juez, dan 422: no tienen vista previa). Compara cada hallazgo abierto con su última evaluación
+  usando la fórmula propuesta (sin llamar al juez) y devuelve `changed_findings` (los que cambian de nivel),
+  `level_matrix` (nivel antes -> nivel después -> cuántos, incluidos los que se quedan en su nivel), `top_movers`
+  (hasta 5, por mayor cambio de puntaje) y `last_30_days_effect` (un resumen del impacto sobre los hallazgos
+  abiertos de hoy; el motor no reproduce los últimos 30 días). Guardar o restaurar una fórmula encola una corrida
+  `recalculation` (estado `queued`, visible en `GET /api/runs`) que el worker toma en segundos; cada guardado
+  encola la suya.
 - **Feedback:** un feedback activo por usuario y evaluación (editable); `wrong_priority` exige el nivel
-  propuesto. El usuario sale del token, nunca del cuerpo.
+  propuesto. El usuario sale del token, nunca del cuerpo. Si la evaluación tiene tickets de varios custodios, manda
+  `ticket_itop_id` (el ticket que el usuario tiene a la vista) para que «no sugerir más» y «falso positivo» solo
+  afecten a ese ticket; sin él se aplican a todos los tickets de la evaluación. Errores: 404 si la evaluación no
+  existe, 403 si el usuario no es analista o admin activo, 422 si el ticket no es de esa evaluación.
 - **Niveles por nombre:** la comparación muestra el nivel CVSS (Crítica/Alta/Media/Baja) contra la urgencia
   final por su nombre, cada uno con su escala; no compares números entre escalas.
 - **Cascada del Δ:** `GET /api/assessments/{id}/breakdown` devuelve las barras (factores, juez, piso, límites,
