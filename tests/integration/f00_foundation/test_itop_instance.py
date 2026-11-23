@@ -21,12 +21,14 @@ import httpx
 import pytest
 
 from harness import itop_seed
+from harness.isolation import free_port, run_name
 
 pytestmark = [pytest.mark.e2e, pytest.mark.slow]
 
 ROOT = Path(__file__).resolve().parents[3]
-PROJECT = "hermes-itop-e2e"
-PORT = "18081"
+# Unique per run: other worktrees may run this weekly suite on the same Docker host (tests/harness/isolation.py).
+PROJECT = run_name("hermes-itop-e2e")
+PORT = str(free_port())
 REST = f"http://127.0.0.1:{PORT}/webservices/rest.php"
 
 
@@ -108,7 +110,7 @@ def instance(webhook_receiver: str) -> Iterator[dict[str, str]]:
         assert install.returncode == 0, install.stdout[-2000:] + install.stderr[-2000:]
         yield env
     finally:
-        compose(env, "down", "-v", "--remove-orphans", timeout=300)
+        compose(env, "down", "-v", "--remove-orphans", "--rmi", "local", timeout=300)
 
 
 def test_seed_then_read_with_the_rest_user(instance: dict[str, str]) -> None:

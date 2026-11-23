@@ -141,7 +141,7 @@ PageQuery = Annotated[PageParams, Depends(page_params)]
 
 
 def paginate[T](items: Sequence[T], params: PageParams, signer: CursorSigner) -> Page[T]:
-    """Page over an in-memory sequence with an `offset` keyset (sample routes; real routes use keyset queries)."""
+    """Page over an in-memory sequence with an `offset` keyset (short lists read whole: versions, peers, runs)."""
     offset = params.keyset.get("offset") if params.keyset else 0
     if not isinstance(offset, int) or isinstance(offset, bool) or offset < 0:
         raise _invalid_cursor()
@@ -150,7 +150,7 @@ def paginate[T](items: Sequence[T], params: PageParams, signer: CursorSigner) ->
     return Page[T](items=list(items[offset:end]), next_cursor=next_cursor)
 
 
-KeyPart = Literal["int", "uuid", "time"]
+KeyPart = Literal["int", "uuid", "time", "str"]
 
 
 def _key_value(raw: object, part: KeyPart) -> object:
@@ -159,14 +159,16 @@ def _key_value(raw: object, part: KeyPart) -> object:
         return raw if isinstance(raw, int) and not isinstance(raw, bool) else None
     if not isinstance(raw, str):
         return None
+    if part == "str":
+        return raw
     try:
         return uuid.UUID(raw) if part == "uuid" else datetime.fromisoformat(raw)
     except ValueError:
         return None
 
 
-def _key_text(value: int | uuid.UUID | datetime) -> int | str:
-    if isinstance(value, int):
+def _key_text(value: int | str | uuid.UUID | datetime) -> int | str:
+    if isinstance(value, int | str):
         return value
     return value.isoformat() if isinstance(value, datetime) else str(value)
 
@@ -187,7 +189,9 @@ def decode_key(params: PageParams, kind: str, parts: Sequence[KeyPart]) -> tuple
     return values
 
 
-def encode_key(signer: CursorSigner, kind: str, values: Sequence[int | uuid.UUID | datetime] | None) -> str | None:
+def encode_key(
+    signer: CursorSigner, kind: str, values: Sequence[int | str | uuid.UUID | datetime] | None
+) -> str | None:
     """The signed cursor of the next page of list `kind`, or None when there is no next page."""
     if values is None:
         return None

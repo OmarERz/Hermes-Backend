@@ -13,9 +13,11 @@ from typing import Any
 import httpx
 import pytest
 from f05data import T0, make_team, make_ticket
+from pydantic import SecretStr
 from sqlalchemy import func, select
 from sqlalchemy.orm import Session, sessionmaker
 
+from core.config import Settings
 from core.db import models as m
 from core.itop.outbox import (
     ItopOutboxWorker,
@@ -27,6 +29,7 @@ from core.itop.outbox import (
     record_write,
     stimulus_payload,
     update_payload,
+    writer_from_settings,
 )
 from doubles.itop import ItopDouble
 
@@ -126,7 +129,7 @@ def test_create_sets_the_itop_id_and_the_shadow_urgency(factory: sessionmaker[Se
     created = next(iter(double.data["UserRequest"].values()))
     assert stored.itop_ticket_id == created["id"]
     assert stored.itop_ref == created["ref"]
-    assert created["description"] == f"Descripción\n\nRef. Hermes: {ticket.id}"
+    assert created["description"] == f"Descripción<br><br>Ref. Hermes: {ticket.id}"  # iTop reads HTML (F12.3)
     assert (stored.status, stored.current_urgency, stored.current_impact) == ("open", 3, "service")
     assert stored.itop_created_at == T0
     row = outbox_row(factory, row_id)
@@ -330,8 +333,8 @@ def test_updates_wait_for_the_create_and_run_in_order(factory: sessionmaker[Sess
 
     assert double.operations[:2] == ["core/get", "core/create"]
     created = next(iter(double.data["UserRequest"].values()))
-    assert created["public_log"].startswith("Sigue presente\n\n[hermes:")
-    assert created["private_log"].startswith("Nota privada\n\n[hermes:")
+    assert created["public_log"].startswith("Sigue presente<br><br>[hermes:")  # iTop reads HTML (F12.3)
+    assert created["private_log"].startswith("Nota privada<br><br>[hermes:")
     # The marker carries the whole row id (32 hex digits), not only its timestamp part (pending F5.1 #43).
     assert re.search(r"\[hermes:[0-9a-f]{32}\]", created["public_log"])
     assert created["urgency"] == "1"
@@ -446,6 +449,100 @@ def test_a_corrupted_payload_fails_without_calling_itop(factory: sessionmaker[Se
     assert double.writes == []
 
 
+def test_text_reaches_itop_html_encoded_and_the_payload_stays_plain(factory: sessionmaker[Session]) -> None:
+    """F12.3 (ASVS V1.2.1): iTop stores the description and case logs as HTML and keeps links and remote images, so
+    markup inside names, news or LLM text must arrive escaped, and line breaks as `<br>`."""
+    double, clock = ItopDouble(), Clock()
+    ticket = new_ticket(factory)
+    hostile = 'Paso 1 <img src="https://evil.test/p.png">\nVer <a href="https://phish.test">parche</a> & "más"'
+    create = queue(
+        factory, ticket.id, create_payload({**ticket_fields(), "description": hostile}), f"create:{ticket.id}"
+    )
+    comment = queue(factory, ticket.id, comment_payload("<b>Nota</b>\nde Ana's", private=True), "c-1", action="suggest")
+
+    assert worker(factory, double, clock).drain() == 2
+
+    created = next(iter(double.data["UserRequest"].values()))
+    assert created["description"] == (
+        "Paso 1 &lt;img src=&quot;https://evil.test/p.png&quot;&gt;<br>"
+        "Ver &lt;a href=&quot;https://phish.test&quot;&gt;parche&lt;/a&gt; &amp; &quot;más&quot;"
+        f"<br><br>Ref. Hermes: {ticket.id}"
+    )
+    assert created["private_log"].startswith("&lt;b&gt;Nota&lt;/b&gt;<br>de Ana&#x27;s<br><br>[hermes:")
+    assert "<img" not in json.dumps(double.data["UserRequest"]) and "<a " not in json.dumps(double.data["UserRequest"])
+    assert outbox_row(factory, create).payload["fields"]["description"] == hostile  # stored as written
+    assert outbox_row(factory, comment).payload["text"] == "<b>Nota</b>\nde Ana's"
+
+
+def test_an_escaped_description_still_finds_our_ticket_on_retry(factory: sessionmaker[Session]) -> None:
+    """The create marker has no character HTML escapes, so a retry still recognises our ticket (lost create answer)."""
+    double, clock = ItopDouble(), Clock()
+    ticket = new_ticket(factory)
+    queue(factory, ticket.id, create_payload({**ticket_fields(), "description": "a < b"}), f"create:{ticket.id}")
+    worker(factory, double, clock, http=losing_responses(double, "core/create")).drain()
+    clock.advance(minutes=2)
+
+    worker(factory, double, clock).drain()
+
+    assert len(double.data["UserRequest"]) == 1
+    assert reload(factory, ticket.id).itop_ticket_id is not None
+
+
+def test_an_oversized_description_is_cut_but_the_ticket_is_created_and_found_again(
+    factory: sessionmaker[Session],
+) -> None:
+    """iTop's description is a 65 535-byte TEXT column: escaping must not push a long description past it, and the
+    `Ref. Hermes` marker (the create's idempotency) must survive the cut."""
+    double, clock = ItopDouble(), Clock()
+    ticket = new_ticket(factory)
+    long_text = "\n".join(f"- CI {i} <expuesto> & dueño «Ñandú»" for i in range(4000))
+    queue(factory, ticket.id, create_payload({**ticket_fields(), "description": long_text}), f"create:{ticket.id}")
+    worker(factory, double, clock, http=losing_responses(double, "core/create")).drain()
+    clock.advance(minutes=2)
+
+    worker(factory, double, clock).drain()
+
+    assert len(double.data["UserRequest"]) == 1  # the retry found the cut ticket by its marker
+    created = next(iter(double.data["UserRequest"].values()))
+    assert len(created["description"].encode()) < 65_535
+    assert created["description"].endswith(
+        f"Texto recortado: no cabe completo en iTop; el detalle está en Hermes.<br>Ref. Hermes: {ticket.id}"
+    )
+    assert reload(factory, ticket.id).itop_ticket_id == created["id"]
+
+
+def test_every_write_carries_the_comment_itop_requires_as_its_userinfo(factory: sessionmaker[Session]) -> None:
+    """iTop 3.2.2 refuses core/create, core/update and core/apply_stimulus without `comment` (checked live, F12.3)
+    and keeps it as the change's userinfo, which TicketStateSync compares with ITOP_SYSTEM_USER (D-007)."""
+    double, clock = ItopDouble(require_comment=True), Clock()
+    ticket = new_ticket(factory)
+    queue(factory, ticket.id, create_payload(ticket_fields()), f"create:{ticket.id}")
+    queue(factory, ticket.id, update_payload({"urgency": "1"}), "u-1", action="raise_urgency")
+    queue(factory, ticket.id, comment_payload("Sigue presente"), "c-1", action="comment")
+    writer = build_writer("http://localhost", str(double.token), http=double.client(), track_info="hermes-system")
+
+    assert ItopOutboxWorker(factory, writer, clock=clock).drain() == 3
+
+    assert double.write_comments == ["hermes-system"] * 3
+    with factory() as session:
+        assert set(session.scalars(select(m.ItopOutbox.status))) == {"done"}
+
+
+def test_the_writer_from_settings_signs_its_writes_with_the_system_user() -> None:
+    settings = Settings(
+        _env_file=None,
+        cursor_signing_key=SecretStr("k" * 40),
+        database_url=SecretStr("postgresql://app:pw@db/hermes"),
+        firebase_project_id="demo-hermes",
+        itop_url="https://itop.example.test",
+        itop_token=SecretStr("t"),
+        itop_system_user="  hermes-rest  ",
+    )
+    assert writer_from_settings(settings).track_info == "hermes-rest"
+    unset = settings.model_copy(update={"itop_system_user": None})
+    assert writer_from_settings(unset).track_info == "Hermes"
+
+
 def test_a_comment_written_with_the_older_short_marker_is_not_sent_twice(factory: sessionmaker[Session]) -> None:
     """A row retried after the upgrade still finds the 16-digit marker of its first attempt (PRE-02, F5.1 #43)."""
     double, clock = ItopDouble(), Clock()
@@ -520,3 +617,20 @@ def test_a_legacy_row_does_not_take_another_comment_with_its_short_marker(factor
 
     assert [c.operation for c in double.writes] == ["core/update"]
     assert outbox_row(factory, row_id).status == "done"
+
+
+def test_adding_an_owner_keeps_the_contacts_a_person_added(factory: sessionmaker[Session]) -> None:
+    """`contacts_list` replaces the whole list in iTop: the worker merges it with what the ticket has (F5.2 #54)."""
+    double, clock = ItopDouble(), Clock()
+    manual = [{"contact_id": "7", "role": "Seguridad", "role_code": "manual", "contact_id_friendlyname": "Ana"}]
+    double.add("UserRequest", 70, title="t", status="new", ref="R-000070", contacts_list=manual)
+    ticket = new_ticket(factory, itop_id="70")
+    owners = [{"contact_id": "9"}, {"contact_id": "7"}]
+    queue(factory, ticket.id, update_payload({"contacts_list": owners}), "u-contacts", action="add_owner")
+
+    worker(factory, double, clock).drain()
+
+    assert double.data["UserRequest"]["70"]["contacts_list"] == [
+        {"contact_id": "7", "role": "Seguridad", "role_code": "manual"},
+        {"contact_id": "9"},
+    ]

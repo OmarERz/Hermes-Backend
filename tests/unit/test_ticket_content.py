@@ -2,10 +2,14 @@
 
 from __future__ import annotations
 
+import dataclasses
+
 import pytest
 
+from core.itop.rich_text import DESCRIPTION_MAX_BYTES, encoded_size
 from core.mitigation.builder import Mitigation
 from core.tickets.content import (
+    MARKER_ROOM,
     CiLine,
     ItopIdentity,
     NewsLine,
@@ -134,3 +138,26 @@ def test_mitigation_from_the_data_lists_every_section() -> None:
     )
     assert mitigation_text(Mitigation("CVE-2026-1", (), (), (), (), (), ())) is None
     assert mitigation_text(None) is None
+
+
+def test_a_huge_inventory_shortens_only_the_ci_list_and_keeps_every_tic_08_section() -> None:
+    """F12.3: iTop's description holds 65 535 bytes once HTML-encoded; the CI list gives way, nothing else does."""
+    many = [ci(f"servidor-{i:04d}-ñandú", 100 - i % 100, f"Dueña {i}") for i in range(3000)]
+    context = dataclasses.replace(CONTEXT, cis=many)
+
+    text = description(context, 2)
+
+    assert encoded_size(text) <= DESCRIPTION_MAX_BYTES - MARKER_ROOM
+    for section in ("Factores: S 0.9", "Motivos del juez:", "Actualizar a 1.26.1.", "1. Actualizar nginx en web-01."):
+        assert section in text
+    assert text.rstrip().endswith("- 2026-11-20 · BleepingComputer · https://news.example.test/a")
+    kept = [line for line in text.splitlines() if line.startswith("- servidor-")]
+    assert 0 < len(kept) < 3000
+    assert kept[0].startswith("- servidor-0000-ñandú: 100")  # the highest scores stay
+    assert f"- … y {3000 - len(kept)} CIs más (lista completa en los CIs del ticket y en Hermes)." in text
+
+
+def test_a_description_that_fits_lists_every_ci() -> None:
+    text = description(CONTEXT, 2)
+    assert "CIs más" not in text
+    assert all(name in text for name in ("web-01", "web-02", "old-01", "- x"))

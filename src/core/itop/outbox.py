@@ -41,6 +41,7 @@ from core.db import models as m
 from core.itop import oql
 from core.itop.client import READ_OPERATIONS, ItopError, ItopObject, ItopReader, ItopUnavailableError
 from core.itop.oql import FIRST_PRINTABLE
+from core.itop.rich_text import encode_html_fields
 
 log = logging.getLogger("core.itop.outbox")
 
@@ -50,6 +51,10 @@ LOG_FIELDS: Final = frozenset({"public_log", "private_log"})
 STIMULI: Final = frozenset({"ev_reopen"})
 REOPENABLE: Final = frozenset({"resolved", "closed"})  # ev_reopen still needed while the ticket is in these
 MAX_BACKOFF_MINUTES: Final = 60
+# iTop's REST API refuses every core/create, core/update and core/apply_stimulus without `comment` ("Missing parameter
+# 'comment'", code 100, checked live on 3.2.2) and records it as the change's `userinfo` in the ticket history.
+# TicketStateSync tells our changes from a person's by that `userinfo` (D-007), so it is `ITOP_SYSTEM_USER`.
+DEFAULT_TRACK_INFO: Final = "Hermes"
 
 Kind = Literal["create", "update", "stimulus", "comment"]
 # itop_outbox.operation only knows create/update/comment: a stimulus is an update of the ticket's state.
@@ -74,7 +79,8 @@ def create_payload(fields: dict[str, Any], *, fallback_team_id: str | None = Non
 
 
 def update_payload(fields: dict[str, Any]) -> dict[str, Any]:
-    """`core/update` of plain fields. A linked set (`functionalcis_list`, `contacts_list`) replaces the whole list."""
+    """`core/update` of plain fields. A linked set (`functionalcis_list`, `contacts_list`) replaces the whole list; the
+    worker merges `contacts_list` with the contacts already on the ticket before writing."""
     if not fields:
         raise ValueError("an update needs at least one field")
     if LOG_FIELDS & fields.keys():
@@ -160,6 +166,7 @@ class _ItopWriter(ItopReader):
     """
 
     max_attempts: int = 1
+    track_info: str = DEFAULT_TRACK_INFO
 
     def call(self, operation: dict[str, Any]) -> dict[str, Any]:
         if operation.get("operation") not in WRITE_OPERATIONS | READ_OPERATIONS:
@@ -173,7 +180,14 @@ class _ItopWriter(ItopReader):
                 client.close()
 
     def write(self, operation: dict[str, Any]) -> tuple[str, str | None]:
-        """Send a write and return the (id, ref) of the object iTop answered with."""
+        """Send a write and return the (id, ref) of the object iTop answered with.
+
+        The ticket's description and comments are plain text here; iTop reads them as HTML, so they are encoded on
+        the way out (`core.itop.rich_text`). The stored payload stays plain text.
+        """
+        if operation.get("class") == TICKET_CLASS and isinstance(operation.get("fields"), dict):
+            operation = {**operation, "fields": encode_html_fields(operation["fields"])}
+        operation = {"comment": self.track_info, **operation}
         body = self.call(operation)
         objects = body.get("objects") or {}
         if not isinstance(objects, dict) or len(objects) != 1:
@@ -195,7 +209,10 @@ def writer_from_settings(settings: Settings, *, http: httpx.Client | None = None
     """Fails closed when iTop is not configured (prototype C5)."""
     if settings.itop_url is None or settings.itop_token is None:
         raise ValueError("ITOP_URL and ITOP_TOKEN must be configured")
-    return build_writer(str(settings.itop_url), settings.itop_token.get_secret_value(), http=http)
+    track_info = (settings.itop_system_user or "").strip() or DEFAULT_TRACK_INFO
+    return build_writer(
+        str(settings.itop_url), settings.itop_token.get_secret_value(), http=http, track_info=track_info
+    )
 
 
 # --- worker -----------------------------------------------------------------------------------------------------
@@ -355,6 +372,8 @@ class ItopOutboxWorker:
         key = claim.itop_ticket_id
         if kind == "update":
             fields = dict(claim.payload["fields"])
+            if "contacts_list" in fields:
+                fields["contacts_list"] = self._merged_contacts(key, fields["contacts_list"])
             self.writer.write({"operation": "core/update", "class": TICKET_CLASS, "key": key, "fields": fields})
             return _Result(fields=fields)
         if kind == "comment":
@@ -390,6 +409,24 @@ class ItopOutboxWorker:
         operation = {"operation": "core/apply_stimulus", "class": TICKET_CLASS, "key": key, "stimulus": stimulus}
         self.writer.write({**operation, "fields": {}, "output_fields": "id"})
         return _Result()
+
+    def _merged_contacts(self, key: str, wanted: list[dict[str, Any]]) -> list[dict[str, Any]]:
+        """A linked set write replaces the whole list: the contacts already on the ticket (a person may have added
+        them by hand) are kept, with their role, and the owners we add go after them (pending F5.2 #54). It is a union:
+        an owner whose CIs left the ticket is not removed; and a contact added in iTop between this read and the write
+        would be lost (milliseconds; the REST API has no conditional update)."""
+        found = self.writer.get(TICKET_CLASS, key, ["contacts_list"])
+        current = found[0].fields.get("contacts_list") if found else None
+        merged: dict[str, dict[str, Any]] = {}
+        for entry in [*(current if isinstance(current, list) else []), *wanted]:
+            contact = str(entry.get("contact_id") or "") if isinstance(entry, dict) else ""
+            if contact and contact != "0" and contact not in merged:
+                kept = {"contact_id": contact}
+                for attribute in ("role", "role_code"):  # the writable link attributes (⚠️ P-011)
+                    if entry.get(attribute):
+                        kept[attribute] = str(entry[attribute])
+                merged[contact] = kept
+        return list(merged.values())
 
     def _remote_contains(self, key: str, field_name: str, markers: tuple[str, ...]) -> bool:
         found = self.writer.get(TICKET_CLASS, key, [field_name])

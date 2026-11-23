@@ -10,6 +10,8 @@ import jsonschema
 import pytest
 
 from doubles.slack import SimulatedSlack, SlackDeliveryError
+from notifications_api.interfaces import NotificationConsumer
+from notifications_api.models import NotificationEvent
 
 SCHEMA = json.loads((Path(__file__).resolve().parents[2] / "schemas" / "notification_event.schema.json").read_text())
 
@@ -104,3 +106,12 @@ def test_fail_next_raises_then_recovers() -> None:
 def test_event_without_id_is_rejected() -> None:
     with pytest.raises(ValueError, match="event_id"):
         SimulatedSlack().process({"type": "fixed"})
+
+
+def test_it_processes_the_contract_model_as_a_notification_consumer() -> None:
+    """Structurally a `NotificationConsumer` (docs/08 NOT-04): it takes the real `NotificationEvent`."""
+    consumer: NotificationConsumer = SimulatedSlack()
+    model = NotificationEvent.model_validate(VALID_EVENT)
+    consumer.process(model)
+    assert isinstance(consumer, SimulatedSlack)
+    assert [(m.event_id, m.event_type, m.priority) for m in consumer.sent] == [("evt-0001", "new_ticket", "immediate")]

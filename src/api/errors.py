@@ -70,6 +70,11 @@ class ApiError(Exception):
         self.details = details or []
 
 
+def internal_error_response() -> JSONResponse:
+    """The generic 500 envelope (API-02): no internal detail ever reaches the client."""
+    return error_response(500, *_GENERIC_SERVER)
+
+
 def error_response(
     status_code: int,
     code: str,
@@ -123,8 +128,7 @@ def _validation_handler(_request: Request, exc: Exception) -> JSONResponse:
 def _unhandled_handler(request: Request, exc: Exception) -> JSONResponse:
     # The traceback goes to the (masked) log; the client only sees a generic message.
     logger.error("unhandled error on %s %s", request.method, request.url.path, exc_info=exc)
-    code, message = _GENERIC_SERVER
-    return error_response(500, code, message)
+    return internal_error_response()
 
 
 def install_error_handlers(app: FastAPI) -> None:
@@ -175,5 +179,4 @@ class UnhandledErrorMiddleware:
             if started:
                 raise
             logger.exception("unhandled error on %s %s", scope.get("method"), scope.get("path"))
-            code, message = _GENERIC_SERVER
-            await error_response(500, code, message)(scope, receive, send)
+            await internal_error_response()(scope, receive, send)

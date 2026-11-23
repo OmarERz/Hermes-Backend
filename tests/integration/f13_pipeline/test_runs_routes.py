@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+from datetime import UTC, datetime, timedelta
+
 import pytest
 from fastapi.testclient import TestClient
 from pydantic import SecretStr
@@ -73,3 +75,33 @@ def test_the_stream_follows_a_running_run_until_it_ends(factory: sessionmaker[Se
     with factory() as session, session.begin():
         session.execute(update(m.Run).where(m.Run.id == run_id).values(status="running", progress=5))
     assert [r.progress for r in capped.progress(str(run_id))] == [5]  # gives up after max_polls
+
+
+def test_the_run_list_pages_in_sql_without_a_size_cap(factory: sessionmaker[Session]) -> None:
+    """Not started first, then newest; every run is reachable through the cursor (pending F13.0 #79)."""
+    base = datetime(2026, 11, 20, tzinfo=UTC)
+    with factory() as session, session.begin():
+        session.execute(update(m.Run).values(kind="inventory_sync"))  # runs of other tests stay out of the list
+        for i in range(5):
+            session.add(
+                m.Run(
+                    kind="news",
+                    status="succeeded",
+                    progress=100,
+                    trigger_reason="schedule",
+                    started_at=base + timedelta(hours=i),
+                )
+            )
+        session.add(m.Run(kind="recalculation", status="queued", progress=0, trigger_reason="formula_change"))
+    with api(factory) as client:
+        seen: list[dict[str, object]] = []
+        cursor = None
+        while True:
+            body = client.get("/api/runs", params={"limit": 2, **({"cursor": cursor} if cursor else {})}).json()
+            seen += body["items"]
+            cursor = body["next_cursor"]
+            if cursor is None:
+                break
+    assert [r["kind"] for r in seen] == ["recalculation"] + ["ingestion"] * 5
+    starts = [r["started_at"] for r in seen[1:]]
+    assert starts == sorted(starts, reverse=True)

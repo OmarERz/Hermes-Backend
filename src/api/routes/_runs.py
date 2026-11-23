@@ -15,7 +15,7 @@ from datetime import UTC, datetime
 from typing import Annotated, Final, Literal, Protocol
 
 from fastapi import Depends, Request
-from sqlalchemy import select
+from sqlalchemy import case, func, select, tuple_
 from sqlalchemy.orm import Session, sessionmaker
 
 from api.errors import ApiError
@@ -39,11 +39,16 @@ STATUSES: Final[dict[str, ApiStatus]] = {
     "cancelled": "failed",
 }
 TERMINAL: Final = frozenset({"succeeded", "failed"})
-LIST_LIMIT: Final = 500
+
+
+# (null start: 1 or 0, start or the epoch, id) of the last run of a page: runs not started yet come first, then the
+# newest; the id breaks ties. Paged in SQL, so the list is never cut at a fixed size (pending F13.0 #79).
+RunKey = tuple[int, datetime, str]
+EPOCH: Final = datetime(1970, 1, 1, tzinfo=UTC)
 
 
 class RunSource(Protocol):
-    def list(self) -> list[Run]: ...
+    def page(self, after: RunKey | None, limit: int) -> tuple[list[Run], RunKey | None]: ...
 
     def queue_scan(self, firebase_uid: str | None) -> Run: ...
 
@@ -75,15 +80,25 @@ class SqlRunSource:
     max_polls: int = 900  # a stream ends after ~15 minutes; the frontend reconnects
     sleep: Callable[[float], None] = time.sleep
 
-    def list(self) -> list[Run]:
+    def page(self, after: RunKey | None, limit: int) -> tuple[list[Run], RunKey | None]:
+        unstarted = case((m.Run.started_at.is_(None), 1), else_=0)
+        started = func.coalesce(m.Run.started_at, EPOCH)
+        query = select(m.Run, unstarted, started).where(m.Run.kind.in_(KINDS))
+        if after is not None:
+            try:
+                after_id = uuid.UUID(after[2])
+            except ValueError:
+                raise ApiError(400, "invalid_cursor", "El cursor de paginación no es válido.") from None
+            query = query.where(tuple_(unstarted, started, m.Run.id) < tuple_(after[0], after[1], after_id))
+        query = query.order_by(unstarted.desc(), started.desc(), m.Run.id.desc()).limit(limit + 1)
         with self.session_factory() as session:
-            rows = session.scalars(
-                select(m.Run)
-                .where(m.Run.kind.in_(KINDS))
-                .order_by(m.Run.started_at.desc().nulls_first(), m.Run.id.desc())
-                .limit(LIST_LIMIT)
-            ).all()
-            return [to_api(row) for row in rows]
+            rows = session.execute(query).all()
+        kept = rows[:limit]
+        next_key = None
+        if len(rows) > limit:
+            last = kept[-1]
+            next_key = (int(last[1]), last[2], str(last[0].id))
+        return [to_api(row[0]) for row in kept], next_key
 
     def queue_scan(self, firebase_uid: str | None) -> Run:
         with self.session_factory() as session, session.begin():

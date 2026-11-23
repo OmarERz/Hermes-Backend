@@ -26,7 +26,6 @@ from core.stix import builders
 from core.stix.ids import stix_id
 
 CVE_ID: Final = re.compile(r"^CVE-[0-9]{4}-[0-9]{4,}\Z")
-LIVE: Final = ("new", "persistent", "reopened", "no_data")
 IOC_SOURCES: Final = ("threatfox", "urlhaus")
 # Order of sensitivity. An unclassified CI is "not classified yet", not "public": it fails closed to AMBER, like any
 # value we do not know (P-021 does not cover it; the choice is reported in the PR).
