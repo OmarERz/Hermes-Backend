@@ -20,7 +20,7 @@ from sqlalchemy.orm import Session
 
 from core.db import models as m
 from core.mitigation.text import clean_text, safe_url
-from core.scan.versions import in_range, parse_version
+from core.scan.versions import compare_versions, parse_version
 
 MAX_IOCS: Final = 20
 MAX_WORKAROUNDS: Final = 10
@@ -77,17 +77,28 @@ def version_key(version: str) -> tuple[tuple[int, int, str], ...]:
     return tuple((0, int(t), "") if t.isdigit() else (1, 0, t.lower()) for t in TOKEN.findall(version))
 
 
+def _bound_order(version: str, bound: str) -> int:
+    """-1, 0 or 1 for one range bound: the scan's comparator when it reads both, else the simple order."""
+    order = compare_versions(version, bound)
+    if order is not None:
+        return order
+    left, right = version_key(version), version_key(bound)
+    return (left > right) - (left < right)
+
+
 def _inside(version: str, rng: tuple[str | None, bool | None, str | None, bool | None]) -> bool:
-    """Is `version` inside the affected range? The scan's comparator decides (pre-releases, trailing zeros); a
-    version it cannot read falls back to the simple order rather than losing the advice (pending F4.4 #42)."""
+    """Is `version` inside the affected range? Each bound is compared on its own with the scan's comparator
+    (pre-releases, trailing zeros) and falls back to the simple order only for a bound it cannot read (F4.4 #42)."""
     start, start_inclusive, end, end_inclusive = rng
-    verdict = in_range(version, start, start_inclusive, end, end_inclusive)
-    if verdict is not None:
-        return verdict
-    key = version_key(version)
-    if start is not None and (key < version_key(start) or (key == version_key(start) and not start_inclusive)):
-        return False
-    return not (end is not None and (key > version_key(end) or (key == version_key(end) and not end_inclusive)))
+    if start is not None:
+        order = _bound_order(version, start)
+        if order < 0 or (order == 0 and not start_inclusive):
+            return False
+    if end is not None:
+        order = _bound_order(version, end)
+        if order > 0 or (order == 0 and not end_inclusive):
+            return False
+    return True
 
 
 def _order(version: str) -> tuple[int, object]:

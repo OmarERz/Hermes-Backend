@@ -195,3 +195,15 @@ def test_an_unreadable_version_falls_back_to_the_simple_order() -> None:
         MitigationData("CVE-2026-1", fixed_versions=["build-7", "1.2"], affected_ranges=[(None, None, "1.0", False)])
     )
     assert result.correction == ("Actualizar a 1.2 o superior.", "Actualizar a build-7 o superior.")
+
+
+def test_each_bound_uses_the_scan_comparator_when_it_can() -> None:
+    """`2.0.0` equals the inclusive end `2.0` even when the start bound is unreadable (feature review)."""
+    result = compose(
+        MitigationData(
+            "CVE-2026-1",
+            fixed_versions=["2.0.0", "2.1"],
+            affected_ranges=[("1.0vendor1", True, "2.0", True)],
+        )
+    )
+    assert result.correction == ("Actualizar a 2.1 o superior.",)
