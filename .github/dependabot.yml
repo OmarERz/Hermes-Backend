@@ -12,7 +12,7 @@ updates:
         update-types: ["minor", "patch"]
 
   - package-ecosystem: "docker"
-    directories: ["/", "/docker/auth-emulator"]
+    directories: ["/", "/docker/auth-emulator", "/docker/db"]
     target-branch: "develop"
     commit-message:
       prefix: "build(deps)"
@@ -24,6 +24,9 @@ updates:
       - dependency-name: "python"
         update-types: ["version-update:semver-major", "version-update:semver-minor"]
       - dependency-name: "node"
+        update-types: ["version-update:semver-major"]
+      # PostgreSQL 18 is pinned by decision (docker/db): a major upgrade needs a dump and restore.
+      - dependency-name: "pgvector/pgvector"
         update-types: ["version-update:semver-major"]
     groups:
       docker-minor-patch:
