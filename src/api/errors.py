@@ -70,6 +70,11 @@ class ApiError(Exception):
         self.details = details or []
 
 
+def internal_error_response() -> JSONResponse:
+    """The generic 500 envelope (API-02): no internal detail ever reaches the client."""
+    return error_response(500, *_GENERIC_SERVER)
+
+
 def error_response(
     status_code: int,
     code: str,

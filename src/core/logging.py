@@ -5,6 +5,10 @@ The filter masks, in the final message and in exception text:
 - token patterns: Slack (`xoxb-`, `xoxp-`, `xapp-`), `sk-` API keys, JWTs, `Bearer` credentials;
 - passwords embedded in URLs (`scheme://user:password@host`);
 - e-mail addresses (personal data must not reach the logs).
+
+Lines written while the API serves a request also carry that request's context (ASVS 5.0 V16.2.1: when, where, who
+and what): `request_id`, `client`, `method`, `path` (never the query string) and, once the token is verified, `user`
+(the Firebase uid, never the e-mail). The API sets it (`api.request_context`); outside a request nothing is added.
 """
 
 from __future__ import annotations
@@ -13,11 +17,39 @@ import json
 import logging
 import re
 import sys
-from collections.abc import Iterable
+from collections.abc import Iterable, Iterator
+from contextlib import contextmanager
+from contextvars import ContextVar
 from datetime import UTC, datetime
 from typing import TextIO
 
 MASK = "***"
+REQUEST_FIELDS = ("request_id", "client", "method", "path", "user")
+
+# One mutable dict per request: FastAPI runs sync dependencies in a worker thread with a *copy* of the context, so a
+# value set there would not come back; updating the shared dict does (the authenticated user is bound that way).
+_request: ContextVar[dict[str, str] | None] = ContextVar("hermes_request", default=None)
+
+
+@contextmanager
+def request_context(**fields: str) -> Iterator[dict[str, str]]:
+    """Every log line written inside the block carries `fields` (only the names of `REQUEST_FIELDS`).
+
+    The context is reset on a normal exit only. When an error leaves the block, the server logs it next, in the same
+    task (an ASGI server runs each request in its own task), and that line must still name the request; the task ends
+    right after, and the next request sets its own context first.
+    """
+    token = _request.set({name: value for name, value in fields.items() if name in REQUEST_FIELDS})
+    yield _request.get() or {}
+    _request.reset(token)
+
+
+def bind_request(**fields: str) -> None:
+    """Add fields (e.g. the verified `user`) to the current request's context; nothing happens outside a request."""
+    context = _request.get()
+    if context is not None:
+        context.update({name: value for name, value in fields.items() if name in REQUEST_FIELDS})
+
 
 _PATTERNS: tuple[tuple[re.Pattern[str], str], ...] = (
     (re.compile(r"\bxox[abprs]-[A-Za-z0-9-]+"), MASK),
@@ -51,6 +83,9 @@ class SecretMaskingFilter(logging.Filter):
     def filter(self, record: logging.LogRecord) -> bool:
         record.msg = self.mask(record.getMessage())
         record.args = None
+        context = _request.get()
+        if context:
+            record.hermes_request = {name: self.mask(value) for name, value in context.items()}
         if record.exc_info and not record.exc_text:
             record.exc_text = logging.Formatter().formatException(record.exc_info)
         if record.exc_text:
@@ -70,6 +105,9 @@ class JsonFormatter(logging.Formatter):
             "logger": record.name,
             "message": record.getMessage(),
         }
+        request = getattr(record, "hermes_request", None)
+        if isinstance(request, dict):
+            entry.update({name: str(value) for name, value in request.items() if name in REQUEST_FIELDS})
         if record.exc_info and not record.exc_text:
             record.exc_text = self.formatException(record.exc_info)
         if record.exc_text:

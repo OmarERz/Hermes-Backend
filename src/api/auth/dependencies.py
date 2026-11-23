@@ -14,6 +14,7 @@ from api.auth.directory import UserConflictError, UserDirectory
 from api.auth.identity import AuthUnavailableError, TokenError, TokenVerifier
 from api.auth.roles import Role
 from api.errors import ApiError, ErrorDetail
+from core.logging import bind_request
 
 logger = logging.getLogger(__name__)
 
@@ -39,16 +40,18 @@ def get_current_user(
     credentials: Annotated[HTTPAuthorizationCredentials | None, Depends(_bearer)],
 ) -> CurrentUser:
     if credentials is None or not credentials.credentials:
+        logger.warning("authentication rejected: missing_bearer")
         raise _unauthenticated()
     verifier: TokenVerifier = request.app.state.token_verifier
     directory: UserDirectory = request.app.state.user_directory
     try:
         identity = verifier.verify(credentials.credentials)
     except TokenError as exc:
-        logger.info("authentication rejected: %s", exc.reason)
+        logger.warning("authentication rejected: %s", exc.reason)
         raise _unauthenticated() from exc
     except AuthUnavailableError as exc:
         raise ApiError(503, "auth_unavailable", "No se pudo verificar la identidad. Intenta de nuevo.") from exc
+    bind_request(user=identity.uid)  # every later line of this request (the access line too) names the user
     try:
         record = directory.sync_login(identity)
     except UserConflictError as exc:
