@@ -17,6 +17,7 @@ from pydantic import SecretStr
 from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
+from core.cpe.fields import split_cpe_fields, unescape_cpe
 from core.db import models as m
 from core.vulndata.http import JsonSource, SourceRefusedError, SourceUnavailableError
 from core.vulndata.records import NVD_CPE
@@ -65,33 +66,11 @@ def cpe_uri(vendor: str, product: str) -> str:
     return f"cpe:2.3:a:{escape(vendor)}:{escape(product)}:*:*:*:*:*:*:*:*"
 
 
-def _split_fields(name: str) -> list[str]:
-    """The fields of a CPE name: a backslash escapes the next character, so `\\:` stays inside its field and the
-    colon after an escaped backslash (`\\\\:`) ends it."""
-    parts: list[str] = []
-    current: list[str] = []
-    escaped = False
-    for char in name:
-        if escaped:
-            current.append(char)
-            escaped = False
-        elif char == "\\":
-            current.append(char)
-            escaped = True
-        elif char == ":":
-            parts.append("".join(current))
-            current = []
-        else:
-            current.append(char)
-    parts.append("".join(current))
-    return parts
-
-
 def parse_cpe_name(name: str) -> tuple[str, str] | None:
-    parts = _split_fields(name)
+    parts = split_cpe_fields(name)
     if len(parts) < CPE_FIELDS or parts[:2] != ["cpe", "2.3"] or parts[2] not in {"a", "o"}:
         return None
-    vendor, product = (re.sub(r"\\(.)", r"\1", p, flags=re.DOTALL) for p in parts[3:5])
+    vendor, product = (unescape_cpe(p) for p in parts[3:5])
     return (vendor, product) if vendor not in {"", "*", "-"} and product not in {"", "*", "-"} else None
 
 
