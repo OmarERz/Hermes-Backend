@@ -89,7 +89,7 @@ def setup_status(session: SessionDep, checker: Checker) -> list[SetupStep]:
 
 @router.put("/api/setup/steps/{n}", dependencies=[guard("PUT", "/api/setup/steps/{n}")])
 def setup_step(
-    n: Annotated[int, Path(ge=0, le=99, description="Step number; an unknown one answers 404")],
+    n: Annotated[int, Path(ge=0, le=99)],  # an unknown step inside the range still answers 404
     update: SetupStepUpdate,
     session: SessionDep,
     checker: Checker,

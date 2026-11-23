@@ -6,6 +6,8 @@ as they were), and every path parameter of the published OpenAPI carries its pat
 
 from __future__ import annotations
 
+import re
+
 import pytest
 from authfakes import SETTINGS, FakeVerifier, bearer
 from fastapi.testclient import TestClient
@@ -34,6 +36,7 @@ UUID_ROUTES: list[tuple[str, str, dict[str, object] | None]] = [
     ("POST", "/api/calibration/proposals/{}/approve", None),
     ("POST", "/api/calibration/proposals/{}/reject", None),
     ("POST", "/api/notifications/events/{}/retry", None),
+    ("GET", "/api/runs/{}/events", None),
 ]
 MALFORMED = ["nope", "0196a6f0000070008000000000000001", "0196a6f0-0000-7000-8000-00000000000g", "x" * 300]
 
@@ -64,10 +67,19 @@ def test_the_token_is_still_checked_before_the_path() -> None:
     assert TestClient(app).get("/api/vulnerabilities/nope").status_code == 401
 
 
-@pytest.mark.parametrize("value", ["CI%00", "CI%1F", "x" * 101])
-def test_a_ci_id_or_run_id_with_control_characters_or_too_long_is_a_422(client: TestClient, value: str) -> None:
-    for url in (f"/api/assets/{value}", f"/api/runs/{value}/events"):
-        assert client.get(url, headers=bearer("admin")).status_code == 422, url
+@pytest.mark.parametrize("value", ["CI%00", "CI%1F", "CI%C2%85", "CI%E2%80%AE", "x" * 101])
+def test_a_ci_id_with_control_or_bidi_characters_or_too_long_is_a_422(client: TestClient, value: str) -> None:
+    assert client.get(f"/api/assets/{value}", headers=bearer("admin")).status_code == 422
+
+
+def _bounded(schema: dict[str, object]) -> bool:
+    """A number needs a maximum; a string a maxLength or a pattern without unbounded repetition (`*`, `+`)."""
+    if schema.get("type") == "integer":
+        return "maximum" in schema
+    if "maxLength" in schema:
+        return True
+    pattern = schema.get("pattern")
+    return isinstance(pattern, str) and not re.search(r"(?<!\\)[*+]", re.sub(r"\[[^\]]*\]", "", pattern))
 
 
 def test_every_path_parameter_is_published_with_a_pattern_or_bounds() -> None:
@@ -79,7 +91,7 @@ def test_every_path_parameter_is_published_with_a_pattern_or_bounds() -> None:
                 if parameter["in"] != "path":
                     continue
                 schema = parameter["schema"]
-                if not ("pattern" in schema or "maximum" in schema):
+                if not _bounded(schema):
                     unbounded.append((method, path, parameter["name"]))
                 if schema.get("pattern") == UUID_PATTERN:
                     assert schema["maxLength"] == 36

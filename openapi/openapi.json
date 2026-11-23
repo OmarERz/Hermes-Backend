@@ -444,7 +444,7 @@
         "additionalProperties": false,
         "properties": {
           "assessment_id": {
-            "description": "Id de la evaluación.",
+            "description": "Id (UUID) de la evaluación.",
             "title": "Assessment Id",
             "type": "string"
           },
@@ -1415,7 +1415,7 @@
         },
         "properties": {
           "assessment_id": {
-            "description": "Id de la evaluación.",
+            "description": "Id (UUID) de la evaluación.",
             "maxLength": 100,
             "title": "Assessment Id",
             "type": "string"
@@ -2370,7 +2370,7 @@
         ],
         "properties": {
           "assessment_id": {
-            "description": "Id de la evaluación.",
+            "description": "Id (UUID) de la evaluación.",
             "title": "Assessment Id",
             "type": "string"
           },
@@ -3357,7 +3357,7 @@
             "type": "integer"
           },
           "group_id": {
-            "description": "Id del grupo de vulnerabilidad (CVE por producto).",
+            "description": "Id (UUID) del grupo de vulnerabilidad (CVE por producto).",
             "title": "Group Id",
             "type": "string"
           },
@@ -3482,7 +3482,7 @@
             "type": "integer"
           },
           "group_id": {
-            "description": "Id del grupo de vulnerabilidad (CVE por producto).",
+            "description": "Id (UUID) del grupo de vulnerabilidad (CVE por producto).",
             "title": "Group Id",
             "type": "string"
           },
@@ -3983,12 +3983,11 @@
         "operationId": "get_assessment_breakdown",
         "parameters": [
           {
-            "description": "UUID",
+            "description": "Identificador del recurso (UUID).",
             "in": "path",
             "name": "id",
             "required": true,
             "schema": {
-              "description": "UUID",
               "examples": [
                 "0196a6f0-0000-7000-8000-000000000001"
               ],
@@ -4137,15 +4136,14 @@
         "operationId": "get_asset",
         "parameters": [
           {
-            "description": "iTop id of the CI",
+            "description": "Id del CI en iTop (por ejemplo `CI-0001`).",
             "in": "path",
             "name": "ci_id",
             "required": true,
             "schema": {
-              "description": "iTop id of the CI",
               "maxLength": 100,
               "minLength": 1,
-              "pattern": "^[^\\x00-\\x1f\\x7f/]+$",
+              "pattern": "^[^\\x00-\\x1f\\x7f-\\x9f/\\u202a-\\u202e\\u2066-\\u2069]+$",
               "title": "Ci Id",
               "type": "string"
             }
@@ -4652,12 +4650,11 @@
         "operationId": "approve_calibration_proposal",
         "parameters": [
           {
-            "description": "UUID",
+            "description": "Identificador del recurso (UUID).",
             "in": "path",
             "name": "id",
             "required": true,
             "schema": {
-              "description": "UUID",
               "examples": [
                 "0196a6f0-0000-7000-8000-000000000001"
               ],
@@ -4787,12 +4784,11 @@
         "operationId": "reject_calibration_proposal",
         "parameters": [
           {
-            "description": "UUID",
+            "description": "Identificador del recurso (UUID).",
             "in": "path",
             "name": "id",
             "required": true,
             "schema": {
-              "description": "UUID",
               "examples": [
                 "0196a6f0-0000-7000-8000-000000000001"
               ],
@@ -6363,12 +6359,11 @@
         "operationId": "get_finding_history",
         "parameters": [
           {
-            "description": "UUID",
+            "description": "Identificador del recurso (UUID).",
             "in": "path",
             "name": "id",
             "required": true,
             "schema": {
-              "description": "UUID",
               "examples": [
                 "0196a6f0-0000-7000-8000-000000000001"
               ],
@@ -6896,12 +6891,11 @@
         "operationId": "set_cpe_mapping",
         "parameters": [
           {
-            "description": "UUID",
+            "description": "Id (UUID) del producto de software del inventario.",
             "in": "path",
             "name": "software",
             "required": true,
             "schema": {
-              "description": "UUID",
               "examples": [
                 "0196a6f0-0000-7000-8000-000000000001"
               ],
@@ -7454,12 +7448,11 @@
         "operationId": "retry_notification_event",
         "parameters": [
           {
-            "description": "UUID",
+            "description": "Identificador del recurso (UUID).",
             "in": "path",
             "name": "id",
             "required": true,
             "schema": {
-              "description": "UUID",
               "examples": [
                 "0196a6f0-0000-7000-8000-000000000001"
               ],
@@ -7867,12 +7860,11 @@
         "operationId": "delete_peer_company",
         "parameters": [
           {
-            "description": "UUID",
+            "description": "Identificador del recurso (UUID).",
             "in": "path",
             "name": "id",
             "required": true,
             "schema": {
-              "description": "UUID",
               "examples": [
                 "0196a6f0-0000-7000-8000-000000000001"
               ],
@@ -7993,12 +7985,11 @@
         "operationId": "update_peer_company",
         "parameters": [
           {
-            "description": "UUID",
+            "description": "Identificador del recurso (UUID).",
             "in": "path",
             "name": "id",
             "required": true,
             "schema": {
-              "description": "UUID",
               "examples": [
                 "0196a6f0-0000-7000-8000-000000000001"
               ],
@@ -8688,12 +8679,11 @@
         "operationId": "get_recommendation",
         "parameters": [
           {
-            "description": "UUID",
+            "description": "Id (UUID) de la evaluación.",
             "in": "path",
             "name": "assessment_id",
             "required": true,
             "schema": {
-              "description": "UUID",
               "examples": [
                 "0196a6f0-0000-7000-8000-000000000001"
               ],
@@ -8823,12 +8813,11 @@
         "operationId": "list_recommendation_feedback",
         "parameters": [
           {
-            "description": "UUID",
+            "description": "Identificador del recurso (UUID).",
             "in": "path",
             "name": "id",
             "required": true,
             "schema": {
-              "description": "UUID",
               "examples": [
                 "0196a6f0-0000-7000-8000-000000000001"
               ],
@@ -9115,15 +9104,16 @@
         "operationId": "stream_run_events",
         "parameters": [
           {
-            "description": "Run id",
+            "description": "Identificador del recurso (UUID).",
             "in": "path",
             "name": "id",
             "required": true,
             "schema": {
-              "description": "Run id",
-              "maxLength": 100,
-              "minLength": 1,
-              "pattern": "^[^\\x00-\\x1f\\x7f/]+$",
+              "examples": [
+                "0196a6f0-0000-7000-8000-000000000001"
+              ],
+              "maxLength": 36,
+              "pattern": "^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$",
               "title": "Id",
               "type": "string"
             }
@@ -9512,12 +9502,11 @@
         "operationId": "update_setup_step",
         "parameters": [
           {
-            "description": "Step number; an unknown one answers 404",
+            "description": "Número del paso del asistente de instalación.",
             "in": "path",
             "name": "n",
             "required": true,
             "schema": {
-              "description": "Step number; an unknown one answers 404",
               "maximum": 99,
               "minimum": 0,
               "title": "N",
@@ -9932,12 +9921,11 @@
         "operationId": "update_source",
         "parameters": [
           {
-            "description": "UUID",
+            "description": "Identificador del recurso (UUID).",
             "in": "path",
             "name": "id",
             "required": true,
             "schema": {
-              "description": "UUID",
               "examples": [
                 "0196a6f0-0000-7000-8000-000000000001"
               ],
@@ -10723,12 +10711,11 @@
         "operationId": "get_vulnerability",
         "parameters": [
           {
-            "description": "UUID",
+            "description": "Id (UUID) del grupo de vulnerabilidad (CVE por producto).",
             "in": "path",
             "name": "group_id",
             "required": true,
             "schema": {
-              "description": "UUID",
               "examples": [
                 "0196a6f0-0000-7000-8000-000000000001"
               ],

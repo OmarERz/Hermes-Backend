@@ -19,7 +19,7 @@ from api.routes._auth import guard
 from api.routes._config_support import CurrentUserDep, app_user_id, now, to_api_error
 from api.routes._db import SessionDep
 from api.routes._events import Events
-from api.routes._paths import RunId, UuidAliasId, UuidId
+from api.routes._paths import UuidAliasId, UuidId
 from api.routes._runs import Runs
 from api.routes._state import MetricsSource
 from api.routes.models import (
@@ -75,7 +75,7 @@ def list_runs(params: PageQuery, signer: Signer, runs: Runs) -> Page[Run]:
         200: {"content": {"text/event-stream": {"schema": SSE_EVENT_SCHEMA}}, "description": "Server-sent events"}
     },
 )
-def run_events(id: RunId, runs: Runs) -> StreamingResponse:  # noqa: A002 - path parameter name of API-06
+def run_events(id: UuidId, runs: Runs) -> StreamingResponse:  # noqa: A002 - path parameter name of API-06
     """Progress of a run until it ends (ARQ-05): one event each time its status or progress changes."""
     snapshots = runs.progress(id)
 

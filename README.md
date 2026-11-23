@@ -75,6 +75,9 @@ iTop limita a las clases de negocio), escritura de `UserRequest` y de los víncu
 los estímulos de su ciclo de vida, y **solo lectura** del historial de cambios (grupo `History`: `CMDBChange` y
 `CMDBChangeOp`). Sin esa lectura, la sincronización de tickets no sabe quién cambió la urgencia y se queda con la que
 guardó Hermes (D-007). Si usas otro perfil, dale al menos esas mismas lecturas, incluida la del grupo `History`.
+iTop no puede limitar esa lectura a los tickets: el token puede leer el historial de **todas** las clases con
+seguimiento, también el de usuarios y perfiles y los valores anteriores de atributos cifrados. Es un riesgo aceptado
+(no hay un permiso más estrecho); guarda `ITOP_TOKEN` como cualquier secreto y rótalo si se filtra.
 
 El primer administrador se asigna con el rol (*custom claim*) de Firebase; con el emulador local,
 `make emulator-token ROLE=admin` imprime un token de prueba. Después, un admin cambia roles con
