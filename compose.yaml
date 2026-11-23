@@ -29,8 +29,10 @@ secrets:
   ransomwarelive_api_key:
     file: ${COMPOSE_SECRETS_DIR:-./.compose-secrets}/ransomwarelive_api_key
 
-# Limits for every service (F12.3, decidido de noche, revisar): a bounded number of processes and threads (a runaway
-# or a fork bomb cannot exhaust the host) and rotated logs (50 MB per container at most, so logs cannot fill the disk).
+# Limits for every service (F12.3, provisional values pending the user's review): a bounded number of processes and
+# threads (a runaway or a fork bomb cannot exhaust the host's process table) and rotated logs (50 MB per container at
+# most, so logs cannot fill the disk). Memory and CPU limits are left out on purpose: they depend on the host and the
+# load, so the operator sets them (README §7).
 x-limits: &limits
   pids_limit: 512
   logging:

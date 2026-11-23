@@ -48,9 +48,10 @@ semgrep: ## Semgrep CE (Docker): registry packs + .semgrep/ project rules, fails
 	  --config /src/.semgrep/ --metrics=off --no-git-ignore \
 	  --error --severity WARNING --severity ERROR --
 
-kics: ## KICS (Docker, pinned) on compose.yaml: fails on HIGH and MEDIUM findings (Trivy does not read Compose files)
+# --disable-secrets: Gitleaks already scans every file and the history for secrets (`make secrets`).
+kics: ## KICS (Docker, pinned) on compose.yaml: fails on CRITICAL, HIGH and MEDIUM (Trivy does not read Compose files)
 	docker run --rm -v "$(CURDIR)/compose.yaml:/scan/compose.yaml:ro" $(KICS_IMAGE) scan -p /scan/compose.yaml \
-	  --type DockerCompose --fail-on high,medium --disable-secrets --no-progress --ci
+	  --type DockerCompose --fail-on critical,high,medium --disable-secrets --no-progress --ci
 
 # Working tree: tracked and untracked files minus ignored ones, streamed as a tar into the container, so
 # caches and virtualenvs are not scanned and no temp dir is needed.

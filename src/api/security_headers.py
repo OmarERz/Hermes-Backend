@@ -25,7 +25,7 @@ _COMMON: tuple[tuple[bytes, bytes], ...] = (
     (b"cache-control", b"no-store"),
     (b"permissions-policy", b"camera=(), microphone=(), geolocation=()"),
     # ASVS 5.0 V3.4.1 (L2: one year, subdomains included). Browsers only honour it over HTTPS, i.e. behind the TLS
-    # proxy of the deployment (README §7); over plain HTTP in development it is ignored (decidido de noche, revisar).
+    # proxy of the deployment (README §7); over plain HTTP in development it is ignored (provisional, pending review).
     (b"strict-transport-security", b"max-age=31536000; includeSubDomains"),
 )
 

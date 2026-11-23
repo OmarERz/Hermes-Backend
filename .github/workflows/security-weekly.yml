@@ -74,8 +74,9 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
-      - name: KICS scan of compose.yaml (fails on HIGH and MEDIUM)
-        # The same pinned image and flags as `make kics`, which `make verify` and the CI static job also run (F12.3).
+      - name: KICS scan of compose.yaml (fails on CRITICAL, HIGH and MEDIUM)
+        # The same pinned image and flags as `make kics`, which `make verify` and the CI static job also run (F12.3);
+        # kept here as the scheduled re-check of the default branch.
         run: make kics
 
   trivy:

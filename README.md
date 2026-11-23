@@ -155,7 +155,11 @@ Con Caddy, `request_body { max_size 1MB }` y un módulo de límite de frecuencia
 mismo.
 
 La API ya envía `Strict-Transport-Security` (un año, con subdominios) y no envía el encabezado `server`; en nginx
-agrega `server_tokens off;` para que el proxy tampoco anuncie su versión.
+agrega `server_tokens off;` para que el proxy tampoco anuncie su versión y **no** agregues otro
+`Strict-Transport-Security` (saldría duplicado). Sirve la API desde su propio nombre de host: con `includeSubDomains`,
+un navegador exige HTTPS durante un año en todos los subdominios del host que la sirve. Los límites de memoria y CPU
+de cada servicio no vienen en `compose.yaml` porque dependen del equipo y de la carga: agrégalos (`mem_limit`,
+`cpus`) según tu instalación.
 
 ## License
 
