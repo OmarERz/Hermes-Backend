@@ -132,3 +132,36 @@ def test_get_bytes_refuses_oversized_bodies(monkeypatch: pytest.MonkeyPatch) -> 
     client, _ = scripted(lambda _r: httpx.Response(200, content=b"abc"))
     with pytest.raises(SourceUnavailableError, match="too large"):
         JsonSource(http=client).get_bytes(URL)
+
+
+def test_a_same_origin_redirect_is_followed() -> None:
+    """The EPSS daily file answers `current` with a relative 302 to the dated file (found in the F13.3 e2e run)."""
+    client, seen = scripted(
+        status(302, Location="epss_scores-2026-11-22.csv.gz"),
+        lambda _r: httpx.Response(200, content=b"\x1f\x8bdata"),
+    )
+    url = "https://epss.example.test/epss_scores-current.csv.gz"
+    assert JsonSource(http=client, sleep=lambda _s: None).get_bytes(url) == b"\x1f\x8bdata"
+    assert [str(r.url) for r in seen] == [url, "https://epss.example.test/epss_scores-2026-11-22.csv.gz"]
+
+
+@pytest.mark.parametrize(
+    "location",
+    ["https://elsewhere.test/file", "http://source.test/api/plain", "https://source.test:8443/api/other", ""],
+)
+def test_a_redirect_to_another_origin_or_without_location_is_refused(location: str) -> None:
+    headers = {"Location": location} if location else {}
+    client, seen = scripted(status(302, **headers), ok)
+    with pytest.raises(SourceRefusedError, match="302"):
+        JsonSource(http=client, sleep=lambda _s: None).get_bytes(URL)
+    assert len(seen) == 1  # never sent anywhere else
+
+
+def test_redirect_loops_and_non_get_redirects_are_refused() -> None:
+    client, seen = scripted(*([status(301, Location="/api")] * 5))
+    with pytest.raises(SourceRefusedError, match="301"):
+        JsonSource(http=client, sleep=lambda _s: None).get(URL)
+    assert len(seen) == 4  # the first request and at most 3 redirects
+    post_client, _ = scripted(status(307, Location="/api/other"), ok)
+    with pytest.raises(SourceRefusedError, match="307"):
+        JsonSource(http=post_client, sleep=lambda _s: None).post(URL, {"a": 1})

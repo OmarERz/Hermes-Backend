@@ -52,7 +52,7 @@ devuelve y los registros las enmascaran.
 | Variable | Para qué |
 |---|---|
 | `ITOP_URL`, `ITOP_TOKEN`, `ITOP_SYSTEM_USER`, `ITOP_WEBHOOK_TOKEN` | Leer el CMDB y crear tickets en iTop; sin ellas no corren los trabajos de iTop |
-| `NVD_API_KEY` | Más cuota en NVD y consulta al diccionario CPE (sin llave solo hay candidatos locales) |
+| `NVD_API_KEY` | Más cuota en NVD y consulta al diccionario CPE (sin llave solo hay candidatos locales). Sin llave, la primera carga de 90 días de NVD al arrancar tarda varios minutos y un escaneo pedido mientras tanto espera en cola |
 | `DEEPSEEK_API_KEY`, `LLM_BASE_URL_JUDGE`, `LLM_BASE_URL_ANALYSTS` | Juez y analistas de IA; **la demo nunca las usa** |
 | `ABUSECH_AUTH_KEY`, `RANSOMWARELIVE_API_KEY` | Fuentes de indicadores y víctimas |
 | `FIREBASE_PROJECT_ID`, `FIREBASE_CREDENTIALS_FILE` | Inicio de sesión; con `demo-hermes` solo sirve el emulador de Firebase incluido |

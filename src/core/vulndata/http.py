@@ -16,6 +16,10 @@ import httpx
 
 DEFAULT_RETRYABLE: Final = frozenset({429, 500, 502, 503, 504})
 HTTP_OK: Final = 200
+# A source may redirect within its own origin (the EPSS daily file points `current` to the dated file with a 302).
+# Only same-origin GET redirects are followed, so a redirect can never take a request (or its API key) elsewhere.
+REDIRECT_STATUSES: Final = frozenset({301, 302, 303, 307, 308})
+MAX_REDIRECTS: Final = 3
 MAX_BACKOFF_SECONDS: Final = 60.0
 MAX_BODY_BYTES: Final = 64 * 1024 * 1024
 
@@ -95,10 +99,31 @@ class JsonSource:
             request = client.build_request(
                 method, url, params=params, headers=headers, json=json, timeout=httpx.Timeout(self.timeout)
             )
-            return self._with_retries(client, request)
+            for _hop in range(MAX_REDIRECTS + 1):
+                response = self._with_retries(client, request)
+                if response.status_code not in REDIRECT_STATUSES:
+                    return response
+                request = self._same_origin_redirect(client, request, response)
+            raise SourceRefusedError(response.status_code)  # too many redirects
         finally:
             if self.http is None:
                 client.close()
+
+    def _same_origin_redirect(
+        self, client: httpx.Client, request: httpx.Request, response: httpx.Response
+    ) -> httpx.Request:
+        location = response.headers.get("Location")
+        if request.method != "GET" or not location:
+            raise SourceRefusedError(response.status_code)
+        target = request.url.join(location)
+        same_origin = (target.scheme, target.host, target.port) == (
+            request.url.scheme,
+            request.url.host,
+            request.url.port,
+        )
+        if not same_origin:
+            raise SourceRefusedError(response.status_code)
+        return client.build_request("GET", target, headers=request.headers, timeout=httpx.Timeout(self.timeout))
 
     def get(
         self, url: str, *, params: Mapping[str, str | int] | None = None, headers: Mapping[str, str] | None = None
@@ -119,7 +144,7 @@ class JsonSource:
             except httpx.TransportError as exc:
                 last = f"no response ({type(exc).__name__})"
             else:
-                if response.status_code == HTTP_OK:
+                if response.status_code == HTTP_OK or response.status_code in REDIRECT_STATUSES:
                     return response
                 if response.status_code not in self.retryable:
                     raise SourceRefusedError(response.status_code)
