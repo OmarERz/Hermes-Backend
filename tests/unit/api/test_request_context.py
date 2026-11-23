@@ -104,9 +104,12 @@ def test_the_servers_own_error_log_still_names_the_request() -> None:
     assert not any(m.get("more_body") is False for m in sent)  # never closed as if it had ended well
 
 
-def test_a_failure_before_the_answer_gets_the_500_envelope_with_its_request_id() -> None:
+@pytest.mark.parametrize(
+    ("subdomains", "hsts"), [(False, b"max-age=31536000"), (True, b"max-age=31536000; includeSubDomains")]
+)
+def test_a_failure_before_the_answer_gets_the_500_envelope_with_its_request_id(subdomains: bool, hsts: bytes) -> None:
     """A middleware outside UnhandledErrorMiddleware failing before answering: the 500 carries X-Request-ID and the
-    security headers, and the error still reaches the server."""
+    security headers (HSTS as configured), and the error still reaches the server."""
     sent: list[Message] = []
 
     async def failing(scope: Scope, receive: Receive, send: Send) -> None:
@@ -117,7 +120,7 @@ def test_a_failure_before_the_answer_gets_the_500_envelope_with_its_request_id()
             sent.append(message)
 
         with pytest.raises(RuntimeError, match="outer middleware broke"):
-            await RequestContextMiddleware(failing)(SCOPE, receive_nothing, send)
+            await RequestContextMiddleware(failing, hsts_include_subdomains=subdomains)(SCOPE, receive_nothing, send)
 
     run_isolated(server)
     start, body = sent[0], sent[1]
@@ -125,6 +128,7 @@ def test_a_failure_before_the_answer_gets_the_500_envelope_with_its_request_id()
     assert start["status"] == 500
     assert re.fullmatch(rb"[0-9a-f]{32}", headers[b"x-request-id"])
     assert headers[b"x-content-type-options"] == b"nosniff"
+    assert headers[b"strict-transport-security"] == hsts
     assert json.loads(body["body"])["error"]["code"] == "internal_error"
 
 

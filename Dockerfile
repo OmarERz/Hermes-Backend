@@ -27,4 +27,8 @@ USER hermes
 EXPOSE 8000
 HEALTHCHECK --interval=10s --timeout=3s --retries=5 \
   CMD ["python", "-c", "import urllib.request,sys; sys.exit(urllib.request.urlopen('http://127.0.0.1:8000/api/health', timeout=2).status != 200)"]
-CMD ["uvicorn", "--factory", "api.app:create_app", "--host", "0.0.0.0", "--port", "8000"]
+# --no-server-header: no `server: uvicorn` on the answers (ASVS 5.0 V13.4.6, F12.3), like the embeddings service.
+# --reset-contextvars: each request starts from a clean context, so a log line Uvicorn writes for the connection later
+# (keep-alive) never carries the previous request's id or user (F12.3, request context in the logs).
+CMD ["uvicorn", "--factory", "api.app:create_app", "--host", "0.0.0.0", "--port", "8000", "--no-server-header", \
+     "--reset-contextvars"]

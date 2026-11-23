@@ -28,8 +28,9 @@ HEADER: Final = b"x-request-id"
 class RequestContextMiddleware:
     """Pure ASGI middleware (keeps streaming answers such as the SSE progress streaming)."""
 
-    def __init__(self, app: ASGIApp) -> None:
+    def __init__(self, app: ASGIApp, *, hsts_include_subdomains: bool = False) -> None:
         self.app = app
+        self.hsts_include_subdomains = hsts_include_subdomains
 
     async def __call__(self, scope: Scope, receive: Receive, send: Send) -> None:
         if scope["type"] != "http":
@@ -61,7 +62,9 @@ class RequestContextMiddleware:
                 if not started:
                     # A middleware outside UnhandledErrorMiddleware failed before answering: the 500 envelope goes out
                     # here, with the security headers and the X-Request-ID that Starlette's last resort would lack.
-                    await SecurityHeadersMiddleware(internal_error_response())(scope, receive, send_with_id)
+                    await SecurityHeadersMiddleware(
+                        internal_error_response(), include_subdomains=self.hsts_include_subdomains
+                    )(scope, receive, send_with_id)
                 # Re-raised, never swallowed: a broken stream stays a broken connection for the client (ARQ-05), and
                 # the server's own log of it ("Exception in ASGI application") still carries this request's context.
                 raise
