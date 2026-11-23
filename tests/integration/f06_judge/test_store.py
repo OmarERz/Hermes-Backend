@@ -169,7 +169,7 @@ def test_rejected_more_critical_asset_without_a_ci_stays_only_in_calls(engine: E
     with Session(engine) as session:
         assert session.scalars(select(m.JudgeReason).where(m.JudgeReason.llm_review_id == review_id)).all() == []
         review = session.get_one(m.LlmReview, review_id)
-        assert review.calls[0]["rule"] == "L4.more_critical_asset"
+        assert review.calls[0]["rule"] == "L5.asset"  # a CI reason that cites no CI (pending F6.1 #64)
         assert review.mitigation_status == "absent"
 
 
