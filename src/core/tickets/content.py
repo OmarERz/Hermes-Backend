@@ -1,7 +1,8 @@
 """What a ticket says in iTop (D-036, TIC-02b, TIC-08). Pure functions over a `TicketContext`.
 
 The text is for people and goes out in Spanish (D-060). Names, titles and descriptions coming from iTop, NVD or the
-news are data: they are copied, never interpreted, and iTop stores the description as plain text.
+news are data: they are copied, never interpreted. The text here is plain; iTop reads the description and the case
+logs as HTML, so the outbox writer encodes them on the way out (`core.itop.rich_text`, F12.3).
 """
 
 from __future__ import annotations
@@ -10,6 +11,7 @@ from collections.abc import Sequence
 from dataclasses import dataclass, field
 from typing import Any, Final
 
+from core.itop.rich_text import DESCRIPTION_MAX_BYTES, encoded_size
 from core.tickets.rules import level
 
 CONFIDENTIALITY_ES: Final[dict[str, str]] = {
@@ -107,32 +109,63 @@ def sorted_cis(cis: Sequence[CiLine]) -> list[CiLine]:
     return sorted(cis, key=lambda ci: (ci.fixed, -(ci.score if ci.score is not None else -1), ci.name))
 
 
+# The outbox appends "\n\nRef. Hermes: <ticket id>" to the description (its create idempotency): room for it.
+MARKER_ROOM: Final = 120
+
+
 def description(context: TicketContext, urgency: int | None) -> str:
-    """TIC-08: score and driving CI, CIs by score, factors, judge reasons, mitigation and every news URL."""
-    lines = [f"Vulnerabilidad {context.cve} en {context.product} (equipo custodio: {context.custodian})."]
+    """TIC-08: score and driving CI, CIs by score, factors, judge reasons, mitigation and every news URL.
+
+    iTop keeps the description in a 65 535-byte column (`core.itop.rich_text`). Every TIC-08 section stays; when the
+    text would not fit, the CI list (the part that grows with the inventory) keeps its highest scores and ends with a
+    line counting the CIs left out (the ticket's linked CIs and Hermes still list them all).
+    """
+    head = [f"Vulnerabilidad {context.cve} en {context.product} (equipo custodio: {context.custodian})."]
     if context.score is not None and urgency is not None:
-        lines.append(
+        head.append(
             f"Puntuación del ticket: {context.score} ({LEVEL_ES[level(urgency)]}), impulsada por {context.driving_ci}."
         )
     else:
-        lines.append("Puntuación del ticket: sin CIs vigentes.")
+        head.append("Puntuación del ticket: sin CIs vigentes.")
     if context.base is not None:
-        lines.append(f"Base {context.base} · Juez {context.judge_adjustment:+d}.")
+        head.append(f"Base {context.base} · Juez {context.judge_adjustment:+d}.")
     if context.cvss is not None or context.in_kev:
         cvss = "sin CVSS" if context.cvss is None else f"CVSS {context.cvss}"
-        lines.append(f"{cvss} · en KEV: {'sí' if context.in_kev else 'no'}.")
-    lines += ["", "CIs afectados (por su puntuación):", *(_ci_line(ci) for ci in sorted_cis(context.cis))]
+        head.append(f"{cvss} · en KEV: {'sí' if context.in_kev else 'no'}.")
+    head += ["", "CIs afectados (por su puntuación):"]
+    ci_lines = [_ci_line(ci) for ci in sorted_cis(context.cis)]
+    tail: list[str] = []
     if context.factors:
-        lines += ["", "Factores: " + " · ".join(f"{k} {v}" for k, v in context.factors.items())]
+        tail += ["", "Factores: " + " · ".join(f"{k} {v}" for k, v in context.factors.items())]
     if context.reasons:
-        lines += ["Motivos del juez: " + " · ".join(f"{r.code} ({r.points:+d})" for r in context.reasons)]
-    lines += ["", "Mitigación (desde los datos):", context.mitigation or "Sin mitigación en las fuentes."]
+        tail += ["Motivos del juez: " + " · ".join(f"{r.code} ({r.points:+d})" for r in context.reasons)]
+    tail += ["", "Mitigación (desde los datos):", context.mitigation or "Sin mitigación en las fuentes."]
     if context.mitigation_draft:
-        lines += ["", "Mitigación redactada por IA (validada por código):"]
-        lines += [f"{i}. {step}" for i, step in enumerate(context.mitigation_draft, start=1)]
+        tail += ["", "Mitigación redactada por IA (validada por código):"]
+        tail += [f"{i}. {step}" for i, step in enumerate(context.mitigation_draft, start=1)]
     if context.news:
-        lines += ["", "Noticias:", *(f"- {n.published} · {n.source} · {n.url}" for n in context.news)]
-    return "\n".join(lines)
+        tail += ["", "Noticias:", *(f"- {n.published} · {n.source} · {n.url}" for n in context.news)]
+    return _fit_ci_list(head, ci_lines, tail)
+
+
+def _fit_ci_list(head: list[str], ci_lines: list[str], tail: list[str]) -> str:
+    def text(keep: int) -> str:
+        left_out = len(ci_lines) - keep
+        # TODO(P-009): Spanish only, like the rest of the ticket text (D-060).
+        more = [f"- … y {left_out} CIs más (lista completa en los CIs del ticket y en Hermes)."] if left_out else []
+        return "\n".join([*head, *ci_lines[:keep], *more, *tail])
+
+    budget = DESCRIPTION_MAX_BYTES - MARKER_ROOM
+    if encoded_size(text(len(ci_lines))) <= budget:
+        return text(len(ci_lines))
+    low, high = 0, len(ci_lines) - 1
+    while low < high:  # the most CIs that still fit
+        middle = (low + high + 1) // 2
+        if encoded_size(text(middle)) <= budget:
+            low = middle
+        else:
+            high = middle - 1
+    return text(low)  # if even no CI fits (an enormous news list), the outbox's last-resort cut applies
 
 
 def ci_links(cis: Sequence[CiLine]) -> list[dict[str, str]]:

@@ -41,6 +41,7 @@ from core.db import models as m
 from core.itop import oql
 from core.itop.client import READ_OPERATIONS, ItopError, ItopObject, ItopReader, ItopUnavailableError
 from core.itop.oql import FIRST_PRINTABLE
+from core.itop.rich_text import encode_html_fields
 
 log = logging.getLogger("core.itop.outbox")
 
@@ -171,7 +172,13 @@ class _ItopWriter(ItopReader):
                 client.close()
 
     def write(self, operation: dict[str, Any]) -> tuple[str, str | None]:
-        """Send a write and return the (id, ref) of the object iTop answered with."""
+        """Send a write and return the (id, ref) of the object iTop answered with.
+
+        The ticket's description and comments are plain text here; iTop reads them as HTML, so they are encoded on
+        the way out (`core.itop.rich_text`). The stored payload stays plain text.
+        """
+        if operation.get("class") == TICKET_CLASS and isinstance(operation.get("fields"), dict):
+            operation = {**operation, "fields": encode_html_fields(operation["fields"])}
         body = self.call(operation)
         objects = body.get("objects") or {}
         if not isinstance(objects, dict) or len(objects) != 1:

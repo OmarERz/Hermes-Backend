@@ -125,7 +125,7 @@ def test_create_sets_the_itop_id_and_the_shadow_urgency(factory: sessionmaker[Se
     created = next(iter(double.data["UserRequest"].values()))
     assert stored.itop_ticket_id == created["id"]
     assert stored.itop_ref == created["ref"]
-    assert created["description"] == f"Descripción\n\nRef. Hermes: {ticket.id}"
+    assert created["description"] == f"Descripción<br><br>Ref. Hermes: {ticket.id}"  # iTop reads HTML (F12.3)
     assert (stored.status, stored.current_urgency, stored.current_impact) == ("open", 3, "service")
     assert stored.itop_created_at == T0
     row = outbox_row(factory, row_id)
@@ -329,8 +329,8 @@ def test_updates_wait_for_the_create_and_run_in_order(factory: sessionmaker[Sess
 
     assert double.operations[:2] == ["core/get", "core/create"]
     created = next(iter(double.data["UserRequest"].values()))
-    assert created["public_log"].startswith("Sigue presente\n\n[hermes:")
-    assert created["private_log"].startswith("Nota privada\n\n[hermes:")
+    assert created["public_log"].startswith("Sigue presente<br><br>[hermes:")  # iTop reads HTML (F12.3)
+    assert created["private_log"].startswith("Nota privada<br><br>[hermes:")
     assert created["urgency"] == "1"
     assert reload(factory, ticket.id).current_urgency == 1
 
@@ -442,3 +442,65 @@ def test_a_corrupted_payload_fails_without_calling_itop(
 
     assert outbox_row(factory, row_id).status == "failed"
     assert double.writes == []
+
+
+def test_text_reaches_itop_html_encoded_and_the_payload_stays_plain(factory: sessionmaker[Session]) -> None:
+    """F12.3 (ASVS V1.2.1): iTop stores the description and case logs as HTML and keeps links and remote images, so
+    markup inside names, news or LLM text must arrive escaped, and line breaks as `<br>`."""
+    double, clock = ItopDouble(), Clock()
+    ticket = new_ticket(factory)
+    hostile = 'Paso 1 <img src="https://evil.test/p.png">\nVer <a href="https://phish.test">parche</a> & "más"'
+    create = queue(
+        factory, ticket.id, create_payload({**ticket_fields(), "description": hostile}), f"create:{ticket.id}"
+    )
+    comment = queue(factory, ticket.id, comment_payload("<b>Nota</b>\nde Ana's", private=True), "c-1", action="suggest")
+
+    assert worker(factory, double, clock).drain() == 2
+
+    created = next(iter(double.data["UserRequest"].values()))
+    assert created["description"] == (
+        "Paso 1 &lt;img src=&quot;https://evil.test/p.png&quot;&gt;<br>"
+        "Ver &lt;a href=&quot;https://phish.test&quot;&gt;parche&lt;/a&gt; &amp; &quot;más&quot;"
+        f"<br><br>Ref. Hermes: {ticket.id}"
+    )
+    assert created["private_log"].startswith("&lt;b&gt;Nota&lt;/b&gt;<br>de Ana&#x27;s<br><br>[hermes:")
+    assert "<img" not in json.dumps(double.data["UserRequest"]) and "<a " not in json.dumps(double.data["UserRequest"])
+    assert outbox_row(factory, create).payload["fields"]["description"] == hostile  # stored as written
+    assert outbox_row(factory, comment).payload["text"] == "<b>Nota</b>\nde Ana's"
+
+
+def test_an_escaped_marker_still_finds_our_ticket_and_comment_on_retry(factory: sessionmaker[Session]) -> None:
+    """The idempotency markers have no character HTML escapes, so a retry still recognises our own write."""
+    double, clock = ItopDouble(), Clock()
+    ticket = new_ticket(factory)
+    queue(factory, ticket.id, create_payload({**ticket_fields(), "description": "a < b"}), f"create:{ticket.id}")
+    worker(factory, double, clock, http=losing_responses(double, "core/create")).drain()
+    clock.advance(minutes=2)
+
+    worker(factory, double, clock).drain()
+
+    assert len(double.data["UserRequest"]) == 1
+    assert reload(factory, ticket.id).itop_ticket_id is not None
+
+
+def test_an_oversized_description_is_cut_but_the_ticket_is_created_and_found_again(
+    factory: sessionmaker[Session],
+) -> None:
+    """iTop's description is a 65 535-byte TEXT column: escaping must not push a long description past it, and the
+    `Ref. Hermes` marker (the create's idempotency) must survive the cut."""
+    double, clock = ItopDouble(), Clock()
+    ticket = new_ticket(factory)
+    long_text = "\n".join(f"- CI {i} <expuesto> & dueño «Ñandú»" for i in range(4000))
+    queue(factory, ticket.id, create_payload({**ticket_fields(), "description": long_text}), f"create:{ticket.id}")
+    worker(factory, double, clock, http=losing_responses(double, "core/create")).drain()
+    clock.advance(minutes=2)
+
+    worker(factory, double, clock).drain()
+
+    assert len(double.data["UserRequest"]) == 1  # the retry found the cut ticket by its marker
+    created = next(iter(double.data["UserRequest"].values()))
+    assert len(created["description"].encode()) < 65_535
+    assert created["description"].endswith(
+        f"Texto recortado: no cabe completo en iTop; el detalle está en Hermes.<br>Ref. Hermes: {ticket.id}"
+    )
+    assert reload(factory, ticket.id).itop_ticket_id == created["id"]
