@@ -86,10 +86,11 @@ PIPELINE = [
 ]
 
 
-def test_without_itop_the_dispatcher_the_nightly_metrics_and_the_pipeline_run() -> None:
+def test_without_itop_the_dispatcher_metrics_calibration_and_pipeline_run() -> None:
     assert [(job.name, job.interval, job.lane) for job in build_jobs(SETTINGS, MagicMock())] == [
         ("notification_dispatch", DISPATCH_SECONDS, "notifications"),
         ("nightly_metrics", NIGHTLY_SECONDS, "nightly"),
+        ("weekly_calibration", NIGHTLY_SECONDS, "nightly"),
         *PIPELINE,
     ]
 
@@ -100,6 +101,7 @@ def test_with_itop_the_outbox_and_the_sync_run() -> None:
     assert [(job.name, job.interval) for job in jobs] == [
         ("notification_dispatch", DISPATCH_SECONDS),
         ("nightly_metrics", NIGHTLY_SECONDS),
+        ("weekly_calibration", NIGHTLY_SECONDS),
         *[(name, interval) for name, interval, _ in PIPELINE],
         ("inventory_refresh", 6 * 3600.0),
         ("itop_outbox", ITOP_OUTBOX_SECONDS),

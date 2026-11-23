@@ -1,0 +1,24 @@
+meta {
+  name: demo-sources
+  type: http
+  seq: 5
+}
+
+get {
+  url: {{baseUrl}}/api/sources?limit=50
+  body: none
+  auth: bearer
+}
+
+auth:bearer {
+  token: {{token}}
+}
+
+assert {
+  res.status: eq 200
+  res.body.items.length: gte {{demoMinItems}}
+}
+
+docs {
+  Default sources plus the demo news source. Run `make demo` first; with `--env-var demoMinItems=1` every list must show data.
+}

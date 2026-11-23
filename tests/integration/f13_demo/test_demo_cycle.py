@@ -1,0 +1,111 @@
+"""Smoke test of F13: factory values on a fresh database and one full demo cycle (scan to events), no network."""
+
+from __future__ import annotations
+
+from datetime import UTC, datetime
+from typing import Any
+
+import pytest
+from sqlalchemy import Engine, text
+from sqlalchemy.orm import sessionmaker
+
+from core.devtools.admin import AdminError, run_bootstrap
+from core.devtools.demo import run_cycle
+
+pytestmark = pytest.mark.integration
+NOW = datetime(2026, 11, 22, 12, 0, tzinfo=UTC)
+
+
+def rows(engine: Engine, statement: str) -> list[tuple[Any, ...]]:
+    with engine.connect() as conn:
+        return [tuple(r) for r in conn.execute(text(statement))]
+
+
+def url(engine: Engine) -> str:
+    return engine.url.render_as_string(hide_password=False)
+
+
+COUNTS = (
+    "SELECT (SELECT count(*) FROM assessment), (SELECT count(*) FROM asset_score), (SELECT count(*) FROM ticket), "
+    "(SELECT count(*) FROM itop_outbox), (SELECT count(*) FROM notification_event), (SELECT count(*) FROM finding), "
+    "(SELECT count(*) FROM correlation)"
+)
+CATALOGS = (
+    "SELECT (SELECT count(*) FROM formula_version), (SELECT count(*) FROM source), "
+    "(SELECT count(*) FROM setting_definition)"
+)
+
+
+def counts(engine: Engine) -> dict[str, int]:
+    names = ("assessment", "asset_score", "ticket", "itop_outbox", "notification_event", "finding", "correlation")
+    return dict(zip(names, rows(engine, COUNTS)[0], strict=True))
+
+
+def test_bootstrap_loads_the_factory_values_once(engine: Engine) -> None:
+    assert rows(engine, "SELECT count(*) FROM formula_version") == [(0,)]
+    first = run_bootstrap(url(engine), NOW)
+    assert first.startswith("factory values loaded") and "source(s) added" in first
+    snapshot = rows(engine, CATALOGS)
+    again = run_bootstrap(url(engine), NOW)
+    assert again.startswith("factory values already present") and "0 source(s) added" in again
+    assert rows(engine, CATALOGS) == snapshot
+    assert rows(engine, "SELECT status FROM formula_version") == [("active",)]
+
+
+def test_the_demo_cycle_reaches_assessments_tickets_the_outbox_and_events(engine: Engine) -> None:
+    run_bootstrap(url(engine), NOW)
+    report = run_cycle(sessionmaker(engine, expire_on_commit=False), NOW)
+    assert report.scan_new >= 1 and report.stories == 3 and report.matches >= 1
+    assert report.assessments == 2  # one per vulnerability group
+    assert report.tickets >= 2  # two custodians across the two groups
+    assert report.outbox >= report.tickets and report.events >= report.tickets
+    state = counts(engine)
+    assert state["asset_score"] >= 3 and state["finding"] >= 3 and state["correlation"] >= 1
+    # the demo judge is a stand-in: one accepted reason, no tokens
+    judge = rows(
+        engine, "SELECT model, tokens_input + tokens_output, cost_usd::text FROM llm_review WHERE agent = 'judge'"
+    )
+    assert len(judge) == 2 and set(judge) == {("demo-double", 0, "0.000000")}  # one verdict per group
+    assert rows(engine, "SELECT reason_code, points, status FROM judge_reason") == [
+        ("mass_exploitation", 8, "accepted")
+    ]
+    # the iTop operations are parked as failed so the outbox worker (pending rows only) never sends them
+    outbox = rows(engine, "SELECT status, last_error FROM itop_outbox")
+    assert outbox and set(outbox) == {("failed", "demo data: never sent to iTop")}
+    assert report.parked == report.outbox
+    open_demo = rows(engine, "SELECT count(*) FROM ticket WHERE status = 'open' AND itop_ticket_id LIKE 'DEMO-%'")
+    assert open_demo == [(report.tickets,)]  # the tickets view lists what iTop holds, so they get a demo id
+    assert {r[0] for r in rows(engine, "SELECT event_type FROM notification_event")} == {"new_ticket"}
+    # every front view has something to show
+    assert rows(engine, "SELECT count(*) FROM finding_group_status WHERE status = 'active'")[0][0] == 2
+    assert rows(engine, "SELECT count(*) FROM alert")[0][0] == report.alerts == 1
+    assert rows(engine, "SELECT count(*) FROM inventory_issue")[0][0] >= 1  # the demo server has no owner
+
+
+def test_running_the_cycle_again_adds_an_assessment_but_no_second_ticket_or_data(engine: Engine) -> None:
+    run_bootstrap(url(engine), NOW)
+    factory = sessionmaker(engine, expire_on_commit=False)
+    run_cycle(factory, NOW)
+    first = counts(engine)
+    run_cycle(factory, NOW)
+    second = counts(engine)
+    assert second["assessment"] == first["assessment"]  # nothing changed, so nothing is re-assessed
+    assert second["notification_event"] == first["notification_event"]
+    assert second["ticket"] == first["ticket"] and second["finding"] == first["finding"]
+    assert second["correlation"] == first["correlation"]
+    assert rows(engine, "SELECT count(*) FROM raw_article")[0][0] == 3
+
+
+def test_the_demo_refuses_to_run_over_real_inventory(engine: Engine) -> None:
+    run_bootstrap(url(engine), NOW)
+    with engine.begin() as conn:
+        conn.execute(
+            text(
+                "INSERT INTO asset (itop_ci_id, itop_class, name, criticality, exposed, confidentiality, "
+                "personal_data, synced_at) VALUES "
+                "('CI-REAL', 'Server', 'real-01', 'low', false, 'public', false, now())"
+            )
+        )
+    with pytest.raises(AdminError, match="not demo data"):
+        run_cycle(sessionmaker(engine, expire_on_commit=False), NOW)
+    assert rows(engine, "SELECT count(*) FROM itop_outbox") == [(0,)]

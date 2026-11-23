@@ -7,14 +7,14 @@ from collections.abc import Iterator
 from datetime import UTC, datetime
 from typing import Annotated, Literal
 
-from fastapi import APIRouter, Depends, Query
+from fastapi import APIRouter, Path, Query
 from fastapi.responses import StreamingResponse
 
-from api.auth import CurrentUser, get_current_user
 from api.errors import ApiError, ErrorDetail
 from api.pagination import PAGINATED_RESPONSES, Page, PageQuery, Signer, paginate
 from api.routes import samples
 from api.routes._auth import guard
+from api.routes._config_support import CurrentUserDep, app_user_id, now, to_api_error
 from api.routes._db import SessionDep
 from api.routes._events import Events
 from api.routes._runs import Runs
@@ -34,10 +34,12 @@ from api.routes.models import (
     StixBundle,
     StixExportRequest,
 )
+from core.calibration import proposals as calibration
+from core.configuration.errors import ConfigError
+from core.db import models as m
 from core.stix.export import ExportOptions, ExportScope, StixExportError, export_bundle
 
 router = APIRouter(tags=["operations"])
-CurrentUserDep = Annotated[CurrentUser, Depends(get_current_user)]
 PROGRESS_ES = {"queued": "En cola", "running": "En curso", "succeeded": "Terminado", "failed": "Falló"}
 
 # Schema of one parsed event: `event` is the event name and `data` a JSON text {run_id, progress, message}.
@@ -121,36 +123,82 @@ def stix_export(request: StixExportRequest, session: SessionDep) -> StixBundle:
     return StixBundle.model_validate(result.bundle)
 
 
+KINDS: dict[str, Literal["source_level", "reason_threshold", "formula_weight"]] = {
+    "weight": "formula_weight",
+    "source_trust": "source_level",
+    "reason_range": "reason_threshold",
+    "new_reason": "reason_threshold",
+}
+STATUSES: dict[str, Literal["pending", "approved", "rejected"]] = {
+    "proposed": "pending",
+    "approved": "approved",
+    "applied": "approved",
+    "reverted": "approved",
+    "rejected": "rejected",
+    "discarded": "rejected",
+}
+ProposalId = Annotated[str, Path(alias="id")]
+
+
+def _proposal(row: m.CalibrationProposal) -> CalibrationProposal:
+    return CalibrationProposal.model_validate(
+        {
+            "id": str(row.id),
+            "created_at": row.created_at.isoformat().replace("+00:00", "Z"),
+            "kind": KINDS[row.target_kind],
+            "summary": calibration.describe(row),
+            "status": STATUSES[row.status],
+            "target_key": row.target_key,
+            "previous_value": row.previous_value,
+            "proposed_value": row.proposed_value,
+            "evidence": row.evidence,
+            "backtest": row.backtest,
+            "decided_at": row.decided_at.isoformat().replace("+00:00", "Z") if row.decided_at else None,
+        }
+    )
+
+
 @router.get(
     "/api/calibration/proposals",
     dependencies=[guard("GET", "/api/calibration/proposals")],
     responses=PAGINATED_RESPONSES,
 )
-def list_proposals(params: PageQuery, signer: Signer) -> Page[CalibrationProposal]:
-    return paginate(samples.PROPOSALS, params, signer)
+def list_proposals(params: PageQuery, signer: Signer, session: SessionDep) -> Page[CalibrationProposal]:
+    """Mode 4 proposals, newest first. They are only ever applied when an admin approves them (D-020)."""
+    return paginate([_proposal(row) for row in calibration.list_proposals(session)], params, signer)
 
 
-def _decide(proposal_id: str, status: Literal["approved", "rejected"]) -> CalibrationProposal:
-    proposal = next((p for p in samples.PROPOSALS if p.id == proposal_id), None)
-    if proposal is None:
-        raise ApiError(404, "not_found", "La propuesta no existe.")
-    if proposal.status != "pending":
-        raise ApiError(409, "already_decided", "La propuesta ya fue resuelta.")
-    return proposal.model_copy(update={"status": status})
+def _decide(
+    session: SessionDep, user: CurrentUserDep, proposal_id: str, action: Literal["approve", "reject"]
+) -> CalibrationProposal:
+    who = calibration.Decider(app_user_id(session, user), now())
+    try:
+        row = (
+            calibration.approve(session, proposal_id, who)
+            if action == "approve"
+            else calibration.reject(session, proposal_id, who)
+        )
+    except ConfigError as error:
+        session.rollback()
+        raise to_api_error(error) from None
+    result = _proposal(row)
+    session.commit()  # before answering: the client must not see a decision that was not saved
+    return result
 
 
 @router.post(
     "/api/calibration/proposals/{id}/approve", dependencies=[guard("POST", "/api/calibration/proposals/{id}/approve")]
 )
-def approve_proposal(id: str) -> CalibrationProposal:  # noqa: A002
-    return _decide(id, "approved")
+def approve_proposal(proposal_id: ProposalId, session: SessionDep, user: CurrentUserDep) -> CalibrationProposal:
+    """Applies the proposal as a new formula version or a source level change, audited; 409 if it went stale."""
+    return _decide(session, user, proposal_id, "approve")
 
 
 @router.post(
     "/api/calibration/proposals/{id}/reject", dependencies=[guard("POST", "/api/calibration/proposals/{id}/reject")]
 )
-def reject_proposal(id: str) -> CalibrationProposal:  # noqa: A002
-    return _decide(id, "rejected")
+def reject_proposal(proposal_id: ProposalId, session: SessionDep, user: CurrentUserDep) -> CalibrationProposal:
+    return _decide(session, user, proposal_id, "reject")
 
 
 @router.get("/api/metrics", dependencies=[guard("GET", "/api/metrics")])

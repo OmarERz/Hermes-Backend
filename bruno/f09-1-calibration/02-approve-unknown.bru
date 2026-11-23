@@ -1,0 +1,23 @@
+meta {
+  name: approve-unknown
+  type: http
+  seq: 2
+}
+
+post {
+  url: {{baseUrl}}/api/calibration/proposals/00000000-0000-0000-0000-000000000000/approve
+  body: none
+  auth: bearer
+}
+
+auth:bearer {
+  token: {{token}}
+}
+
+assert {
+  res.status: eq 404
+}
+
+docs {
+  Approving an unknown proposal answers 404. Manual flow: take an id from the list and approve it as admin: it applies as a new formula version or source level.
+}
