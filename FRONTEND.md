@@ -142,9 +142,8 @@ Todo error responde con:
 ## 6. Tiempo real (SSE)
 
 `GET /api/runs/{id}/events` es un *Server-Sent Events* (`text/event-stream`) con eventos `progress` mientras la
-corrida avanza. ⚠️ **Estado actual:** `POST /api/scans`, `GET /api/runs` y este stream todavía responden con datos
-de **demostración** (tres eventos fijos); el progreso real desde la tabla de corridas llega con la orquestación
-del backend, ya en revisión. Construye la pantalla contra el contrato, que no cambia. `EventSource` del navegador no permite cabecera `Authorization`: usa un cliente SSE que acepte
+corrida avanza, leídos de la tabla de corridas. `POST /api/scans` deja la corrida en cola y el worker la toma;
+el stream refleja su avance real y `GET /api/runs` su estado final. `EventSource` del navegador no permite cabecera `Authorization`: usa un cliente SSE que acepte
 cabeceras (por ejemplo `@microsoft/fetch-event-source`) y manda el Bearer. Si la conexión se corta, reconecta y
 consulta `GET /api/runs` para el estado final.
 
