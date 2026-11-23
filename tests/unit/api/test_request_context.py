@@ -176,3 +176,13 @@ def test_the_context_does_not_leak_into_the_next_request(client: tuple[TestClien
     http.get("/api/me")
     (entry,) = entries(stream, "missing_bearer")
     assert "user" not in entry
+
+
+def test_an_oversized_body_rejected_outside_the_routes_still_gets_a_request_id() -> None:
+    """The context middleware is the outermost one: the 413 of the body limit carries X-Request-ID too."""
+    app = create_app(SETTINGS, token_verifier=FakeVerifier(), role_manager=object())
+    answer = TestClient(app).post(
+        "/api/feedback", content=b"x" * (1024 * 1024 + 1), headers={"Content-Type": "application/json"}
+    )
+    assert answer.status_code == 413
+    assert re.fullmatch(r"[0-9a-f]{32}", answer.headers["x-request-id"])

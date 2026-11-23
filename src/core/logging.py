@@ -32,7 +32,7 @@ _request: ContextVar[dict[str, str] | None] = ContextVar("hermes_request", defau
 
 
 @contextmanager
-def request_context(**fields: str) -> Iterator[dict[str, str]]:
+def request_context(**fields: str) -> Iterator[None]:
     """Every log line written inside the block carries `fields` (only the names of `REQUEST_FIELDS`).
 
     The context is reset on a normal exit only. When an error leaves the block, the server logs it next, in the same
@@ -40,7 +40,7 @@ def request_context(**fields: str) -> Iterator[dict[str, str]]:
     right after, and the next request sets its own context first.
     """
     token = _request.set({name: value for name, value in fields.items() if name in REQUEST_FIELDS})
-    yield _request.get() or {}
+    yield
     _request.reset(token)
 
 
