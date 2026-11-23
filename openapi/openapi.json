@@ -831,9 +831,14 @@
         "properties": {
           "changes": {
             "additionalProperties": {
+              "maxLength": 1000,
               "type": "string"
             },
+            "maxProperties": 100,
             "minProperties": 1,
+            "propertyNames": {
+              "maxLength": 100
+            },
             "title": "Changes",
             "type": "object"
           },
@@ -988,6 +993,7 @@
                   ],
                   "type": "string"
                 },
+                "maxItems": 10,
                 "type": "array"
               },
               {
@@ -1220,6 +1226,7 @@
         },
         "properties": {
           "assessment_id": {
+            "maxLength": 100,
             "title": "Assessment Id",
             "type": "string"
           },
@@ -1457,6 +1464,7 @@
         "additionalProperties": false,
         "properties": {
           "cpe": {
+            "maxLength": 512,
             "pattern": "^cpe:2\\.3:",
             "title": "Cpe",
             "type": "string"
@@ -1900,8 +1908,11 @@
         "properties": {
           "aliases": {
             "items": {
+              "maxLength": 200,
+              "minLength": 1,
               "type": "string"
             },
+            "maxItems": 50,
             "title": "Aliases",
             "type": "array"
           },
@@ -1914,6 +1925,7 @@
           "domain": {
             "anyOf": [
               {
+                "maxLength": 253,
                 "type": "string"
               },
               {
@@ -1927,11 +1939,13 @@
             "type": "string"
           },
           "name": {
+            "maxLength": 200,
             "minLength": 1,
             "title": "Name",
             "type": "string"
           },
           "sector": {
+            "maxLength": 100,
             "title": "Sector",
             "type": "string"
           }
@@ -1950,8 +1964,11 @@
         "properties": {
           "aliases": {
             "items": {
+              "maxLength": 200,
+              "minLength": 1,
               "type": "string"
             },
+            "maxItems": 50,
             "title": "Aliases",
             "type": "array"
           },
@@ -1964,6 +1981,7 @@
           "domain": {
             "anyOf": [
               {
+                "maxLength": 253,
                 "type": "string"
               },
               {
@@ -1973,11 +1991,13 @@
             "title": "Domain"
           },
           "name": {
+            "maxLength": 200,
             "minLength": 1,
             "title": "Name",
             "type": "string"
           },
           "sector": {
+            "maxLength": 100,
             "title": "Sector",
             "type": "string"
           }
@@ -1995,8 +2015,10 @@
         "properties": {
           "countries": {
             "items": {
+              "maxLength": 100,
               "type": "string"
             },
+            "maxItems": 300,
             "title": "Countries",
             "type": "array"
           },
@@ -2012,14 +2034,17 @@
             "type": "string"
           },
           "sector": {
+            "maxLength": 100,
             "minLength": 1,
             "title": "Sector",
             "type": "string"
           },
           "subsectors": {
             "items": {
+              "maxLength": 100,
               "type": "string"
             },
+            "maxItems": 50,
             "title": "Subsectors",
             "type": "array"
           }
@@ -2394,9 +2419,14 @@
         "properties": {
           "changes": {
             "additionalProperties": {
+              "maxLength": 1000,
               "type": "string"
             },
+            "maxProperties": 100,
             "minProperties": 1,
+            "propertyNames": {
+              "maxLength": 100
+            },
             "title": "Changes",
             "type": "object"
           }
@@ -2541,12 +2571,14 @@
             "type": "string"
           },
           "name": {
+            "maxLength": 200,
             "minLength": 1,
             "title": "Name",
             "type": "string"
           },
           "url": {
             "description": "Own feeds must use HTTPS; they enter as N4 (D-041)",
+            "maxLength": 2048,
             "pattern": "^https://",
             "title": "Url",
             "type": "string"
@@ -2630,6 +2662,7 @@
           "date_from": {
             "anyOf": [
               {
+                "maxLength": 100,
                 "type": "string"
               },
               {
@@ -2641,6 +2674,7 @@
           "date_to": {
             "anyOf": [
               {
+                "maxLength": 100,
                 "type": "string"
               },
               {
@@ -2657,6 +2691,7 @@
           "run_id": {
             "anyOf": [
               {
+                "maxLength": 100,
                 "type": "string"
               },
               {
@@ -2677,6 +2712,7 @@
           "vulnerability_id": {
             "anyOf": [
               {
+                "maxLength": 100,
                 "type": "string"
               },
               {
