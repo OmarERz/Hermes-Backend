@@ -21,6 +21,7 @@ METHODS = ("get", "post", "put", "patch", "delete")
 HTTP = re.compile(r"^meta \{[^}]*^\s*type: http\s*$", re.MULTILINE | re.DOTALL)
 REQUEST = re.compile(r"^(get|post|put|patch|delete) \{\s*\n\s*url: \{\{baseUrl\}\}(\S+)", re.MULTILINE)
 TAG = re.compile(r"^\s*operationId: ([a-z_]+)\s*$", re.MULTILINE)
+REQUIRE = re.compile(r"require\(\"(\./[^\"]+)\"\)")
 # An explicit success: `res.status: eq 2xx` in `assert`, or `expect(res.status).to.equal(2xx)` in `tests`.
 SUCCESS = re.compile(r"^\s*res\.status: eq 2\d\d\s*$|expect\(res\.status\)\.to\.equal\(2\d\d\)", re.MULTILINE)
 
@@ -90,3 +91,18 @@ def test_protected_routes_are_checked_without_a_token_and_with_a_lower_role() ->
     forbidden = sum("res.status: eq 403" in t for t in texts)
     assert unauthenticated >= 3
     assert forbidden >= 3
+
+
+def required_modules() -> set[str]:
+    return {
+        match for file in (ROOT / "bruno").rglob("*.bru") for match in REQUIRE.findall(file.read_text(encoding="utf-8"))
+    }
+
+
+def test_every_helper_a_request_requires_exists() -> None:
+    """A required module that is missing makes every request using it fail with 'Cannot find module'.
+    tests/integration/f00_harness/test_bruno_helpers.py also checks that git does not ignore it."""
+    modules = required_modules()
+    assert modules, "the requests share bruno/lib/hermes.js"
+    missing = sorted(m for m in modules if not (ROOT / "bruno" / m).with_suffix(".js").is_file())
+    assert not missing, f"modules required by requests but absent: {missing}"
