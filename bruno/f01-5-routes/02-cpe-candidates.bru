@@ -1,0 +1,23 @@
+meta {
+  name: cpe-candidates
+  type: http
+  seq: 2
+}
+
+get {
+  url: {{baseUrl}}/api/cpe/candidates?q=nginx
+  body: none
+  auth: bearer
+}
+
+auth:bearer {
+  token: {{token}}
+}
+
+assert {
+  res.status: eq 200
+}
+
+docs {
+  Candidate CPE vendor and product pairs (ESC-06). Needs the analyst role.
+}
