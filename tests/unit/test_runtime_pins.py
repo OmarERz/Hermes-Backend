@@ -19,3 +19,9 @@ def test_the_api_and_embeddings_images_hide_the_server_header() -> None:
     for dockerfile in (ROOT / "Dockerfile", ROOT / "docker" / "embeddings" / "Dockerfile"):
         commands = [line for line in dockerfile.read_text(encoding="utf-8").splitlines() if line.startswith("CMD ")]
         assert any('"uvicorn"' in line and '"--no-server-header"' in line for line in commands), dockerfile
+
+
+def test_the_api_image_starts_each_request_with_a_clean_context() -> None:
+    """F12.3: with --reset-contextvars no log line of a keep-alive connection inherits the previous request's id."""
+    text = (ROOT / "Dockerfile").read_text(encoding="utf-8")
+    assert '"--reset-contextvars"' in text
