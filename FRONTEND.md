@@ -132,7 +132,10 @@ Todo error responde con:
   `recalculation` (estado `queued`, visible en `GET /api/runs`) que el worker toma en segundos; cada guardado
   encola la suya.
 - **Feedback:** un feedback activo por usuario y evaluación (editable); `wrong_priority` exige el nivel
-  propuesto. El usuario sale del token, nunca del cuerpo.
+  propuesto. El usuario sale del token, nunca del cuerpo. Si la evaluación tiene tickets de varios custodios, manda
+  `ticket_itop_id` (el ticket que el usuario tiene a la vista) para que «no sugerir más» y «falso positivo» solo
+  afecten a ese ticket; sin él se aplican a todos los tickets de la evaluación. Errores: 404 si la evaluación no
+  existe, 403 si el usuario no es analista o admin activo, 422 si el ticket no es de esa evaluación.
 - **Niveles por nombre:** la comparación muestra el nivel CVSS (Crítica/Alta/Media/Baja) contra la urgencia
   final por su nombre, cada uno con su escala; no compares números entre escalas.
 - **Cascada del Δ:** `GET /api/assessments/{id}/breakdown` devuelve las barras (factores, juez, piso, límites,
