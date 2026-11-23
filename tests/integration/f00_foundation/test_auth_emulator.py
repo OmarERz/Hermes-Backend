@@ -10,8 +10,6 @@ import base64
 import json
 import secrets
 import time
-from collections.abc import Iterator
-from pathlib import Path
 from typing import Any
 
 import httpx
@@ -20,9 +18,6 @@ from fastapi.testclient import TestClient
 from firebase_admin import auth, initialize_app
 from pydantic import SecretStr
 from testcontainers.core.config import testcontainers_config
-from testcontainers.core.container import DockerContainer
-from testcontainers.core.image import DockerImage
-from testcontainers.core.waiting_utils import wait_for_logs
 
 from api.app import create_app
 from api.auth import FirebaseTokenVerifier, InMemoryUserDirectory, TokenError
@@ -33,18 +28,8 @@ testcontainers_config.ryuk_disabled = True
 
 pytestmark = pytest.mark.integration
 
-ROOT = Path(__file__).resolve().parents[3]
 PROJECT = "demo-hermes"
 IDP = "identitytoolkit.googleapis.com/v1"
-
-
-@pytest.fixture(scope="module")
-def emulator_host() -> Iterator[str]:
-    with DockerImage(path=str(ROOT / "docker" / "auth-emulator"), tag="hermes-test-auth-emulator") as image:
-        container = DockerContainer(str(image.tag)).with_exposed_ports(9099)
-        with container:
-            wait_for_logs(container, "All emulators ready", timeout=120)
-            yield f"{container.get_container_host_ip()}:{container.get_exposed_port(9099)}"
 
 
 @pytest.fixture(autouse=True)

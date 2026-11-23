@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import os
+import re
 import shutil
 import stat
 import subprocess
@@ -111,3 +112,15 @@ def test_refuses_an_output_dir_inside_the_repo(tmp_path: Path) -> None:
     shutil.rmtree(ROOT / "tests" / "leak-probe", ignore_errors=True)
     assert result.returncode == 2
     assert "outside the repository" in result.stderr
+
+
+def test_every_secret_compose_mounts_is_written(tmp_path: Path) -> None:
+    """compose.yaml mounts each file the script writes (the iTop webhook token included, ARQ-02)."""
+    required = "".join(f"{name}=x\n" for name in NAMES[:5])
+    result = run(tmp_path, required, {"ITOP_WEBHOOK_TOKEN": "w"})
+    assert result.returncode == 0, result.stderr
+    written = {path.name for path in (tmp_path / "out").iterdir()}
+    compose = (ROOT / "compose.yaml").read_text(encoding="utf-8")
+    mounted = set(re.findall(r"compose-secrets\}/([a-z_]+)$", compose, re.MULTILINE))
+    assert mounted == written
+    assert (tmp_path / "out" / "itop_webhook_token").read_text() == "w"

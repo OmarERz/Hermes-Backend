@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import re
 from pathlib import Path
 
 import pytest
@@ -165,3 +166,30 @@ def test_read_secret_keeps_spaces_and_drops_final_newline(tmp_path: Path, monkey
     assert read_secret("sample_secret", tmp_path) == "  padded value "
     (tmp_path / "blank_secret").write_text("   \n", encoding="utf-8")
     assert read_secret("blank_secret", tmp_path) is None
+
+
+# Read outside Settings (os.environ or compose interpolation) but still documented in .env.example.
+EXAMPLE_EXTRAS = {
+    "POSTGRES_PASSWORD",  # compose secrets (make compose-secrets)
+    "MIGRATOR_DB_PASSWORD",
+    "APP_DB_PASSWORD",
+    "RETENTION_DB_PASSWORD",
+    "FIREBASE_AUTH_EMULATOR_HOST",  # read by firebase-admin and core.devtools.emulator
+    "ADVISORY_DOMAINS",  # core.analysts.cve
+    "API_PORT",  # compose interpolation
+    "DB_PORT",
+    "AUTH_EMULATOR_PORT",
+    "COMPOSE_SECRETS_DIR",
+    "MIGRATION_DATABASE_URL",  # core.devtools.admin (make seed)
+}
+NOT_IN_EXAMPLE = {"PGPASSWORD"}  # the app role's password reaches Settings as the pgpassword secret file only
+
+
+def test_the_example_env_file_lists_every_setting_and_only_settings() -> None:
+    example = (Path(__file__).resolve().parents[2] / ".env.example").read_text(encoding="utf-8")
+    listed = set(re.findall(r"^#? ?([A-Z][A-Z0-9_]+)=", example, re.MULTILINE))
+    fields = {name.upper() for name in Settings.model_fields} - NOT_IN_EXAMPLE
+    assert fields <= listed, f"settings missing from .env.example: {sorted(fields - listed)}"
+    assert listed <= fields | EXAMPLE_EXTRAS, (
+        f".env.example lists unread variables: {sorted(listed - fields - EXAMPLE_EXTRAS)}"
+    )

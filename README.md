@@ -58,6 +58,15 @@ devuelve y los registros las enmascaran.
 | `ABUSECH_AUTH_KEY`, `RANSOMWARELIVE_API_KEY` | Fuentes de indicadores y víctimas |
 | `FIREBASE_PROJECT_ID`, `FIREBASE_CREDENTIALS_FILE` | Inicio de sesión; con `demo-hermes` solo sirve el emulador de Firebase incluido |
 | `EMBEDDINGS_URL` | Servicio de *embeddings* del ciclo de noticias; por defecto `http://embeddings:8080` dentro de Compose. Vacío apaga el ciclo de noticias |
+| `ITOP_ORG_ID`, `ITOP_CALLER_ID`, `ITOP_SERVICE_ID` | Quién abre los tickets en iTop (ids de la organización, la persona del sistema y el servicio); sin los dos primeros el pipeline puntúa pero no abre tickets |
+| `SCAN_INTERVAL_HOURS` | Escaneo simulado programado cada N horas; `0` (por defecto) = solo a pedido (`POST /api/scans`) |
+| `ADVISORY_DOMAINS` | Dominios de los que el analista de CVE puede descargar el aviso del fabricante; sin definir = la lista aprobada por defecto, vacía = ninguno |
+| `CORS_ALLOWED_ORIGINS` | Orígenes exactos del front si va en otro origen (separados por comas); vacío = mismo origen |
+| `API_DOCS_ENABLED` | Documentación interactiva en `/api/docs`; solo desarrollo (apagada por defecto) |
+
+Para la pila local, `API_PORT`, `DB_PORT` y `AUTH_EMULATOR_PORT` cambian los puertos publicados en `127.0.0.1`,
+`COMPOSE_SECRETS_DIR` cambia dónde se escriben los archivos de secretos y `MIGRATION_DATABASE_URL` es la conexión del
+rol `migrator` para `make seed` fuera de Compose (ver `.env.example`).
 
 El primer administrador se asigna con el rol (*custom claim*) de Firebase; con el emulador local,
 `make emulator-token ROLE=admin` imprime un token de prueba. Después, un admin cambia roles con
