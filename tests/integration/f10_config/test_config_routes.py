@@ -20,6 +20,7 @@ from core.config import Settings
 from core.db import models as m
 from core.db.seeds import NOW, seed
 from core.ingestion.catalog import sync_default_sources
+from core.ingestion.ssrf import system_resolver
 
 pytestmark = pytest.mark.integration
 APPS: dict[int, Any] = {}
@@ -494,6 +495,10 @@ def test_new_feed_rules(client: TestClient, engine: Engine) -> None:
     APPS[id(client)].state.source_resolver = lambda _host: ["10.0.0.5"]
     private = client.post("/api/sources", json={"name": "Interno", "url": "https://intranet.example.test/rss"})
     assert private.status_code == 422
+    # The real resolver refuses a host that is not a valid name before any DNS lookup (was a 500, Schemathesis).
+    APPS[id(client)].state.source_resolver = system_resolver
+    garbled = client.post("/api/sources", json={"name": "Conexiones", "url": "https:// \u0087q\u00b6"})
+    assert (garbled.status_code, garbled.json()["error"]["code"]) == (422, "validation_error")
     assert rows(engine, "SELECT count(*) FROM source WHERE is_custom") == [(0,)]
 
 

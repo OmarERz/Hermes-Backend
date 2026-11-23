@@ -24,6 +24,8 @@ def system_resolver(host: str) -> list[str]:
         infos = socket.getaddrinfo(host, 443, type=socket.SOCK_STREAM)
     except socket.gaierror as exc:
         raise UnsafeUrlError("The host does not resolve") from exc
+    except ValueError as exc:  # UnicodeError (IDNA) or an embedded NUL: not a host name at all
+        raise UnsafeUrlError("The host is not a valid name") from exc
     return sorted({str(info[4][0]) for info in infos})
 
 

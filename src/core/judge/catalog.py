@@ -190,6 +190,7 @@ class JudgeSettings:
     double_review_max_diff: int = 10  # L10
     critical_line: int = 90  # L10: crossing to or from Critical triggers the double review
     output_language: str = "es"  # JUE-MIT-08
+    mode2_min_confidence: Decimal | None = None  # explicit admin setting; None = the profile's value (§12)
     token_caps: TokenCaps = field(default_factory=TokenCaps)
 
     def __post_init__(self) -> None:

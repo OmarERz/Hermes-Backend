@@ -14,11 +14,21 @@ from dataclasses import dataclass, replace
 
 from sqlalchemy.orm import Session
 
+from core.db.models import ReviewPackage as ReviewPackageRow
+from core.judge.budget import OffsetDailyBudget
 from core.judge.double_review import combine_outcomes, needs_double_review
 from core.judge.mitigation import MitigationResult
+from core.judge.mode2 import Mode2Context, mode2_min_confidence, review_candidate
 from core.judge.package import ReviewPackage
 from core.judge.session import Failure, JudgeEnvironment, JudgeSession, ReviewOutcome, ReviewStatus, ToolCaller
-from core.judge.store import ReviewTarget, save_review, sync_error_queue
+from core.judge.store import (
+    DbInventory,
+    ReviewTarget,
+    refuted_relationships,
+    save_alert,
+    save_review,
+    sync_error_queue,
+)
 from core.llm import ToolDefinition
 
 
@@ -69,7 +79,9 @@ class JudgeService:
         first = self._session(package).run()
         if not needs_double_review(first, package, self._env.settings):
             return JudgeResult(first.status, first.adjustment, first.ci_adjustments, first)
-        second = self._session(package).run()
+        # the first review is not stored yet: the blind one counts its cost against the day (L12)
+        offset = replace(self._env, daily_budget=OffsetDailyBudget(self._env.daily_budget, first.cost_usd))
+        second = JudgeSession(self._caller, package, offset, self._tools).run()
         if second.adjustment is None:  # any failure of the second review: final = base (L11)
             return JudgeResult(ReviewStatus.NO_JUDGE_REVIEW, None, {}, first, second)
         combined = combine_outcomes(first, second, self._env.settings.double_review_max_diff)
@@ -95,3 +107,60 @@ class JudgeService:
             second_id = save_review(session, result.second, target, second_review_of=first_id)
         queued = sync_error_queue(session, target.review_package_id, result.failure, target.now)
         return StoredJudgeResult(result, first_id, second_id, queued)
+
+
+@dataclass(frozen=True)
+class StoredDismissalReview:
+    status: ReviewStatus
+    review_id: uuid.UUID
+    second_review_id: uuid.UUID | None
+    alert_id: uuid.UUID | None
+    queued: bool
+
+
+class DismissalService:
+    """Mode 2 (docs/15 F-10): review a dismissal candidate, store the review(s) and the alert it validated."""
+
+    def __init__(
+        self, caller: ToolCaller, env: JudgeEnvironment, tools: Mapping[str, ToolDefinition] | None = None
+    ) -> None:
+        self._caller = caller
+        self._env = env
+        self._tools = tools
+
+    def review(self, session: Session, package: ReviewPackage, target: ReviewTarget) -> StoredDismissalReview:
+        _check_candidate(session, package, target)
+        context = Mode2Context(mode2_min_confidence(self._env), DbInventory(session), refuted_relationships(session))
+        result = review_candidate(self._caller, package, self._env, context, self._tools)
+        first = result.first
+        if result.status is not first.status:  # the blind review disagreed or failed: nothing is raised
+            failure = result.second.failure if result.second is not None else None
+            first = replace(first, alert=None, failure=first.failure or failure)
+        review_id = save_review(session, first, target, status=result.status)
+        second_id = None
+        if result.second is not None:
+            second_id = save_review(session, result.second, target, second_review_of=review_id)
+        alert_id = save_alert(session, result.alert, review_id, target.now) if result.alert is not None else None
+        undecided = result.status in (ReviewStatus.NO_JUDGE_REVIEW, ReviewStatus.PARTIAL_REVIEW)
+        failure = (result.second or result.first).failure if undecided else None
+        # no decision (provider failure, budget or limits): the candidate is retried later (PRE-01)
+        queued = sync_error_queue(session, target.review_package_id, failure, target.now)
+        return StoredDismissalReview(result.status, review_id, second_id, alert_id, queued)
+
+
+def _check_candidate(session: Session, package: ReviewPackage, target: ReviewTarget) -> None:
+    """Before asking the judge (F-10): the candidate has exactly one news item, its story is a UUID, and the stored
+    package row (when given) is that story's dismissal package with this very content (L13: the audit points at
+    exactly what the judge read)."""
+    news = [element.news for element in package.news_elements if element.news is not None]
+    if len(news) != 1:
+        raise ValueError("a dismissal candidate carries exactly one news item")
+    try:
+        story_id = uuid.UUID(news[0].story_id)
+    except ValueError:
+        raise ValueError("the news item of a dismissal candidate needs its story UUID") from None
+    if target.review_package_id is not None:
+        stored = session.get(ReviewPackageRow, target.review_package_id)
+        same = stored is not None and stored.kind == "dismissal" and stored.story_id == story_id
+        if not same or stored is None or ReviewPackage.from_content(stored.content).content != package.content:
+            raise ValueError("the stored package is not this dismissal candidate")

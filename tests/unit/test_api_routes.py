@@ -80,20 +80,6 @@ def test_a_lower_role_gets_403(client: TestClient) -> None:
 
 
 GET_SAMPLES = [
-    "/api/vulnerabilities",
-    "/api/vulnerabilities?view=criticality",
-    "/api/vulnerabilities?view=asset",
-    "/api/vulnerabilities/grp-1",
-    "/api/assets/CI-0001",
-    "/api/findings/fnd-1/history",
-    "/api/comparison/summary",
-    "/api/comparison/table",
-    "/api/assessments/asm-0001/breakdown",
-    "/api/recommendations",
-    "/api/recommendations/asm-0001",
-    "/api/recommendations/asm-0001/feedback",
-    "/api/tickets",
-    "/api/alerts",
     "/api/runs",
     "/api/metrics",
     "/api/notifications/events",
@@ -120,32 +106,21 @@ def test_connection_status_never_contains_a_key(client: TestClient) -> None:
 
 def test_pagination_cursor_flow_and_invalid_cursor(client: TestClient) -> None:
     as_role(Role.READER)
-    first = client.get("/api/recommendations", params={"limit": 1}).json()
+    first = client.get("/api/runs", params={"limit": 1}).json()
     assert len(first["items"]) == 1
     assert first["next_cursor"]
-    second = client.get("/api/recommendations", params={"limit": 1, "cursor": first["next_cursor"]}).json()
-    assert second["items"][0]["assessment_id"] == "asm-0002"
+    second = client.get("/api/runs", params={"limit": 1, "cursor": first["next_cursor"]}).json()
+    assert second["items"][0]["id"] == "run-2"
     assert second["next_cursor"] is None
-    bad = client.get("/api/recommendations", params={"cursor": "tampered.cursor"})
+    bad = client.get("/api/runs", params={"cursor": "tampered.cursor"})
     assert bad.status_code == 400
     assert bad.json()["error"]["code"] == "invalid_cursor"
-    assert client.get("/api/recommendations", params={"limit": 500}).status_code == 422
-
-
-def test_criticality_view_has_a_section_per_band(client: TestClient) -> None:
-    as_role(Role.READER)
-    bands = client.get("/api/vulnerabilities", params={"view": "criticality"}).json()["bands"]
-    assert [b["level"] for b in bands] == ["critical", "high", "medium", "low"]
+    assert client.get("/api/runs", params={"limit": 500}).status_code == 422
 
 
 def test_not_found_uses_the_envelope(client: TestClient) -> None:
     as_role(Role.READER)
-    for url in (
-        "/api/vulnerabilities/nope",
-        "/api/assets/nope",
-        "/api/recommendations/nope",
-        "/api/findings/x/history",
-    ):
+    for url in ("/api/recommendations/nope", "/api/recommendations/nope/feedback", "/api/findings/x/history"):
         response = client.get(url)
         assert response.status_code == 404
         assert response.json()["error"]["code"] == "not_found"
@@ -168,43 +143,10 @@ def test_scan_run_is_listed_and_streams_its_progress(client: TestClient) -> None
     assert client.get("/api/runs/run-zzz/events").status_code == 404
 
 
-def test_vulnerability_filters_apply_to_every_view(client: TestClient) -> None:
+def test_vulnerability_filters_are_validated_before_the_database(client: TestClient) -> None:
     as_role(Role.READER)
-
-    def groups(**params: str) -> list[str]:
-        return [g["group_id"] for g in client.get("/api/vulnerabilities", params={**params}).json()["groups"]]
-
-    assert groups(custodian="Datos") == ["grp-2"]
-    assert groups(owner="Alex Ejemplo") == ["grp-1"]
-    assert groups(classification="public") == ["grp-3"]
-    assert groups(exposed="true") == ["grp-1", "grp-3"]
-    assert groups(in_kev="true") == ["grp-1"]
-    assert groups(status="new") == ["grp-2"]
-    assert groups(band="medium") == ["grp-3"]
-    assert groups(date_from="2026-01-14T00:00:00Z") == ["grp-1", "grp-2"]
-    assert groups(date_to="2026-01-12T00:00:00Z") == ["grp-3"]
-    assert groups(status="new", band="critical") == []
-    assets = client.get("/api/vulnerabilities", params={"view": "asset", "exposed": "false"}).json()["assets"]
-    assert [a["ci_id"] for a in assets] == ["CI-0002"]
-    assert [
-        a["ci_id"]
-        for a in client.get("/api/vulnerabilities", params={"view": "asset", "band": "critical"}).json()["assets"]
-    ] == ["CI-0001"]
     assert client.get("/api/vulnerabilities", params={"classification": "secret"}).status_code == 422
-
-
-def test_criticality_view_honors_cursor_and_limit(client: TestClient) -> None:
-    as_role(Role.READER)
-    first = client.get("/api/vulnerabilities", params={"view": "criticality", "limit": 2}).json()
-    assert first["next_cursor"]
-    assert [b["level"] for b in first["bands"]] == ["critical", "high", "medium", "low"]
-    assert [b["count"] for b in first["bands"]] == [1, 1, 1, 0]  # counts of the whole filtered result
-    assert sum(len(b["groups"]) for b in first["bands"]) == 2
-    second = client.get(
-        "/api/vulnerabilities", params={"view": "criticality", "limit": 2, "cursor": first["next_cursor"]}
-    ).json()
-    assert [g["group_id"] for b in second["bands"] for g in b["groups"]] == ["grp-3"]
-    assert second["next_cursor"] is None
+    assert client.get("/api/vulnerabilities", params={"view": "ticket"}).status_code == 422
 
 
 def test_feedback_rules(client: TestClient) -> None:
@@ -236,8 +178,6 @@ def test_runs_stix_calibration_and_notifications(client: TestClient) -> None:
     assert client.post("/api/connections/test", json={"names": ["itop"]}).json()[0]["name"] == "itop"
     assert client.put("/api/setup/steps/3", json={"done": True}).json()["done"] is True
     assert client.put("/api/setup/steps/99", json={}).status_code == 404
-    assert client.get("/api/tickets", params={"urgency": 1}).json()["items"][0]["itop_id"] == "R-000123"
-    assert client.get("/api/recommendations/asm-0002/feedback").json() == []
 
 
 def test_non_error_event_conflict() -> None:

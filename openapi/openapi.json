@@ -392,15 +392,39 @@
             "title": "Assessment Id",
             "type": "string"
           },
+          "ci_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "CI of the waterfall: the requested one or the top one",
+            "title": "Ci Id"
+          },
           "final": {
             "title": "Final",
             "type": "integer"
+          },
+          "raw": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Raw value 100 x S (EVA-11), where the bars start",
+            "title": "Raw"
           },
           "waterfall": {
             "additionalProperties": {
               "type": "integer"
             },
-            "description": "P, T, A, D, judge, floor and rounding contributions (EVA-12)",
+            "description": "Whole-point bars from the raw value to the final (EVA-12): P, T, A, D, judge, floor and rounding, plus clamp (keeping base + adjustment in 0-100) and version (E of alerts without a finding); raw + every bar = final",
             "title": "Waterfall",
             "type": "object"
           }
@@ -3195,6 +3219,7 @@
     },
     "/api/alerts": {
       "get": {
+        "description": "Threat alerts without a finding: R2 and R3 packages and mode 2 inferences, newest first.",
         "operationId": "list_alerts_api_alerts_get",
         "parameters": [
           {
@@ -3347,6 +3372,7 @@
     },
     "/api/assessments/{id}/breakdown": {
       "get": {
+        "description": "Waterfall of the change from the raw value to the final for one CI of the assessment (EVA-12).",
         "operationId": "assessment_breakdown_api_assessments__id__breakdown_get",
         "parameters": [
           {
@@ -3356,6 +3382,25 @@
             "schema": {
               "title": "Id",
               "type": "string"
+            }
+          },
+          {
+            "description": "CI of the waterfall; default the top one",
+            "in": "query",
+            "name": "ci_id",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "maxLength": 100,
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "CI of the waterfall; default the top one",
+              "title": "Ci Id"
             }
           }
         ],
@@ -3474,6 +3519,7 @@
     },
     "/api/assets/{ci_id}": {
       "get": {
+        "description": "A live CI and its vulnerabilities; each one carries this CI's final, level and status (D-035).",
         "operationId": "asset_detail_api_assets__ci_id__get",
         "parameters": [
           {
@@ -4178,6 +4224,7 @@
     },
     "/api/comparison/summary": {
       "get": {
+        "description": "Raw vs processed over the current scored findings (D-039, MET-24 to MET-27). The matrix crosses the CVSS\nlevel of the raw snapshot (rows) with the final level (columns); findings without CVSS stay out of the matrix\nand the indicators. `rank_correlation` is Kendall's tau-b, \"0.00\" when it is undefined.",
         "operationId": "comparison_summary_api_comparison_summary_get",
         "responses": {
           "200": {
@@ -4294,6 +4341,7 @@
     },
     "/api/comparison/table": {
       "get": {
+        "description": "One row per current scored finding, largest change against the raw value first (EVA-11, EVA-12).",
         "operationId": "comparison_table_api_comparison_table_get",
         "parameters": [
           {
@@ -5610,6 +5658,7 @@
     },
     "/api/findings/{id}/history": {
       "get": {
+        "description": "Score of the finding's CI in each assessment of its group, oldest first (EVA-05). The judge adjustment\nshown is the group's plus the CI's own.",
         "operationId": "finding_history_api_findings__id__history_get",
         "parameters": [
           {
@@ -7698,8 +7747,47 @@
     },
     "/api/recommendations": {
       "get": {
+        "description": "Recommendation feed, newest first (FRO-12); `group_id` or `ci_id` narrow it to one timeline.\n\nThe score is the assessment's highest final (EVA-07); the CI shown is the most restrictive one at evaluation\ntime, with its classification, owner and custodian of that moment (FRO-13).",
         "operationId": "list_recommendations_api_recommendations_get",
         "parameters": [
+          {
+            "description": "Timeline of one vulnerability group",
+            "in": "query",
+            "name": "group_id",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "maxLength": 100,
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Timeline of one vulnerability group",
+              "title": "Group Id"
+            }
+          },
+          {
+            "description": "Timeline of one CI (iTop id)",
+            "in": "query",
+            "name": "ci_id",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "maxLength": 100,
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Timeline of one CI (iTop id)",
+              "title": "Ci Id"
+            }
+          },
           {
             "description": "Opaque cursor from `next_cursor`: base64url(payload).base64url(signature). A cursor that is not ours or was altered is answered with 400 `invalid_cursor`.",
             "in": "query",
@@ -7977,6 +8065,7 @@
     },
     "/api/recommendations/{id}/feedback": {
       "get": {
+        "description": "Feedback received on one assessment, from Slack and the front, newest first, superseded ones included\n(FRO-15). `on_older_version`: a newer assessment of the same group changed the score.",
         "operationId": "recommendation_feedback_api_recommendations__id__feedback_get",
         "parameters": [
           {
@@ -9329,6 +9418,7 @@
     },
     "/api/tickets": {
       "get": {
+        "description": "Tickets already created in iTop (D-036), most urgent first, then newest. Before the first sync with iTop\nthe urgency is the band of the ticket score (TIC-03). A CI counts as fixed when none of its linked findings\nis current or it was decommissioned.",
         "operationId": "list_tickets_api_tickets_get",
         "parameters": [
           {
@@ -9499,7 +9589,7 @@
     },
     "/api/vulnerabilities": {
       "get": {
-        "description": "Grouped views resolved by the backend (FRO-09). The FRO-10 filters and cursor/limit apply to every view.\n\nIn the `criticality` view the page is cut over the groups ordered by their final; each band reports the\nnumber of groups of the whole filtered result and only the groups that fall in the page.",
+        "description": "Grouped views resolved by the backend (FRO-09). The FRO-10 filters and cursor/limit apply to every view.\n\nGroups are ordered by their final (the highest among their current CIs) and CIs by their risk (the highest\nfinal of their findings, never a sum, FRO-11). In the `criticality` view the page is cut over the groups\nordered by their final; each band reports the number of groups of the whole filtered result and only the\ngroups that fall in the page. Only scored findings on live CIs are listed.",
         "operationId": "list_vulnerabilities_api_vulnerabilities_get",
         "parameters": [
           {
@@ -9838,6 +9928,7 @@
     },
     "/api/vulnerabilities/{group_id}": {
       "get": {
+        "description": "A vulnerability group with each scored CI and that CI's own score (D-035).",
         "operationId": "vulnerability_detail_api_vulnerabilities__group_id__get",
         "parameters": [
           {

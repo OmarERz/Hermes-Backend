@@ -1,0 +1,45 @@
+{
+  "package_id": "0196a6f0-0000-7000-8000-000000000001",
+  "type": "dismissal_candidate",
+  "fingerprint": "sha256:dismissal-1",
+  "versions": {"profile": "v1", "weights": "v1", "schema": "1.0"},
+  "group": null,
+  "cve_data": null,
+  "kev": {"listed": false, "date": null, "required_action": null, "known_ransomware": false},
+  "epss": null,
+  "base": {
+    "S": 0.8,
+    "P": 0.2,
+    "T": 0.4,
+    "A": 0.5,
+    "D": 0.5,
+    "score": 51,
+    "details": ["synthetic fixture"],
+    "floor_applicable": false,
+    "relevance": []
+  },
+  "news": [
+    {
+      "element_id": "N1",
+      "story_id": "0196a6f0-0000-7000-8000-000000000001",
+      "title": "Synthetic advisory: critical flaw in OpenSSL 3.x",
+      "source": "synthetic_media",
+      "source_level": "N3",
+      "date": "2026-11-21T08:00:00+00:00",
+      "urls": ["https://media.example.test/openssl-3"],
+      "summary": "A critical memory corruption flaw affects OpenSSL 3.x and is under active exploitation against TLS servers. Distributions are shipping backported patches.",
+      "event_types": ["new_vulnerability", "active_exploitation"],
+      "exploitation_level": "active",
+      "match": {"type": "none", "strength": 0.0},
+      "suspicious": false
+    }
+  ],
+  "iocs": [],
+  "tickets": [],
+  "profile_summary": {
+    "sector": "Transporte",
+    "countries": ["MX"],
+    "peer_companies": ["Example Rides"],
+    "stack_summary": ["Nginx 1.24.0", "Ubuntu 22.04"]
+  }
+}
