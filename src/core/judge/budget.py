@@ -1,12 +1,14 @@
 """Judge budget (L12, docs/09 §4): per-review token caps by complexity, daily gate and cost at today's price.
 
-The daily budget and the critical reserve live in the shared budget policy (F3.1); the judge depends only on the
-`DailyBudget` protocol so that policy plugs in without changes here. Budget is checked between turns, never in
-the middle of a response, and a review that runs out closes as `partial_review` with what was accepted.
+The daily budget and the critical reserve live in the shared budget policy (F3.1, `core.validation.budget`); the
+judge depends on the `DailyBudget` protocol and `LedgerDailyBudget` adapts that policy to it. Budget is checked
+between turns, never in the middle of a response, and a review that runs out closes as `partial_review` with what
+was accepted.
 """
 
 from __future__ import annotations
 
+from collections.abc import Callable
 from dataclasses import dataclass
 from decimal import Decimal
 from typing import Protocol
@@ -14,6 +16,7 @@ from typing import Protocol
 from core.judge.catalog import TokenCaps
 from core.judge.package import ReviewPackage
 from core.llm import Usage
+from core.validation.budget import BudgetConfig, can_start
 
 COMPLEX_NEWS = 3
 COMPLEX_CIS = 10
@@ -23,16 +26,29 @@ COST_QUANTUM = Decimal("0.000001")  # llm_review.cost_usd is numeric(10,6)
 
 
 class DailyBudget(Protocol):
-    def allows(self, *, critical: bool) -> bool:
-        """Whether the day's budget (with the 20% critical reserve, P-015) still allows a judge turn."""
+    def allows(self, *, critical: bool, pending_usd: Decimal = Decimal(0)) -> bool:
+        """Whether the day's budget (with the 20% critical reserve, P-015) still allows a judge turn, counting
+        `pending_usd`: what the review in progress already spent and is not yet stored in `llm_review`."""
         ...
 
 
 class UnlimitedDailyBudget:
-    """Placeholder until the shared daily budget policy is wired in (TODO(P-015): USD 5 a day, 20% critical)."""
+    """No daily limit: for tests and tools only; production wires `LedgerDailyBudget`."""
 
-    def allows(self, *, critical: bool) -> bool:
+    def allows(self, *, critical: bool, pending_usd: Decimal = Decimal(0)) -> bool:
         return True
+
+
+@dataclass(frozen=True)
+class OffsetDailyBudget:
+    """A daily budget that also counts reviews of the same package that ran but are not stored yet (the first of a
+    double review, docs/07 §6)."""
+
+    inner: DailyBudget
+    already_usd: Decimal
+
+    def allows(self, *, critical: bool, pending_usd: Decimal = Decimal(0)) -> bool:
+        return self.inner.allows(critical=critical, pending_usd=pending_usd + self.already_usd)
 
 
 @dataclass(frozen=True)
@@ -54,6 +70,9 @@ class ModelPrice:
 
 
 FREE = ModelPrice(Decimal(0), Decimal(0), Decimal(0))
+# TODO(P-015): conservative provisional price (USD per million tokens) used while `model_prices` has no entry for
+# the model, so the daily budget still advances; deliberately above the published DeepSeek prices ⚠️ (verify).
+FALLBACK_PRICE = ModelPrice(input=Decimal(2), cached_input=Decimal("0.5"), output=Decimal(8))
 
 
 def complexity(package: ReviewPackage) -> str:
@@ -68,3 +87,21 @@ def token_cap(package: ReviewPackage, caps: TokenCaps) -> int:
     """Token cap of one review: by complexity; KEV, R1 or an exposed CI may use up to 2x the normal cap (§4.5)."""
     cap = caps.complex if complexity(package) == "complex" else caps.normal
     return max(cap, caps.normal * caps.critical_multiplier) if package.is_critical else cap
+
+
+# TODO(P-015): one judge turn is estimated at this size until the test bench measures it (docs/09 §4.1).
+TURN_ESTIMATE = Usage(input=12_000, cached_input=0, output=1_500, reasoning=0)
+
+
+class LedgerDailyBudget:
+    """`DailyBudget` over the shared daily policy (F3.1): what the day already spent, read through `spent` (the
+    `llm_usage_daily` view), plus the estimated cost of the next turn must fit the day's limit; only critical
+    packages (KEV, R1, exposed CI) may use the reserve (docs/09 §4, P-015)."""
+
+    def __init__(self, spent: Callable[[], Decimal], config: BudgetConfig, turn_estimate_usd: Decimal) -> None:
+        self._spent = spent
+        self._config = config
+        self._estimate = turn_estimate_usd
+
+    def allows(self, *, critical: bool, pending_usd: Decimal = Decimal(0)) -> bool:
+        return can_start(self._config, self._spent() + pending_usd, self._estimate, critical)

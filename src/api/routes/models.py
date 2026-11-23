@@ -263,8 +263,14 @@ class ComparisonRow(_Model):
 
 class Breakdown(_Model):
     assessment_id: str
-    waterfall: dict[str, int] = Field(description="P, T, A, D, judge, floor and rounding contributions (EVA-12)")
+    waterfall: dict[str, int] = Field(
+        description="Whole-point bars from the raw value to the final (EVA-12): P, T, A, D, judge, floor and "
+        "rounding, plus clamp (keeping base + adjustment in 0-100) and version (E of alerts without a finding); "
+        "raw + every bar = final"
+    )
     final: int
+    ci_id: str | None = Field(default=None, description="CI of the waterfall: the requested one or the top one")
+    raw: int | None = Field(default=None, description="Raw value 100 x S (EVA-11), where the bars start")
 
 
 # --- recommendations, feedback, tickets, alerts -----------------------------------------------------------------
@@ -452,3 +458,13 @@ class VulnerabilityFilters(_Model):
     status: FindingStatus | None = None
     date_from: DateTimeString | None = Field(default=None, description="Last seen on or after (RFC 3339)")
     date_to: DateTimeString | None = Field(default=None, description="Last seen on or before (RFC 3339)")
+
+
+class RecommendationFilters(_Model):
+    """Optional narrowing of the recommendation feed to one timeline (FRO-12)."""
+
+    # The same query string also carries `cursor` and `limit`, read by other parameters.
+    model_config = ConfigDict(extra="ignore", strict=False)
+
+    group_id: str | None = Field(default=None, max_length=100, description="Timeline of one vulnerability group")
+    ci_id: str | None = Field(default=None, max_length=100, description="Timeline of one CI (iTop id)")

@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from collections.abc import Callable, Sequence
 from dataclasses import dataclass
 
 from sqlalchemy.orm import Session
@@ -21,6 +22,7 @@ class PipelineResult:
     placements: list[Placement]
     filtered: FilterResult
     alerts: list[HealthAlert]
+    analyses: Sequence[object] = ()
 
 
 @dataclass(frozen=True)
@@ -28,6 +30,7 @@ class PipelineOptions:
     trigger_reason: str = "schedule"
     clock: Clock = utc_now
     entities: EntityProvider = regex_entities
+    analyze: Callable[[Session], Sequence[object]] | None = None  # the news analyst (F-05 step 7)
 
 
 def run_news_pipeline(
@@ -39,4 +42,5 @@ def run_news_pipeline(
     placements = group_new_articles(session, embed, options.entities, options.clock)
     filtered = filter_pending_stories(session)
     alerts = check_source_health(session, options.clock)
-    return PipelineResult(ingested=ingested, placements=placements, filtered=filtered, alerts=alerts)
+    analyses = options.analyze(session) if options.analyze is not None else ()
+    return PipelineResult(ingested=ingested, placements=placements, filtered=filtered, alerts=alerts, analyses=analyses)

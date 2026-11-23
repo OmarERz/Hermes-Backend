@@ -296,7 +296,7 @@ class _Budget:
         self.answers = answers
         self.critical: list[bool] = []
 
-    def allows(self, *, critical: bool) -> bool:
+    def allows(self, *, critical: bool, pending_usd: Decimal = Decimal(0)) -> bool:
         self.critical.append(critical)
         return self.answers.pop(0)
 
@@ -359,3 +359,28 @@ def test_exploit_chain_is_rejected_without_an_active_group_lookup() -> None:
     }
     outcome, _ = review([propose(chain), finalize()])
     assert outcome.reasons[0].rule == "L4.exploit_chain"
+
+
+class _RecordingBudget:
+    def __init__(self) -> None:
+        self.pending: list[Decimal] = []
+
+    def allows(self, *, critical: bool, pending_usd: Decimal = Decimal(0)) -> bool:
+        self.pending.append(pending_usd)
+        return True
+
+
+def test_each_turn_counts_what_the_review_already_spent() -> None:
+    budget = _RecordingBudget()
+    price = ModelPrice(input=Decimal(1000), cached_input=Decimal(0), output=Decimal(1000))
+    review([propose(MASS), finalize()], daily_budget=budget, price=price)
+    assert budget.pending == [Decimal(0), Decimal("0.015000")]  # before the 1st turn, then after it (15 tokens)
+
+
+def test_a_retry_after_an_invalid_first_answer_checks_the_budget() -> None:
+    outcome, double = review(
+        [text_completion("no json"), finalize()], daily_budget=_Budget([True, False]), settings=JudgeSettings()
+    )
+    assert outcome.status is ReviewStatus.PARTIAL_REVIEW
+    assert outcome.failure is Failure.BUDGET
+    double.assert_calls(1)
