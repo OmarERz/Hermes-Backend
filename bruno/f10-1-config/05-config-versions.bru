@@ -1,0 +1,23 @@
+meta {
+  name: config-versions
+  type: http
+  seq: 5
+}
+
+get {
+  url: {{baseUrl}}/api/config/versions
+  body: none
+  auth: bearer
+}
+
+auth:bearer {
+  token: {{token}}
+}
+
+assert {
+  res.status: eq 200
+}
+
+docs {
+  Configuration history, newest first. Manual flow: POST /api/config/versions/{v}/restore with expected_version.
+}

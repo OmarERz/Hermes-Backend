@@ -49,8 +49,6 @@ def create_app(
     app.state.cursor_signer = CursorSigner(settings.cursor_signing_key.get_secret_value())
     app.state.itop_url = str(settings.itop_url) if settings.itop_url is not None else None  # for links to iTop
     app.state.runs = list(samples.RUNS)
-    app.state.peers = list(samples.PEERS)
-    app.state.sources = list(samples.SOURCES)
     install_error_handlers(app)
     app.add_middleware(BodySizeLimitMiddleware)
     app.add_middleware(SecurityHeadersMiddleware)  # outermost: also on the 413 of the size limit

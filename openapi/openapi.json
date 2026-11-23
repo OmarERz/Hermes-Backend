@@ -440,9 +440,44 @@
       "CalibrationProposal": {
         "additionalProperties": false,
         "properties": {
+          "backtest": {
+            "anyOf": [
+              {
+                "additionalProperties": true,
+                "type": "object"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Before and after of the 30-day replay",
+            "title": "Backtest"
+          },
           "created_at": {
             "title": "Created At",
             "type": "string"
+          },
+          "decided_at": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Decided At"
+          },
+          "evidence": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Evidence"
           },
           "id": {
             "title": "Id",
@@ -457,6 +492,30 @@
             "title": "Kind",
             "type": "string"
           },
+          "previous_value": {
+            "anyOf": [
+              {
+                "additionalProperties": true,
+                "type": "object"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Previous Value"
+          },
+          "proposed_value": {
+            "anyOf": [
+              {
+                "additionalProperties": true,
+                "type": "object"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Proposed Value"
+          },
           "status": {
             "enum": [
               "pending",
@@ -469,6 +528,18 @@
           "summary": {
             "title": "Summary",
             "type": "string"
+          },
+          "target_key": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "What the proposal changes, e.g. weights.P or source:code",
+            "title": "Target Key"
           }
         },
         "required": [
@@ -715,6 +786,14 @@
             ],
             "title": "Min Role",
             "type": "string"
+          },
+          "options": {
+            "description": "Allowed values of an enum parameter",
+            "items": {
+              "type": "string"
+            },
+            "title": "Options",
+            "type": "array"
           },
           "type": {
             "enum": [
@@ -2408,6 +2487,19 @@
       "SourceCreate": {
         "additionalProperties": false,
         "properties": {
+          "kind": {
+            "default": "rss",
+            "description": "How the feed is read",
+            "enum": [
+              "rss",
+              "atom",
+              "json",
+              "csv",
+              "api"
+            ],
+            "title": "Kind",
+            "type": "string"
+          },
           "name": {
             "minLength": 1,
             "title": "Name",
@@ -3724,6 +3816,7 @@
     },
     "/api/calibration/proposals": {
       "get": {
+        "description": "Mode 4 proposals, newest first. They are only ever applied when an admin approves them (D-020).",
         "operationId": "list_proposals_api_calibration_proposals_get",
         "parameters": [
           {
@@ -3876,6 +3969,7 @@
     },
     "/api/calibration/proposals/{id}/approve": {
       "post": {
+        "description": "Applies the proposal as a new formula version or a source level change, audited; 409 if it went stale.",
         "operationId": "approve_proposal_api_calibration_proposals__id__approve_post",
         "parameters": [
           {
@@ -4514,7 +4608,7 @@
         ]
       },
       "put": {
-        "description": "Optimistic concurrency: `expected_version` must be the current one, else 409 (API-03).",
+        "description": "Optimistic concurrency: `expected_version` must be the current one, else 409 (API-03).\n\nThe change is one new version, validated per parameter and, for the formula, against FRO-05; each parameter\ncarries its own minimum role (API-05).",
         "operationId": "put_config_api_config_put",
         "requestBody": {
           "content": {
@@ -4641,7 +4735,7 @@
     },
     "/api/config/schema": {
       "get": {
-        "description": "Parameter schema the frontend builds its forms from (API-05).",
+        "description": "Parameter schema the frontend builds its forms from (API-05): the formula and the settings catalog.",
         "operationId": "config_schema_api_config_schema_get",
         "responses": {
           "200": {
@@ -4914,7 +5008,7 @@
     },
     "/api/config/versions/{v}/restore": {
       "post": {
-        "description": "Restores a version as a new one and recalculates the bases by code, without calling the judge (FRO-08).\n\nLike every configuration write it carries the expected current version (API-03): 409 if it changed.",
+        "description": "Restores a version as a new one without calling the judge (FRO-08).\n\nLike every configuration write it carries the expected current version (API-03): 409 if it changed.",
         "operationId": "restore_version_api_config_versions__v__restore_post",
         "parameters": [
           {
@@ -5696,7 +5790,7 @@
     },
     "/api/formula/simulate": {
       "post": {
-        "description": "Preview only: it never changes data (FRO-06).",
+        "description": "Preview only: it never changes data (FRO-06). The changes are checked against the active formula.",
         "operationId": "simulate_api_formula_simulate_post",
         "requestBody": {
           "content": {
@@ -6354,6 +6448,7 @@
     },
     "/api/metrics": {
       "get": {
+        "description": "Dashboards of docs/10 (FRO-21): the latest nightly value of each metric and the judge ladder level.",
         "operationId": "metrics_api_metrics_get",
         "responses": {
           "200": {
@@ -6470,6 +6565,7 @@
     },
     "/api/notifications/events": {
       "get": {
+        "description": "Notification events of the outbox (NOT-02); `error` lists those that exhausted their retries.",
         "operationId": "notification_events_api_notifications_events_get",
         "parameters": [
           {
@@ -6637,6 +6733,7 @@
     },
     "/api/notifications/events/{id}/retry": {
       "post": {
+        "description": "Put an event in error back in the queue with a fresh attempt budget.",
         "operationId": "retry_event_api_notifications_events__id__retry_post",
         "parameters": [
           {
@@ -6914,7 +7011,6 @@
         ]
       },
       "post": {
-        "description": "The new company is kept for the life of the app, so the id in the answer works in PUT and DELETE.",
         "operationId": "create_peer_api_peer_companies_post",
         "requestBody": {
           "content": {
@@ -7413,6 +7509,7 @@
     },
     "/api/profile": {
       "get": {
+        "description": "The company profile; sector and subsectors are catalog codes.",
         "operationId": "get_profile_api_profile_get",
         "responses": {
           "200": {
@@ -8932,7 +9029,7 @@
         ]
       },
       "post": {
-        "description": "Own feeds enter as N4 (unverified) and inactive until an analyst activates them.",
+        "description": "Own feeds enter as N4 and inactive until an analyst switches them on (D-041); the change is audited.",
         "operationId": "create_source_api_sources_post",
         "requestBody": {
           "content": {
@@ -9059,6 +9156,7 @@
     },
     "/api/sources/{id}": {
       "patch": {
+        "description": "Analysts switch a source on or off; only an admin changes its level (D-041); structural ones stay on.",
         "operationId": "patch_source_api_sources__id__patch",
         "parameters": [
           {

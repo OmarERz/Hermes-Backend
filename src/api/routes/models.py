@@ -41,6 +41,7 @@ class ConfigParameter(_Model):
     min_role: Literal["reader", "analyst", "admin"]
     description: str
     validations: list[str] = Field(default_factory=list)
+    options: list[str] = Field(default_factory=list, description="Allowed values of an enum parameter")
 
 
 class ConfigDocument(_Model):
@@ -120,6 +121,7 @@ class Source(_Model):
 class SourceCreate(_Model):
     name: str = Field(min_length=1)
     url: str = Field(pattern=r"^https://", description="Own feeds must use HTTPS; they enter as N4 (D-041)")
+    kind: Literal["rss", "atom", "json", "csv", "api"] = Field(default="rss", description="How the feed is read")
 
 
 class SourcePatch(_Model):
@@ -388,6 +390,12 @@ class CalibrationProposal(_Model):
     kind: Literal["source_level", "reason_threshold", "formula_weight"]
     summary: str
     status: Literal["pending", "approved", "rejected"]
+    target_key: str | None = Field(default=None, description="What the proposal changes, e.g. weights.P or source:code")
+    previous_value: dict[str, Any] | None = None
+    proposed_value: dict[str, Any] | None = None
+    evidence: str | None = None
+    backtest: dict[str, Any] | None = Field(default=None, description="Before and after of the 30-day replay")
+    decided_at: str | None = None
 
 
 class Metric(_Model):
