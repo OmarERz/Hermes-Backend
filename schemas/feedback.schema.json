@@ -69,6 +69,14 @@
       ],
       "maxLength": 2000,
       "description": "Optional but recommended"
+    },
+    "ticket_itop_id": {
+      "type": [
+        "string",
+        "null"
+      ],
+      "pattern": "^([0-9]{1,12})?$",
+      "description": "Optional: iTop id of the ticket the user acted on (ticket.itop_id of the event). When present, ticket-level effects (stop_suggestions, comments in iTop, false positive) only touch that ticket; absent, null or empty (an event delivered before iTop created the ticket) keeps them on every ticket of the assessment. Backward compatible."
     }
   },
   "allOf": [

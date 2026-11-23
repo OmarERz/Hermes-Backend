@@ -25,7 +25,9 @@ _CIS: Final = text(
     """
     SELECT a.id AS asset_id, a.itop_ci_id, a.name, a.criticality, a.exposed, a.confidentiality, a.personal_data,
            p.name AS owner_name, p.itop_person_id AS owner_itop_id, p.email AS owner_email,
-           fc.status, s.final, s.base, s.ci_adjustment, s.factor_a, s.factor_d
+           fc.status, s.final, s.base, s.ci_adjustment, s.factor_a, s.factor_d,
+           EXISTS (SELECT 1 FROM suppression x WHERE x.finding_id = fc.finding_id AND x.lifted_at IS NULL
+                     AND x.suppressed_version = fc.observed_version) AS suppressed
       FROM ticket_finding tf
       JOIN finding_current fc ON fc.finding_id = tf.finding_id
       JOIN installed_software i ON i.id = fc.installed_software_id
@@ -124,7 +126,8 @@ def load_context(session: Session, ticket: m.Ticket, assessment: m.Assessment | 
         )
         for row in rows
     ]
-    scored = [row for row in rows if row.status in CURRENT_STATUSES and row.final is not None]
+    # A false positive (ARQ-06) never drives the ticket score: its CI is listed but does not count.
+    scored = [row for row in rows if row.status in CURRENT_STATUSES and row.final is not None and not row.suppressed]
     driver = max(sorted(scored, key=lambda r: r.name), key=lambda r: r.final) if scored else None
     review_id = assessment.llm_review_id if assessment is not None else None
     reasons = session.execute(_REASONS, {"review_id": review_id}).all() if review_id else []
@@ -171,7 +174,8 @@ def score_history(session: Session, ticket: m.Ticket, asset_ids: Sequence[uuid.U
 
 
 def linked_asset_ids(session: Session, ticket_id: uuid.UUID, *, current_only: bool = True) -> list[uuid.UUID]:
-    """Assets of the ticket's linked findings; only the current (not fixed) ones unless `current_only` is False."""
+    """Assets of the ticket's linked findings; only the current ones (not fixed, not a false positive) unless
+    `current_only` is False."""
     rows = session.execute(
         text(
             """
@@ -179,7 +183,10 @@ def linked_asset_ids(session: Session, ticket_id: uuid.UUID, *, current_only: bo
               FROM ticket_finding tf
               JOIN finding_current fc ON fc.finding_id = tf.finding_id
               JOIN installed_software i ON i.id = fc.installed_software_id
-             WHERE tf.ticket_id = :ticket_id AND tf.removed_at IS NULL AND (fc.status <> 'fixed' OR NOT :current_only)
+             WHERE tf.ticket_id = :ticket_id AND tf.removed_at IS NULL
+               AND (NOT :current_only OR (fc.status <> 'fixed' AND NOT EXISTS (
+                     SELECT 1 FROM suppression x WHERE x.finding_id = fc.finding_id AND x.lifted_at IS NULL
+                       AND x.suppressed_version = fc.observed_version)))
             """
         ),
         {"ticket_id": ticket_id, "current_only": current_only},

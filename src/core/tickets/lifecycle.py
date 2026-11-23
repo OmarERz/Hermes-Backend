@@ -59,7 +59,8 @@ _FINDINGS: Final = text(
     """
     SELECT fc.finding_id, fc.status, fc.fixed_at, a.name AS asset_name, a.custodian_team_id,
            a.decommissioned_at IS NOT NULL AS decommissioned,
-           EXISTS (SELECT 1 FROM suppression s WHERE s.finding_id = fc.finding_id AND s.lifted_at IS NULL)
+           EXISTS (SELECT 1 FROM suppression s WHERE s.finding_id = fc.finding_id AND s.lifted_at IS NULL
+                     AND s.suppressed_version = fc.observed_version)
              AS suppressed
       FROM finding_current fc
       JOIN installed_software i ON i.id = fc.installed_software_id
@@ -67,6 +68,13 @@ _FINDINGS: Final = text(
      WHERE fc.finding_group_id = :group_id
      ORDER BY a.name, fc.finding_id
     """
+)
+# ARQ-06: a false positive lasts until the finding's version changes; then the suppression is lifted.
+_LIFT_STALE_SUPPRESSIONS: Final = text(
+    """UPDATE suppression s SET lifted_at = :now, lift_reason = 'version_changed'
+    FROM finding_current fc
+    WHERE s.finding_id = fc.finding_id AND fc.finding_group_id = :group_id
+      AND s.lifted_at IS NULL AND s.suppressed_version <> fc.observed_version"""
 )
 _SETTING: Final = text("SELECT value FROM setting_current WHERE setting_key = :key")
 _LAST_FIX_REPORT: Final = text(
@@ -136,6 +144,7 @@ class TicketLifecycle:
         session.execute(select(m.FindingGroup.id).where(m.FindingGroup.id == group_id).with_for_update())
         params = self._params(session, assessment)
         now = self.clock()
+        session.execute(_LIFT_STALE_SUPPRESSIONS, {"now": now, "group_id": group_id})
         state = _Pass(self, session, assessment, params, now)
         state.relink(self._findings(session, group_id, params))
         for ticket in state.tickets.values():
