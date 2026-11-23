@@ -17,7 +17,9 @@ from core.scan.engine import (
     ScanAlreadyRunningError,
     ScanOptions,
     fail_stale_scans,
+    next_queued_scan,
     next_status,
+    queue_scan,
     run_scan,
 )
 from core.vulndata.http import JsonSource
@@ -375,3 +377,18 @@ def test_the_scan_can_refresh_the_inventory_from_itop_first(world: Engine) -> No
     itop.data["Software"]["200"]["version"] = "1.25.3"
     second = scan(world, 1, ScanOptions(reader=reader))
     assert second.fixed == 2  # the version changed in iTop and the next scan saw it (docs/04 demo)
+
+
+def test_a_queued_request_runs_on_its_own_run_row(world: Engine) -> None:
+    with factory(world)() as session, session.begin():
+        queued = queue_scan(session, DAY0).id
+        assert next_queued_scan(session) == queued
+
+    result = scan(world, 0, ScanOptions(run_id=queued))
+
+    assert result.run_id == queued
+    assert rows(world, "SELECT status, progress FROM run WHERE kind = 'scan'") == [("succeeded", 100)]
+    with factory(world)() as session:
+        assert next_queued_scan(session) is None
+    with pytest.raises(ValueError, match="not a queued scan"):
+        scan(world, 1, ScanOptions(run_id=queued))  # it already ran
