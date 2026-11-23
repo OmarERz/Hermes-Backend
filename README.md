@@ -21,6 +21,10 @@ make up          # local stack: writes the Docker secret files from your env fil
 Copy `.env.example` to `.env` and set at least `POSTGRES_PASSWORD`, `MIGRATOR_DB_PASSWORD`, `APP_DB_PASSWORD` and
 `RETENTION_DB_PASSWORD` before `make up`.
 
+## Front de personalización
+
+El front (React) lo construye otro equipo. Todo lo que necesita del backend está en [`FRONTEND.md`](FRONTEND.md).
+
 ## Guía de operación (español)
 
 Esta guía es para quien instala y mantiene Hermes en un servidor propio. Todo corre con Docker Compose; los puertos
