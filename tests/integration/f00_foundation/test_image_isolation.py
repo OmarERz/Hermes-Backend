@@ -11,7 +11,7 @@ from pathlib import Path
 import docker
 import pytest
 
-from harness.isolation import LABEL, LABELS, built_image, sweep_dead_runs
+from harness.isolation import COMPOSE_PROJECT, LABEL, LABELS, RUN_ID, built_image, run_name, sweep_dead_runs
 
 pytestmark = pytest.mark.integration
 # The backend base image, pinned by digest: already on the host for the backend and emulator builds.
@@ -67,3 +67,30 @@ def test_the_sweep_removes_what_a_dead_run_left_and_keeps_live_runs(
         for leftover in (orphan, mine):
             with contextlib.suppress(docker.errors.NotFound):
                 leftover.remove(force=True)
+
+
+def test_the_sweep_removes_the_compose_stack_of_a_dead_e2e_run(client: docker.DockerClient) -> None:
+    project = f"hermes-e2e-{RUN_ID.split('-')[0]}-{dead_pid()}-abcdef"
+    live = run_name("hermes-e2e")  # this run's own stack name: never swept while the run lives
+    scope = {COMPOSE_PROJECT: project}
+    network = client.networks.create(f"{project}_default", labels=scope)
+    volume = client.volumes.create(f"{project}_data", labels=scope)
+    orphan = client.containers.create(BASE, ["true"], labels=scope)
+    mine = client.containers.create(BASE, ["true"], labels={COMPOSE_PROJECT: live})
+    try:
+        removed = sweep_dead_runs(client)
+        assert project in removed
+        assert live not in removed
+        for gone in (lambda: client.containers.get(orphan.id), lambda: client.networks.get(network.id)):
+            with pytest.raises(docker.errors.NotFound):
+                gone()
+        with pytest.raises(docker.errors.NotFound):
+            client.volumes.get(volume.id)
+        assert client.containers.get(mine.id).id == mine.id
+    finally:
+        for leftover in (orphan, mine):
+            with contextlib.suppress(docker.errors.NotFound):
+                leftover.remove(force=True)
+        for resource in (network, volume):
+            with contextlib.suppress(docker.errors.NotFound):
+                resource.remove()

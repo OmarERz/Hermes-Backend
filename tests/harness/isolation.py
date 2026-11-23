@@ -9,7 +9,9 @@ container and image carries labels naming the run and its process:
 * a SIGTERM (a `timeout`, an agent stopping a command) unwinds pytest like Ctrl-C, so the fixtures stop their
   containers; Ryuk stays off (tests/integration/conftest.py explains why);
 * a run killed outright (SIGKILL) cannot clean up: the next run on this host removes the containers and tags whose
-  process is gone (`sweep_dead_runs`), and leaves everything of a live run alone.
+  process is gone (`sweep_dead_runs`), and leaves everything of a live run alone. Compose stacks of the e2e tests
+  are found by their project name (`run_name`, which carries the pid) and removed with their networks, volumes and
+  built images.
 """
 
 from __future__ import annotations
@@ -17,6 +19,7 @@ from __future__ import annotations
 import contextlib
 import hashlib
 import os
+import re
 import secrets
 import signal
 import socket
@@ -34,6 +37,9 @@ RUN_ID = f"{hashlib.sha256(str(ROOT).encode()).hexdigest()[:8]}-{os.getpid()}-{s
 LABEL: Final = "dev.hermes.test"
 HOST: Final = socket.gethostname()
 LABELS: Final = {LABEL: "1", f"{LABEL}.run": RUN_ID, f"{LABEL}.pid": str(os.getpid()), f"{LABEL}.host": HOST}
+COMPOSE_PROJECT: Final = "com.docker.compose.project"
+# A Compose project of the e2e tests: run_name("hermes-...e2e") = prefix-<repo hash>-<pid>-<random>
+E2E_PROJECT: Final = re.compile(r"^hermes-[a-z0-9-]*e2e-[0-9a-f]{8}-(\d+)-[0-9a-f]{6}$")
 
 
 def run_name(prefix: str) -> str:
@@ -91,6 +97,33 @@ def sweep_dead_runs(client: docker.DockerClient, alive: Callable[[str], bool] = 
             for tag in image.tags:
                 untag(client, tag)
                 removed.append(tag)
+    removed += _sweep_dead_stacks(client, alive)
+    return removed
+
+
+def _sweep_dead_stacks(client: docker.DockerClient, alive: Callable[[str], bool]) -> list[str]:
+    """The Compose stacks of e2e runs whose process is gone: containers, networks, volumes and built images."""
+    dead: set[str] = set()
+    for container in client.containers.list(all=True, filters={"label": COMPOSE_PROJECT}):
+        match = E2E_PROJECT.match(container.labels.get(COMPOSE_PROJECT, ""))
+        if match and not alive(match.group(1)):
+            dead.add(match.group(0))
+    removed: list[str] = []
+    for project in sorted(dead):
+        scope = {"label": f"{COMPOSE_PROJECT}={project}"}
+        for container in client.containers.list(all=True, filters=scope):
+            with contextlib.suppress(NotFound, APIError):
+                container.remove(force=True)
+        for network in client.networks.list(filters=scope):
+            with contextlib.suppress(NotFound, APIError):
+                network.remove()
+        for volume in client.volumes.list(filters=scope):
+            with contextlib.suppress(NotFound, APIError):
+                volume.remove(force=True)
+        for image in client.images.list(name=f"{project}-*"):
+            for tag in image.tags:
+                untag(client, tag)
+        removed.append(project)
     return removed
 
 

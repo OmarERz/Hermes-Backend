@@ -70,7 +70,7 @@ def stack() -> Iterator[dict[str, str]]:
         assert up.returncode == 0, up.stderr[-3000:]
         yield env
     finally:
-        compose(env, "down", "-v", "--remove-orphans", timeout=300)
+        compose(env, "down", "-v", "--remove-orphans", "--rmi", "local", timeout=300)
         shutil.rmtree(secrets_dir, ignore_errors=True)
 
 

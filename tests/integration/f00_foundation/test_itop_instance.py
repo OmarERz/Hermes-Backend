@@ -110,7 +110,7 @@ def instance(webhook_receiver: str) -> Iterator[dict[str, str]]:
         assert install.returncode == 0, install.stdout[-2000:] + install.stderr[-2000:]
         yield env
     finally:
-        compose(env, "down", "-v", "--remove-orphans", timeout=300)
+        compose(env, "down", "-v", "--remove-orphans", "--rmi", "local", timeout=300)
 
 
 def test_seed_then_read_with_the_rest_user(instance: dict[str, str]) -> None:

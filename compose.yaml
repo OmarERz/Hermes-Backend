@@ -1,7 +1,7 @@
 # Local stack: docker compose up --build
 # Credentials travel as Docker secret files (D-042): `make compose-secrets` writes them from POSTGRES_PASSWORD,
 # MIGRATOR_DB_PASSWORD, APP_DB_PASSWORD, RETENTION_DB_PASSWORD, CURSOR_SIGNING_KEY (required) and ITOP_TOKEN, NVD_API_KEY,
-# DEEPSEEK_API_KEY, ABUSECH_AUTH_KEY, RANSOMWARELIVE_API_KEY (optional, blank means "not configured").
+# DEEPSEEK_API_KEY, ABUSECH_AUTH_KEY, RANSOMWARELIVE_API_KEY, ITOP_WEBHOOK_TOKEN (optional, blank = "not configured").
 # Ports bind to 127.0.0.1 only. On every start the provision service (re)applies the idempotent provisioning
 # (extensions, roles, schema owner, role passwords as SCRAM verifiers); the migrate service then runs Alembic as
 # migrator (DAT-05) and the API and workers connect as app, the least-privilege role.
@@ -28,6 +28,8 @@ secrets:
     file: ${COMPOSE_SECRETS_DIR:-./.compose-secrets}/abusech_auth_key
   ransomwarelive_api_key:
     file: ${COMPOSE_SECRETS_DIR:-./.compose-secrets}/ransomwarelive_api_key
+  itop_webhook_token:
+    file: ${COMPOSE_SECRETS_DIR:-./.compose-secrets}/itop_webhook_token
 
 x-hardening: &hardening
   read_only: true
@@ -56,6 +58,9 @@ x-backend: &backend
     SCAN_INTERVAL_HOURS: ${SCAN_INTERVAL_HOURS:-0}
     # Embeddings service of the news cycle (internal network only); set it blank to turn the news cycle off
     EMBEDDINGS_URL: ${EMBEDDINGS_URL-http://embeddings:8080}
+    # Vendor advisory domains of the CVE analyst (D-014). No value here on purpose: passed only when set in the
+    # environment or the project's variables file (set and empty = no downloads); unset, the default list applies.
+    ADVISORY_DOMAINS:
     LLM_BASE_URL_JUDGE: ${LLM_BASE_URL_JUDGE:-}
     LLM_BASE_URL_ANALYSTS: ${LLM_BASE_URL_ANALYSTS:-}
   secrets:
@@ -67,6 +72,7 @@ x-backend: &backend
     - deepseek_api_key
     - abusech_auth_key
     - ransomwarelive_api_key
+    - itop_webhook_token
   depends_on:
     bootstrap:
       condition: service_completed_successfully
