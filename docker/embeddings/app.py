@@ -94,6 +94,10 @@ def verify_model(model_dir: Path, name: str, revision: str) -> None:
     files = manifest.get("files")
     if not isinstance(files, dict) or not files:
         raise ModelIntegrityError("model manifest lists no files")
+    present = {str(path.relative_to(model_dir)) for path in model_dir.rglob("*") if path.is_file()} - {MANIFEST}
+    if present != set(files):
+        extra, missing = sorted(present - set(files)), sorted(set(files) - present)
+        raise ModelIntegrityError(f"model files differ from the manifest: extra {extra}, missing {missing}")
     for relative, expected in files.items():
         path = model_dir / relative
         if not path.is_file() or _sha256(path) != expected:

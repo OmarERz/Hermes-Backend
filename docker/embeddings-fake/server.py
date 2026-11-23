@@ -2,9 +2,9 @@
 
 The real image (`docker/embeddings`) weighs about 2.8 GB (torch plus the model); Schemathesis and ZAP test the API and
 never the vectors, so CI swaps it for this standard-library server with the same contract: `POST /embed` with the
-same limits (413 for a large body, 422 for an invalid one) and `GET /health`. Vectors are a hashed bag of words,
-L2-normalised, so texts that share words are similar. It reports the configured model name so the worker accepts it;
-it is never used outside CI (the weekly Trivy scan and production use the real image).
+same limits (413 for a large body, declared or chunked; 422 for an invalid one) and `GET /health`. Vectors are a
+hashed bag of words, L2-normalised, so texts that share words are similar. It reports the configured model name so
+the worker accepts it; it is never used outside CI (the weekly Trivy scan and production use the real image).
 """
 
 from __future__ import annotations
@@ -60,15 +60,12 @@ class Handler(BaseHTTPRequestHandler):
         if self.path != "/embed":
             self._json(404, {"detail": "Not Found"})
             return
-        declared = self.headers.get("Content-Length", "")
-        if not declared.isdigit():
-            self._json(411, {"detail": "Content-Length required"})
-            return
-        if int(declared) > MAX_BODY_BYTES:
+        body = self._body()
+        if body is None:
             self._json(413, {"detail": f"request body above {MAX_BODY_BYTES} bytes"})
             return
         try:
-            texts = valid_texts(json.loads(self.rfile.read(int(declared))))
+            texts = valid_texts(json.loads(body))
         except ValueError:
             texts = None
         if texts is None:
@@ -76,6 +73,27 @@ class Handler(BaseHTTPRequestHandler):
             return
         vectors = [embed(text) for text in texts]
         self._json(200, {"model": MODEL_NAME, "revision": "ci-fake", "dimensions": DIMENSIONS, "vectors": vectors})
+
+    def _body(self) -> bytes | None:
+        """The request body, or None above the limit (declared Content-Length, or a chunked body as it arrives)."""
+        if self.headers.get("Transfer-Encoding", "").lower() == "chunked":
+            parts: list[bytes] = []
+            size = 0
+            while chunk := int(self.rfile.readline().split(b";")[0].strip() or b"0", 16):
+                size += chunk
+                if size > MAX_BODY_BYTES:
+                    self.close_connection = True
+                    return None
+                parts.append(self.rfile.read(chunk))
+                self.rfile.readline()  # the CRLF after each chunk
+            self.rfile.readline()  # the empty line after the last chunk
+            return b"".join(parts)
+        declared = self.headers.get("Content-Length", "0")
+        length = int(declared) if declared.isdigit() else 0
+        if length > MAX_BODY_BYTES:
+            self.close_connection = True
+            return None
+        return self.rfile.read(length)
 
     def log_message(self, fmt: str, *args: object) -> None:
         """Quiet: one line per request would flood the CI log."""

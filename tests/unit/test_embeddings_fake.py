@@ -77,11 +77,14 @@ def test_limits_match_the_real_service(fake: tuple[ModuleType, str]) -> None:
     too_many = json.dumps({"texts": ["x"] * (module.MAX_TEXTS + 1)})
     big = b"x" * (module.MAX_BODY_BYTES + 1)
 
-    def chunks() -> Iterator[bytes]:
-        yield b"{}"
+    def chunked(*parts: bytes) -> Iterator[bytes]:  # no Content-Length: sent with Transfer-Encoding chunked
+        yield from parts
 
     with client(url) as http:
         assert http.post("/embed", content=too_many).status_code == 422
         assert http.post("/embed", content=json.dumps({"texts": ["x" * 4_001]})).status_code == 422
         assert http.post("/embed", content=big).status_code == 413
-        assert http.post("/embed", content=chunks()).status_code == 411  # no Content-Length
+        valid = http.post("/embed", content=chunked(b'{"texts": ', b'["passage: a"]}'))
+        assert (valid.status_code, len(valid.json()["vectors"])) == (200, 1)
+    with client(url) as http:  # the server closes the connection after a 413 on a chunked body
+        assert http.post("/embed", content=chunked(*[b"x" * module.MAX_BODY_BYTES] * 2)).status_code == 413

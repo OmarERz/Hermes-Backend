@@ -115,7 +115,15 @@ def test_the_manifest_pins_name_revision_and_every_file(tmp_path: Path) -> None:
     ("change", "message"),
     [
         (lambda root: (root / "model.safetensors").write_bytes(b"tampered"), "changed after the build"),
-        (lambda root: (root / "1_Pooling" / "config.json").unlink(), "changed after the build"),
+        (lambda root: (root / "1_Pooling" / "config.json").unlink(), "missing \\['1_Pooling/config.json'\\]"),
+        (lambda root: (root / "extra.bin").write_bytes(b"x"), "extra \\['extra.bin'\\]"),
+        (
+            lambda root: (root / "hermes-model.json").write_text(
+                json.dumps({"name": NAME, "revision": REVISION, "files": {"model.safetensors": "0"}}),
+                encoding="utf-8",
+            ),
+            "missing \\[\\]|extra \\['1_Pooling/config.json'\\]",
+        ),
         (lambda root: (root / "hermes-model.json").unlink(), "missing or unreadable"),
         (lambda root: (root / "hermes-model.json").write_text("not json", encoding="utf-8"), "missing or unreadable"),
         (
