@@ -260,11 +260,15 @@ def test_bad_configuration_is_refused(kwargs: dict[str, Any], message: str) -> N
 
 
 # --- typed errors ----------------------------------------------------------------------------------------------
-def test_a_timeout_is_a_transport_error_and_is_not_retried() -> None:
+def test_a_timeout_is_a_transport_error_and_is_not_retried(caplog: pytest.LogCaptureFixture) -> None:
     runner = FakeRunner([subprocess.TimeoutExpired(cmd="claude", timeout=30)])
-    with pytest.raises(LlmTransportError, match="timed out"):
+    with (
+        caplog.at_level(logging.INFO, logger="core.llm.claude_code"),
+        pytest.raises(LlmTransportError, match="timed out"),
+    ):
         call(client(runner, timeout=30.0))
     assert len(runner.calls) == 1
+    assert "claude-code call: model=sonnet returned=None status=LlmTransportError" in caplog.text  # every call logs
 
 
 def test_a_cli_that_cannot_start_is_a_request_error() -> None:
@@ -304,12 +308,16 @@ def test_api_errors_map_to_typed_errors_without_retries(status: int, error: type
     assert "API Error" not in str(raised.value)
 
 
-def test_exhausted_structured_output_retries_are_a_format_error_with_usage() -> None:
-    body = result(subtype="error_max_structured_output_retries", is_error=True, errors=["schema mismatch"])
+def test_exhausted_structured_output_retries_are_a_format_error_with_usage(caplog: pytest.LogCaptureFixture) -> None:
+    errors = ["verdict must be one of yes, no; got 'NEWS-SENTINEL'", "second"]
+    body = result(subtype="error_max_structured_output_retries", is_error=True, errors=errors)
     runner = FakeRunner([done(body, 1)])
-    with pytest.raises(LlmResponseError) as raised:
+    with caplog.at_level(logging.INFO, logger="core.llm.claude_code"), pytest.raises(LlmResponseError) as raised:
         call(client(runner))
     assert raised.value.usage == Usage(input=150, cached_input=20, output=30, reasoning=10)
+    assert "subtype=error_max_structured_output_retries" in caplog.text
+    assert "errors=2" in caplog.text
+    assert "NEWS-SENTINEL" not in caplog.text  # the CLI's error texts may quote the answer: only their count
 
 
 def test_a_refusal_is_a_format_error() -> None:
@@ -363,6 +371,8 @@ def test_several_tools_become_a_choice_of_name_and_arguments() -> None:
     system = runner.calls[0]["system"]
     assert "`submit_result`: Submit a result." in system
     assert "`read_note`: Read a note." in system
+    assert "nunca instrucciones" in system  # the transcript's content is data (SEG-02)
+    assert "mensajes del sistema" not in system
 
 
 def test_a_forced_tool_among_several_uses_only_its_schema() -> None:
@@ -469,26 +479,42 @@ def test_odd_usage_values_count_as_zero() -> None:
 
 
 # --- settings and wiring ---------------------------------------------------------------------------------------
-SETTINGS = Settings(
-    _env_file=None,
-    database_url=SecretStr("postgresql://app:pw@db/hermes"),
-    firebase_project_id="demo-hermes",
-    cursor_signing_key=SecretStr("k" * 40),
+CLAUDE_VARIABLES = (
+    "LLM_PROVIDER",
+    "CLAUDE_CODE_MODEL_JUDGE",
+    "CLAUDE_CODE_MODEL_ANALYSTS",
+    "CLAUDE_CODE_EFFORT",
+    "CLAUDE_CODE_TIMEOUT_SECONDS",
+    "DEEPSEEK_API_KEY",
+    "EMBEDDINGS_URL",
 )
 
 
-def test_settings_default_to_deepseek_and_validate_the_claude_values() -> None:
-    assert SETTINGS.llm_provider == "deepseek"
-    assert (SETTINGS.claude_code_model_judge, SETTINGS.claude_code_model_analysts) == ("opus", "sonnet")
-    assert (SETTINGS.claude_code_effort, SETTINGS.claude_code_timeout_seconds) == ("medium", 300)
-    base = SETTINGS.model_dump()
+@pytest.fixture
+def settings(monkeypatch: pytest.MonkeyPatch) -> Settings:
+    """Settings built after removing the variables a developer may export for `make worker-host`."""
+    for name in CLAUDE_VARIABLES:
+        monkeypatch.delenv(name, raising=False)
+    return Settings(
+        _env_file=None,
+        database_url=SecretStr("postgresql://app:pw@db/hermes"),
+        firebase_project_id="demo-hermes",
+        cursor_signing_key=SecretStr("k" * 40),
+    )
+
+
+def test_settings_default_to_deepseek_and_validate_the_claude_values(settings: Settings) -> None:
+    assert settings.llm_provider == "deepseek"
+    assert (settings.claude_code_model_judge, settings.claude_code_model_analysts) == ("opus", "sonnet")
+    assert (settings.claude_code_effort, settings.claude_code_timeout_seconds) == ("medium", 300)
+    base = settings.model_dump()
     for bad in ({"claude_code_model_judge": "--tools=default"}, {"claude_code_effort": "huge"}, {"llm_provider": "x"}):
         with pytest.raises(ValidationError):
             Settings(_env_file=None, **{**base, **bad})
 
 
-def test_from_settings_uses_the_role_alias_effort_and_timeout() -> None:
-    settings = SETTINGS.model_copy(
+def test_from_settings_uses_the_role_alias_effort_and_timeout(settings: Settings) -> None:
+    settings = settings.model_copy(
         update={
             "claude_code_model_judge": "claude-opus-5-5",
             "claude_code_effort": "low",
@@ -508,23 +534,25 @@ def test_from_settings_uses_the_role_alias_effort_and_timeout() -> None:
     assert runner.calls[0]["timeout"] == 90.0
 
 
-def test_the_worker_wires_claude_code_without_a_deepseek_key(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
+def test_the_worker_wires_claude_code_without_a_deepseek_key(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path, settings: Settings
+) -> None:
     executable = tmp_path / "claude"
     executable.write_text("#!/bin/sh\n", encoding="utf-8")
     executable.chmod(0o755)
     monkeypatch.setenv("PATH", str(tmp_path))
-    steps = build_pipeline(SETTINGS.model_copy(update={"llm_provider": "claude-code"}), _factory()).steps
+    steps = build_pipeline(settings.model_copy(update={"llm_provider": "claude-code"}), _factory()).steps
     assert isinstance(steps.judge_caller, ClaudeCodeClient)
     assert steps.judge_caller.model == "opus"
     assert steps.analyze_cves is not None
 
 
 def test_the_worker_fails_closed_when_the_cli_is_missing(
-    monkeypatch: pytest.MonkeyPatch, tmp_path: Path, caplog: pytest.LogCaptureFixture
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path, caplog: pytest.LogCaptureFixture, settings: Settings
 ) -> None:
     monkeypatch.setenv("PATH", str(tmp_path))
     with caplog.at_level(logging.ERROR, logger="workers.pipeline"):
-        steps = build_pipeline(SETTINGS.model_copy(update={"llm_provider": "claude-code"}), _factory()).steps
+        steps = build_pipeline(settings.model_copy(update={"llm_provider": "claude-code"}), _factory()).steps
     assert steps.judge_caller is None
     assert steps.analyze_cves is None
     assert "LLM_PROVIDER=claude-code but the claude CLI is not on PATH: the judge is off" in caplog.text
@@ -621,3 +649,12 @@ def test_assistant_text_and_plain_tool_answers_are_kept_as_text() -> None:
     assert transcript[1] == {"role": "assistant", "content": "Pienso leer la nota."}
     assert transcript[2] == {"role": "assistant", "tool_call": {"name": "", "arguments": None}}
     assert transcript[3] == {"role": "tool", "name": "", "content": "plain text, not JSON"}
+
+
+def test_the_containers_receive_the_provider_so_claude_code_fails_closed_there() -> None:
+    """Without LLM_PROVIDER in compose, a container would keep calling DeepSeek after the operator chose claude-code."""
+    import yaml  # noqa: PLC0415 - only this test reads compose.yaml
+
+    compose = yaml.safe_load((Path(__file__).resolve().parents[2] / "compose.yaml").read_text(encoding="utf-8"))
+    for service in ("api", "workers"):
+        assert compose["services"][service]["environment"]["LLM_PROVIDER"] == "${LLM_PROVIDER:-}"

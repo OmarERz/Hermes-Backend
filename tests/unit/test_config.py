@@ -31,6 +31,11 @@ def clean_env(monkeypatch: pytest.MonkeyPatch) -> None:
         "RANSOMWARELIVE_API_KEY",
         "ITOP_SYSTEM_USER",
         "FIREBASE_CREDENTIALS_FILE",
+        "LLM_PROVIDER",
+        "CLAUDE_CODE_MODEL_JUDGE",
+        "CLAUDE_CODE_MODEL_ANALYSTS",
+        "CLAUDE_CODE_EFFORT",
+        "CLAUDE_CODE_TIMEOUT_SECONDS",
     ]:
         monkeypatch.delenv(name, raising=False)
 

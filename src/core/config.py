@@ -21,6 +21,8 @@ DEFAULT_LLM_BASE_URL = "https://api.deepseek.com/beta"  # strict tool mode (JUE-
 # A Claude Code model alias or name (opus, sonnet, claude-opus-5-5, sonnet[1m]): it reaches the CLI as the value of
 # --model, so it can never start with "-" and be read as another flag (D-084).
 CLAUDE_MODEL_PATTERN = r"^[A-Za-z0-9][A-Za-z0-9._:\[\]-]{0,99}$"
+# Effort levels of `claude --effort` (checked against `claude --help` 2.1.330)
+ClaudeEffort = Literal["low", "medium", "high", "xhigh", "max"]
 
 
 def read_secret(name: str, secrets_dir: Path = DOCKER_SECRETS_DIR) -> str | None:
@@ -138,7 +140,7 @@ class Settings(BaseSettings):
     # of one CLI call in seconds
     claude_code_model_judge: str = Field(default="opus", pattern=CLAUDE_MODEL_PATTERN)
     claude_code_model_analysts: str = Field(default="sonnet", pattern=CLAUDE_MODEL_PATTERN)
-    claude_code_effort: Literal["low", "medium", "high", "xhigh", "max"] = "medium"
+    claude_code_effort: ClaudeEffort = "medium"
     claude_code_timeout_seconds: int = Field(default=300, ge=30, le=3600)
 
     @field_validator("database_url")
