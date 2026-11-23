@@ -170,3 +170,21 @@ def test_initial_private_target_is_refused_before_any_request() -> None:
 def test_host_that_is_not_a_valid_name_is_refused_by_the_system_resolver(url: str) -> None:
     with pytest.raises(UnsafeUrlError, match="not a valid name"):
         validate_public_url(url)
+
+
+def test_the_allowlist_is_checked_on_the_first_url_and_on_every_redirect_hop() -> None:
+    web = FakeWeb()
+    web.redirect("https://example.com/old", "https://other.example.net/new")
+    web.serve("https://other.example.net/new", b"ok", "text/plain")
+    web.serve("https://example.com/direct", b"ok", "text/plain")
+    fetcher = make_fetcher(web)
+
+    def only_example(host: str) -> bool:
+        return host == "example.com"
+
+    assert fetcher.get("https://example.com/direct", host_allowed=only_example).body == b"ok"
+    with pytest.raises(FetchError, match="allowlist"):
+        fetcher.get("https://example.com/old", host_allowed=only_example)
+    with pytest.raises(FetchError, match="allowlist"):
+        fetcher.get("https://other.example.net/new", host_allowed=only_example)
+    assert [r.headers["host"] for r in web.requests] == ["example.com", "example.com"]
