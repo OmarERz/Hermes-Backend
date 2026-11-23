@@ -34,6 +34,12 @@ from core.ingestion.embeddings import EmbeddingError
 from core.judge.session import ToolCaller
 from core.pipeline.judging import JudgeFn, dismiss_story, judge_for
 from core.pipeline.locks import cycle_lock
+from core.scoring.queue import (
+    claim_recalculation,
+    has_running_recalculation,
+    next_queued_recalculation,
+    requeue_abandoned_recalculations,
+)
 
 log = logging.getLogger("core.pipeline")
 
@@ -73,6 +79,7 @@ class Steps:
     scan: Callable[[uuid.UUID | None, str], ScanCycleOutput] | None = None
     evaluate: Evaluator | None = None
     recalculate: Callable[[Session], object] | None = None
+    recalculate_queued: Callable[[Session, uuid.UUID], object] | None = None
     dismissal_package: DismissalPackager | None = None
     judge_caller: ToolCaller | None = None
     tickets: TicketApplier | None = None
@@ -169,6 +176,33 @@ class Pipeline:
                 session.commit()
         self._log(report)
         return report
+
+    def recalculation_requests_cycle(self) -> bool:
+        """FRO-08: serve the oldest queued formula-change request (no judge, D-033). True when one ran."""
+        if self.steps.recalculate_queued is None:
+            return False
+        with self.session_factory() as session:
+            if next_queued_recalculation(session) is None and not has_running_recalculation(session):
+                return False
+        report = CycleReport("recalculation")
+        with cycle_lock(self.session_factory) as acquired:
+            if not acquired:
+                self._skipped(report)  # the request stays queued for the next tick
+                return False
+            with self.session_factory() as session, session.begin():
+                if requeue_abandoned_recalculations(session):
+                    log.warning("requeued a recalculation left running by a stopped worker")
+                run_id = next_queued_recalculation(session)
+                if run_id is None:
+                    return False
+                report.run_id = run_id
+                claimed = claim_recalculation(session, run_id, self.clock())
+            if not claimed:
+                return False
+            with self.session_factory() as session:
+                self.steps.recalculate_queued(session, run_id)  # commits per group; a failure marks the run failed
+        self._log(report)
+        return True
 
     # --- steps ----------------------------------------------------------------------------------------------
     def _news(self, report: CycleReport, trigger_reason: str) -> None:

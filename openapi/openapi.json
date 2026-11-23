@@ -1265,6 +1265,19 @@
             ],
             "title": "Proposed Score"
           },
+          "ticket_itop_id": {
+            "anyOf": [
+              {
+                "pattern": "^[0-9]{1,12}$",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Optional: iTop id of the ticket the user acted on; scopes ticket-level effects (stop_suggestions, false_positive) to it instead of every ticket of the assessment (TIC-07).",
+            "title": "Ticket Itop Id"
+          },
           "verdict": {
             "enum": [
               "relevant",
@@ -5634,7 +5647,7 @@
     },
     "/api/feedback": {
       "post": {
-        "description": "Same `FeedbackService` as Slack (NOT-06). Never changes the score by itself.",
+        "description": "Same `FeedbackService` as Slack (NOT-06). The user comes from the token, never from the body; it never\nchanges the score by itself.",
         "operationId": "post_feedback_api_feedback_post",
         "requestBody": {
           "content": {
@@ -5893,7 +5906,7 @@
     },
     "/api/formula/simulate": {
       "post": {
-        "description": "Preview only: it never changes data (FRO-06). The changes are checked against the active formula.",
+        "description": "Preview only: it never changes data (FRO-06). The proposed formula is validated (FRO-05) and compared with\nthe last assessment of every open finding, keeping the stored judge adjustments (no judge call).",
         "operationId": "simulate_api_formula_simulate_post",
         "requestBody": {
           "content": {

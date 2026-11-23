@@ -21,6 +21,7 @@ from core.pipeline.wiring import (
     engine_dismissal_package,
     engine_evaluate,
     engine_recalculate,
+    engine_recalculate_queued,
     inventory_refresh,
     news_step,
     refresh_vulndata,
@@ -39,6 +40,7 @@ log = logging.getLogger("workers.pipeline")
 
 NEWS_SECONDS = 3600.0  # D-010: news every hour
 SCAN_REQUEST_SECONDS = 10.0  # POST /api/scans is picked up within seconds
+RECALC_REQUEST_SECONDS = 10.0  # a saved formula is recalculated within seconds (FRO-08)
 NIGHTLY_RECALC_SECONDS = 24 * 3600.0  # F-17
 VULNDATA_SECONDS = 24 * 3600.0  # ESC-09: NVD recent publications, KEV and EPSS once a day (and at start)
 INVENTORY_SECONDS = 6 * 3600.0  # ARQ-03
@@ -101,6 +103,7 @@ def build_pipeline(settings: Settings, session_factory: sessionmaker[Session]) -
         scan=scan_step(session_factory, reader),
         evaluate=engine_evaluate,
         recalculate=engine_recalculate(tickets),
+        recalculate_queued=engine_recalculate_queued(tickets),
         dismissal_package=engine_dismissal_package,
         judge_caller=_llm(settings, "judge"),
         tickets=tickets,
@@ -117,6 +120,7 @@ def pipeline_jobs(
     jobs = [
         job("news_cycle", NEWS_SECONDS, pipeline.news_cycle),
         job("scan_requests", SCAN_REQUEST_SECONDS, QueuedScans(pipeline, session_factory)),
+        job("recalculation_requests", RECALC_REQUEST_SECONDS, pipeline.recalculation_requests_cycle),
         job("nightly_recalculation", NIGHTLY_RECALC_SECONDS, pipeline.nightly_cycle),
         job("vulndata_refresh", VULNDATA_SECONDS, pipeline.refresh_cycle),
     ]

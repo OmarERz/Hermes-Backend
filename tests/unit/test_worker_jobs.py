@@ -19,7 +19,7 @@ from workers.jobs import (
     run_jobs,
     run_jobs_in_threads,
 )
-from workers.pipeline_jobs import NEWS_SECONDS, NIGHTLY_RECALC_SECONDS, SCAN_REQUEST_SECONDS
+from workers.pipeline_jobs import NEWS_SECONDS, NIGHTLY_RECALC_SECONDS, RECALC_REQUEST_SECONDS, SCAN_REQUEST_SECONDS
 
 pytestmark = pytest.mark.unit
 SETTINGS = Settings(
@@ -81,6 +81,7 @@ def test_a_stop_during_a_round_skips_the_remaining_jobs() -> None:
 PIPELINE = [
     ("news_cycle", NEWS_SECONDS, "pipeline"),
     ("scan_requests", SCAN_REQUEST_SECONDS, "pipeline"),
+    ("recalculation_requests", RECALC_REQUEST_SECONDS, "pipeline"),
     ("nightly_recalculation", NIGHTLY_RECALC_SECONDS, "pipeline"),
     ("vulndata_refresh", 24 * 3600.0, "pipeline"),
 ]
