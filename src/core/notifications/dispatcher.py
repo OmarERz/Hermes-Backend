@@ -20,6 +20,7 @@ import uuid
 from collections.abc import Callable
 from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
+from threading import Event
 from typing import Any, Final
 
 from pydantic import ValidationError
@@ -105,10 +106,14 @@ class NotificationDispatcher:
     immediate_link_wait: timedelta = timedelta(0)
     link_wait: timedelta = timedelta(minutes=30)
 
-    def drain(self, limit: int = 100) -> int:
-        """Deliver due events until none is left or `limit` is reached; returns how many were handled."""
+    def drain(self, limit: int = 100, stop: Event | None = None) -> int:
+        """Deliver due events until none is left, `limit` is reached or `stop` is set; returns how many were handled.
+
+        `stop` is checked between events (pending F5.3 #65): a worker shutting down finishes the event in hand and
+        leaves the rest pending, instead of being killed mid-delivery and redelivering it after the lease.
+        """
         handled = 0
-        while handled < limit and self.run_once():
+        while handled < limit and not (stop is not None and stop.is_set()) and self.run_once():
             handled += 1
         return handled
 
