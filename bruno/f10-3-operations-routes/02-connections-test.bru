@@ -1,0 +1,28 @@
+meta {
+  name: connections-test
+  type: http
+  seq: 2
+}
+
+post {
+  url: {{baseUrl}}/api/connections/test
+  body: json
+  auth: bearer
+}
+
+auth:bearer {
+  token: {{token}}
+}
+
+body:json {
+  {"names": ["firebase"]}
+}
+
+assert {
+  res.status: eq 200
+  res.body[0].name: eq firebase
+}
+
+docs {
+  Probar de nuevo: re-checks one service (rate limited).
+}

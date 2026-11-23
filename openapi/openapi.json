@@ -883,6 +883,32 @@
       "ConnectionStatus": {
         "additionalProperties": false,
         "properties": {
+          "checked_at": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "When this result was checked (UTC)",
+            "title": "Checked At"
+          },
+          "last_ok_at": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Last successful check since the API started",
+            "title": "Last Ok At"
+          },
           "latency_ms": {
             "anyOf": [
               {
@@ -893,6 +919,18 @@
               }
             ],
             "title": "Latency Ms"
+          },
+          "message": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Generic status in Spanish (e.g. 'Llave rechazada'); never an error body (SEG-23)",
+            "title": "Message"
           },
           "missing_variable": {
             "anyOf": [
@@ -3647,9 +3685,11 @@
     },
     "/api/audit": {
       "get": {
+        "description": "Changes made from the front and by the system, newest first. Never shows the values changed.",
         "operationId": "audit_api_audit_get",
         "parameters": [
           {
+            "description": "E-mail or display name; 'sistema' for none",
             "in": "query",
             "name": "actor",
             "required": false,
@@ -3663,7 +3703,65 @@
                   "type": "null"
                 }
               ],
+              "description": "E-mail or display name; 'sistema' for none",
               "title": "Actor"
+            }
+          },
+          {
+            "description": "Exact action, e.g. 'source.enable'",
+            "in": "query",
+            "name": "action",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "maxLength": 100,
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Exact action, e.g. 'source.enable'",
+              "title": "Action"
+            }
+          },
+          {
+            "description": "On or after (RFC 3339)",
+            "in": "query",
+            "name": "date_from",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "format": "date-time",
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "On or after (RFC 3339)",
+              "title": "Date From"
+            }
+          },
+          {
+            "description": "On or before (RFC 3339)",
+            "in": "query",
+            "name": "date_to",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "format": "date-time",
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "On or before (RFC 3339)",
+              "title": "Date To"
             }
           },
           {
@@ -5146,7 +5244,7 @@
     },
     "/api/connections/status": {
       "get": {
-        "description": "Never includes a key, not even a partial one (SEG-23).",
+        "description": "iTop, DeepSeek, NVD, abuse.ch, ransomware.live and Firebase: configured or not, latency and a generic message.\n\nResults are reused for 5 minutes, so this route does not spend quota. Never includes a key, not even a partial\none, nor the body of an error (SEG-23).",
         "operationId": "connections_status_api_connections_status_get",
         "responses": {
           "200": {
@@ -5267,6 +5365,7 @@
     },
     "/api/connections/test": {
       "post": {
+        "description": "Checks again (\"Probar de nuevo\"); a service checked in the last 30 seconds keeps its result.",
         "operationId": "connections_test_api_connections_test_post",
         "requestBody": {
           "content": {
@@ -8624,6 +8723,7 @@
     },
     "/api/setup/status": {
       "get": {
+        "description": "The seven steps of the first-run wizard (D-042). A step is done when the data shows it or an admin marked\nit; step 1 uses the last connection checks without running new ones.",
         "operationId": "setup_status_api_setup_status_get",
         "responses": {
           "200": {
@@ -8744,6 +8844,7 @@
     },
     "/api/setup/steps/{n}": {
       "put": {
+        "description": "Marks a step done or skipped (skipping wins); the mark is audited. The wizard never stores a key.",
         "operationId": "setup_step_api_setup_steps__n__put",
         "parameters": [
           {

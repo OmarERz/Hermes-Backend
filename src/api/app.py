@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from typing import Annotated
 
+import httpx
 from fastapi import Depends, FastAPI
 
 from api.auth import FirebaseTokenVerifier, Role, TokenVerifier, UserDirectory, require_role
@@ -16,6 +17,8 @@ from api.itop_webhook import build_itop_webhook_router
 from api.pagination import CursorSigner
 from api.routes import routers
 from core.config import Settings
+from core.connections.checker import ConnectionChecker
+from core.connections.probes import Probes
 from core.cpe.candidates import CpeDictionaryClient
 from core.db.session import make_session_factory
 from core.itop.client import reader_from_settings
@@ -45,6 +48,8 @@ def create_app(
     )
 
     app.state.cursor_signer = CursorSigner(settings.cursor_signing_key.get_secret_value())
+    # Connection checks (SEG-23): short timeouts, results cached; tests replace it with fake probes.
+    app.state.connections = ConnectionChecker(Probes(settings, httpx.Client(trust_env=False)).get)
     app.state.itop_url = str(settings.itop_url) if settings.itop_url is not None else None  # for links to iTop
     install_error_handlers(app)
     if token_verifier is None or role_manager is None:

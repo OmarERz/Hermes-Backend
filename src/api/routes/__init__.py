@@ -2,6 +2,13 @@
 
 from fastapi import APIRouter
 
-from api.routes import catalog, config, findings, operations, sources
+from api.routes import admin, catalog, config, findings, operations, sources
 
-routers: list[APIRouter] = [config.router, catalog.router, findings.router, operations.router, sources.router]
+routers: list[APIRouter] = [
+    config.router,
+    catalog.router,
+    findings.router,
+    operations.router,
+    sources.router,
+    admin.router,
+]
