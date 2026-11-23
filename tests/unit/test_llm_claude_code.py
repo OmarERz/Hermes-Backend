@@ -37,6 +37,7 @@ from core.llm import (
 )
 from core.llm.claude_code import FIXED_ENV, PASSTHROUGH_ENV, child_environment
 from core.llm.stoppable import StoppableCaller
+from core.shutdown import ShutdownRequested
 from core.validation.retry import CircuitBreaker, Timing
 from core.validation.violations import Violation
 from harness.judge import finding_package
@@ -270,6 +271,14 @@ def test_a_timeout_is_a_transport_error_and_is_not_retried(caplog: pytest.LogCap
         call(client(runner, timeout=30.0))
     assert len(runner.calls) == 1
     assert "claude-code call: model=sonnet returned=None status=LlmTransportError" in caplog.text  # every call logs
+
+
+def test_a_call_cut_by_the_worker_shutdown_is_logged_as_interrupted(caplog: pytest.LogCaptureFixture) -> None:
+    runner = FakeRunner([ShutdownRequested("the worker is stopping")])
+    with caplog.at_level(logging.INFO, logger="core.llm.claude_code"), pytest.raises(ShutdownRequested):
+        call(client(runner))
+    assert len(runner.calls) == 1  # never retried
+    assert "claude-code call: model=sonnet returned=None status=interrupted" in caplog.text
 
 
 def test_a_cli_that_cannot_start_is_a_request_error() -> None:
