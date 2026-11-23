@@ -36,7 +36,7 @@ def test_payload_builders_validate_their_input() -> None:
         "fallback_team_id": "9",
     }
     assert update_payload({"urgency": "2"}) == {"kind": "update", "fields": {"urgency": "2"}}
-    assert comment_payload("hola") == {"kind": "comment", "log": "public_log", "text": "hola"}
+    assert comment_payload("hola") == {"kind": "comment", "log": "public_log", "text": "hola", "marker": "full"}
     assert comment_payload("x", private=True)["log"] == "private_log"
     assert stimulus_payload("ev_reopen") == {"kind": "stimulus", "stimulus": "ev_reopen"}
     with pytest.raises(ValueError, match="title"):

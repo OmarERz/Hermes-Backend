@@ -11,7 +11,7 @@ import pytest
 from alembic import command
 from alembic.config import Config
 from dbprovision import provisioned_database
-from sqlalchemy import delete, select, text, update
+from sqlalchemy import delete, event, select, text, update
 from sqlalchemy.orm import Session, sessionmaker
 
 from core.db import models as m
@@ -149,3 +149,25 @@ def test_missing_dead_zone_definition_uses_the_documented_default(sessions: sess
         session.execute(text("DELETE FROM setting_definition WHERE key = 'dead_zone'"))
     with sessions() as session:
         assert load_active_formula(session)[1].dead_zone == 4
+
+
+def test_the_formula_is_read_in_a_single_statement(sessions: sessionmaker[Session]) -> None:
+    """One statement is one snapshot under READ COMMITTED: a formula change committed while it loads can never mix
+    two versions, or a version with another dead zone (pending #107)."""
+    with sessions.begin() as session:
+        seed(session, "empty")
+    statements: list[str] = []
+
+    def count(_conn: object, _cursor: object, statement: str, *_args: object) -> None:
+        statements.append(statement)
+
+    engine = sessions.kw["bind"]
+    event.listen(engine, "before_cursor_execute", count)
+    try:
+        with sessions() as session:
+            version_id, _ = load_active_formula(session)
+            load_formula(session, version_id)
+    finally:
+        event.remove(engine, "before_cursor_execute", count)
+    assert len(statements) == 2  # one per call, each with the version, its rows and the dead zone
+    assert all("formula_version" in s and "setting_current" in s for s in statements)

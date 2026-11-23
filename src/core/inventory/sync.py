@@ -15,8 +15,8 @@ from dataclasses import dataclass, field
 from datetime import UTC, datetime
 from typing import Final
 
-from sqlalchemy import select, text
-from sqlalchemy.orm import Session
+from sqlalchemy import func, select, text
+from sqlalchemy.orm import Session, sessionmaker
 
 from core.db import models as m
 from core.inventory.version import normalize_version
@@ -84,6 +84,37 @@ def sync_inventory(
 def _lock(session: Session) -> None:
     """Serialize syncs; transaction-scoped and re-entrant, so taking it twice in one transaction is fine."""
     session.execute(text("SELECT pg_advisory_xact_lock(:key)"), {"key": SYNC_LOCK_KEY})
+
+
+def sync_from_itop_unlocked_read(
+    factory: sessionmaker[Session], reader: ItopReader, *, now: datetime | None = None, wait: bool = True
+) -> SyncResult | None:
+    """Read iTop with no transaction open, then apply it in a short transaction (pending #106).
+
+    One connection holds the sync lock at session level across the read and the write, so an older read never
+    overwrites a newer one, and the slow iTop read keeps no snapshot nor transaction lock in PostgreSQL. The write
+    takes the same key at transaction level, which is re-entrant on the same connection. `wait=False` returns None
+    at once when another sync holds the lock. An iTop failure raises before anything is written.
+    """
+    with factory.kw["bind"].connect() as conn:
+        if wait:
+            conn.execute(select(func.pg_advisory_lock(SYNC_LOCK_KEY)))
+            acquired = True
+        else:
+            acquired = bool(conn.execute(select(func.pg_try_advisory_lock(SYNC_LOCK_KEY))).scalar())
+        conn.commit()
+        if not acquired:
+            return None
+        try:
+            snapshot = read_inventory(reader)
+            with Session(bind=conn) as session:
+                result = sync_inventory(session, snapshot, now=now)
+                session.commit()
+            return result
+        finally:
+            conn.rollback()
+            conn.execute(select(func.pg_advisory_unlock(SYNC_LOCK_KEY)))
+            conn.commit()
 
 
 def sync_from_itop(session: Session, reader: ItopReader, *, now: datetime | None = None) -> SyncResult:
