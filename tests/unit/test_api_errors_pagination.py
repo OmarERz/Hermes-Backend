@@ -4,6 +4,8 @@ from __future__ import annotations
 
 import base64
 import logging
+import uuid
+from datetime import UTC, datetime
 
 import pytest
 from fastapi import FastAPI, HTTPException
@@ -12,7 +14,17 @@ from pydantic import BaseModel, Field, SecretStr, ValidationError
 
 from api.app import create_app
 from api.errors import ApiError, ErrorDetail, install_error_handlers
-from api.pagination import CursorSigner, Page, PageQuery, Signer
+from api.pagination import (
+    CursorSigner,
+    KeyPart,
+    Keyset,
+    Page,
+    PageParams,
+    PageQuery,
+    Signer,
+    decode_key,
+    encode_key,
+)
 from core.config import Settings
 
 pytestmark = pytest.mark.unit
@@ -212,3 +224,41 @@ def test_envelope_forwards_exception_headers_and_lists_every_allowed_method() ->
     assert wrong_method.status_code == 405
     assert wrong_method.headers["allow"] == "GET"
     assert wrong_method.json()["error"]["code"] == "method_not_allowed"
+
+
+def test_keyset_cursor_round_trip_and_its_list() -> None:
+    when = datetime(2026, 11, 22, 12, 0, tzinfo=UTC)
+    ident = uuid.UUID(int=7)
+    cursor = encode_key(SIGNER, "alerts", (3, ident, when))
+    assert cursor is not None and encode_key(SIGNER, "alerts", None) is None
+    params = PageParams(keyset=SIGNER.decode(cursor), limit=10)
+    assert decode_key(params, "alerts", ("int", "uuid", "time")) == (3, ident, when)
+    assert decode_key(PageParams(keyset=None, limit=10), "alerts", ("int",)) is None
+
+
+@pytest.mark.parametrize(
+    "keyset",
+    [
+        {"kind": "tickets", "k0": 3},  # another list
+        {"kind": "alerts", "k0": 3, "k1": "x"},  # extra field
+        {"kind": "alerts", "k0": True},  # a boolean is not an integer
+        {"kind": "alerts", "k0": "3"},
+        {"offset": 50},  # a sample-route cursor
+    ],
+)
+def test_keyset_cursor_of_another_list_or_type_is_rejected(keyset: Keyset) -> None:
+    params = PageParams(keyset=SIGNER.decode(SIGNER.encode(keyset)), limit=10)
+    with pytest.raises(ApiError) as caught:
+        decode_key(params, "alerts", ("int",))
+    assert caught.value.code == "invalid_cursor"
+
+
+UUID_OR_TIME: list[KeyPart] = ["uuid", "time"]
+
+
+@pytest.mark.parametrize("part", UUID_OR_TIME)
+@pytest.mark.parametrize("value", [3, "not-a-uuid-or-date"])
+def test_keyset_uuid_and_time_fields_need_their_format(part: KeyPart, value: int | str) -> None:
+    params = PageParams(keyset=SIGNER.decode(SIGNER.encode({"kind": "x", "k0": value})), limit=1)
+    with pytest.raises(ApiError):
+        decode_key(params, "x", (part,))

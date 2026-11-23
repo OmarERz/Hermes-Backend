@@ -31,3 +31,10 @@ def double_llm_client(double: LlmDouble) -> LlmClient:
         http_client=double.client(),  # an httpx client; the SDK accepts it at runtime
         retry=RetryPolicy(max_attempts=1, sleep=lambda _s: None),
     )
+
+
+def dismissal_package(**overrides: Any) -> dict[str, Any]:
+    """A fresh mode 2 dismissal candidate (docs/07 §7 reference case: OpenSSL 3.x news, iTop has Nginx on Ubuntu)."""
+    content: dict[str, Any] = json.loads((FIXTURES / "dismissal_package.json").read_text(encoding="utf-8"))
+    content.update(copy.deepcopy(overrides))
+    return content
