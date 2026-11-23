@@ -10,8 +10,13 @@ a second vulnerable product, news with their analyses and an indicator, and then
 3. the scoring of every group with the deterministic engine; the judge is a **stand-in**: where a news item ties a
    KEV CVE to the group it records one accepted reason of +8 points, citing the demo news, as an `llm_review` of
    the model `demo-double`. No LLM client is created and no key is read, so a demo can never spend tokens;
-4. the ticket rules, which write the iTop operations to the outbox and the notification events. Nothing is sent to
-   iTop here: the outbox worker only runs when iTop is configured.
+4. the ticket rules, which write the iTop operations to the outbox and the notification events. The operations are
+   saved as `failed` ("demo data: never sent to iTop") in the same transaction, so the outbox worker, which only
+   claims pending rows, can never send them even when iTop is configured. The tickets get the demo ids DEMO-1,
+   DEMO-2... (open), which stands in for iTop's answer so that the tickets view has something to show.
+
+It refuses to run when the database holds assets other than the demo ones, so it cannot mix fake CIs into a real
+CMDB. The notification events are real rows: do not switch the consumer to Slack on a demo installation.
 
 Every step is idempotent: running it again adds an assessment per group but no duplicate data, ticket or event.
 It runs as the migrator role (MIGRATION_DATABASE_URL and the migrator_db_password secret), like `seed`.
@@ -26,7 +31,7 @@ from dataclasses import dataclass, field
 from datetime import UTC, datetime, timedelta
 from decimal import Decimal
 
-from sqlalchemy import func, select, text
+from sqlalchemy import func, select, text, update
 from sqlalchemy.orm import Session, sessionmaker
 
 from core.correlation.engine import correlate_stories
@@ -59,13 +64,16 @@ from core.tickets.lifecycle import TicketLifecycle
 DEMO_REASON = "mass_exploitation"
 DEMO_ADJUSTMENT = 8
 DEMO_MODEL = "demo-double"
+DEMO_CIS = ("CI-1", "CI-2", "CI-3")
+PARKED_REASON = "demo data: never sent to iTop"
 _LIVE = text(
     "SELECT i.asset_id FROM finding_current fc JOIN installed_software i ON i.id = fc.installed_software_id "
     "JOIN asset a ON a.id = i.asset_id WHERE fc.finding_group_id = :group_id "
     "AND fc.status IN ('new', 'persistent', 'reopened', 'no_data') AND a.decommissioned_at IS NULL"
 )
 NEWS_SOURCE = "demo_news"
-NEWS: tuple[tuple[str, str, str], ...] = (
+CVE_STORIES = 2  # the first two stories tie CVE-2026-10001 to the inventory
+NEWS: tuple[tuple[str, str, str], ...] = (  # the third names a CMDB product with no known CVE (R2 alert)
     (
         "https://news.example.test/openssl-exploited",
         "Explotan una falla de OpenSSL en ataques dirigidos",
@@ -75,6 +83,11 @@ NEWS: tuple[tuple[str, str, str], ...] = (
         "https://news.example.test/openssl-patch",
         "Parche urgente para OpenSSL 3.0",
         "Se publicó OpenSSL 3.0.8 para corregir CVE-2026-10001, ya explotada.",
+    ),
+    (
+        "https://news.example.test/nginx-campaign",
+        "Campaña de escaneo contra servidores Redis expuestos",
+        "Un grupo escanea servidores Redis 7.0 expuestos a internet en busca de fallas sin parche.",
     ),
 )
 ITOP_ORG = "1"  # demo identity: nothing is sent to iTop, the outbox only stores the operations
@@ -91,6 +104,7 @@ class DemoReport:
     assessments: int = 0
     tickets: int = 0
     outbox: int = 0
+    parked: int = 0
     events: int = 0
     notes: list[str] = field(default_factory=list)
 
@@ -175,11 +189,17 @@ def _second_vulnerability(session: Session, now: datetime) -> None:
     )
     session.add(web)
     session.flush()
-    session.add(
-        m.InstalledSoftware(
-            itop_instance_id="SI-3", asset_id=web.id, software_product_id=product.id, version="1.24.0", synced_at=now
+    redis = _ensure_product(session, "Redis", "redis", now)
+    for instance, software, version in (("SI-3", product, "1.24.0"), ("SI-4", redis, "7.0.5")):
+        session.add(
+            m.InstalledSoftware(
+                itop_instance_id=instance,
+                asset_id=web.id,
+                software_product_id=software.id,
+                version=version,
+                synced_at=now,
+            )
         )
-    )
 
 
 def _news(session: Session, now: datetime) -> list[uuid.UUID]:
@@ -260,15 +280,16 @@ def _analysis(session: Session, story_id: uuid.UUID, quote: str, index: int, now
     )
     session.add(review)
     session.flush()
+    with_cve = index < CVE_STORIES
     output = {
-        "event_types": ["exploitation"],
-        "cves": [{"cve": "CVE-2026-10001", "exploitation_level": "active"}],
+        "event_types": ["exploitation" if with_cve else "campaign"],
+        "cves": [{"cve": "CVE-2026-10001", "exploitation_level": "active"}] if with_cve else [],
     }
     analysis = m.NewsAnalysis(
         story_id=story_id,
         llm_review_id=review.id,
         summary=quote,
-        event_type="exploitation",
+        event_type="exploitation" if with_cve else "campaign",
         output=output,
         created_at=now,
     )
@@ -279,10 +300,12 @@ def _analysis(session: Session, story_id: uuid.UUID, quote: str, index: int, now
         actor = m.Actor(name="Grupo Demo")
         session.add(actor)
         session.flush()
-    session.add(m.NewsCveMention(analysis_id=analysis.id, cve_id="CVE-2026-10001", quote=quote))
+    if with_cve:
+        session.add(m.NewsCveMention(analysis_id=analysis.id, cve_id="CVE-2026-10001", quote=quote))
     session.add(m.NewsActorMention(analysis_id=analysis.id, actor_id=actor.id, quote=quote))
+    vendor, product, version = ("openssl", "openssl", "3.0.7") if with_cve else ("redis", "redis", "7.0.5")
     session.add(
-        m.NewsProductMention(analysis_id=analysis.id, vendor="openssl", product="openssl", version="3.0.7", quote=quote)
+        m.NewsProductMention(analysis_id=analysis.id, vendor=vendor, product=product, version=version, quote=quote)
     )
     session.flush()
 
@@ -473,11 +496,44 @@ def score_group(session: Session, group: m.FindingGroup, run_id: uuid.UUID, now:
     return assessment.id
 
 
+def refuse_over_real_data(session: Session) -> None:
+    """The demo only runs where there is nothing but demo data (it would mix fake CIs into a real CMDB)."""
+    foreign = session.scalar(select(func.count()).select_from(m.Asset).where(m.Asset.itop_ci_id.not_in(DEMO_CIS)))
+    if foreign:
+        raise AdminError("the database holds assets that are not demo data; the demo only runs on a clean installation")
+
+
+def park_demo_operations(session: Session) -> int:
+    """Mark the demo's iTop operations as never to be sent: the outbox worker only claims pending rows."""
+    parked = session.scalars(
+        update(m.ItopOutbox)
+        .where(m.ItopOutbox.status == "pending")
+        .values(status="failed", next_attempt_at=None, last_error=PARKED_REASON)
+        .returning(m.ItopOutbox.id)
+    ).all()
+    return len(parked)
+
+
+_CONFIRM_TICKETS = text(
+    "UPDATE ticket SET status = 'open', itop_ticket_id = 'DEMO-' || (s.n + s.base), "
+    "itop_ref = 'DEMO-' || (s.n + s.base), itop_created_at = :now "
+    "FROM (SELECT id, row_number() OVER (ORDER BY created_at, id) AS n, "
+    "(SELECT count(*) FROM ticket WHERE itop_ticket_id LIKE 'DEMO-%') AS base "
+    "FROM ticket WHERE status = 'pending_creation') s WHERE ticket.id = s.id"
+)
+
+
+def confirm_demo_tickets(session: Session, now: datetime) -> None:
+    """Stand in for iTop's answer: the tickets view lists what iTop already holds, so give them a demo id."""
+    session.execute(_CONFIRM_TICKETS, {"now": now})
+
+
 def run_cycle(factory: sessionmaker[Session], now: datetime | None = None) -> DemoReport:
     """Load the demo data and run the cycle once; the report counts what exists afterwards."""
     now = now or datetime.now(UTC)
     report = DemoReport()
     with factory() as session, session.begin():
+        refuse_over_real_data(session)
         stories = load_demo_data(session, now)
     scan = run_scan(factory, ScanOptions(reason="manual"), now=now)
     report.scan_new, report.scan_persistent = scan.new, scan.persistent
@@ -494,6 +550,8 @@ def run_cycle(factory: sessionmaker[Session], now: datetime | None = None) -> De
                 continue
             report.assessments += 1
             lifecycle.apply(session, assessment_id)
+        confirm_demo_tickets(session, now)
+        report.parked = park_demo_operations(session)  # same transaction: the worker never sees them pending
     with factory() as session:
         report.tickets = int(session.scalar(select(func.count()).select_from(m.Ticket)) or 0)
         report.outbox = int(session.scalar(select(func.count()).select_from(m.ItopOutbox)) or 0)
@@ -516,8 +574,8 @@ def main(argv: Sequence[str] | None = None) -> int:
         "demo ready: "
         f"scan {report.scan_new} new and {report.scan_persistent} persistent finding(s); "
         f"{report.stories} stories correlated ({report.matches} match(es), {report.alerts} alert(s)); "
-        f"{report.assessments} assessment(s); {report.tickets} ticket(s), {report.outbox} iTop operation(s) in the "
-        f"outbox and {report.events} notification event(s)\n"
+        f"{report.assessments} assessment(s); {report.tickets} ticket(s), {report.outbox} iTop operation(s) "
+        f"parked in the outbox (never sent) and {report.events} notification event(s)\n"
     )
     return 0
 

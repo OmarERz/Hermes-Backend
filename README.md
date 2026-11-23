@@ -61,8 +61,25 @@ Con la pila arriba, `make demo` carga el inventario de ejemplo, un par de CVE co
 analizadas, un indicador y corre **un ciclo completo**: escaneo simulado → correlación → puntuación → reglas de
 tickets. Deja evaluaciones, tickets pendientes en el *outbox* de iTop y eventos de notificación, así que todas las
 pantallas del front tienen datos. No usa red ni gasta tokens: el juez es un doble que registra un solo motivo
-aceptado, y nada se envía a iTop. Repetirlo agrega una evaluación por grupo, sin duplicar datos, tickets ni eventos.
+aceptado. Las operaciones de iTop quedan guardadas como `failed` («demo data: never sent to iTop») en la misma
+transacción, así que el trabajador del *outbox* nunca las envía aunque iTop esté configurado, y la demo **se niega a
+correr** si la base ya tiene activos que no son de la demo. Úsala solo en una instalación de pruebas: los eventos de
+notificación sí son filas reales, así que no cambies el consumidor a Slack con datos de demostración. Repetirlo agrega
+una evaluación por grupo, sin duplicar datos, tickets ni eventos.
 Para ver los eventos: `docker compose exec api python -m core.devtools.admin events`.
+
+**Guion de punta a punta (unos 10 minutos).**
+
+1. `make up` y espera a que `docker compose ps` muestre `api` y `workers` en `running` (F-01).
+2. `make demo` y lee el resumen (activos, hallazgos, evaluaciones, tickets, eventos) (F-02).
+3. Obtén un token de administrador local con `make emulator-token ROLE=admin`.
+4. Recorre las vistas con ese token: vulnerabilidades (`/api/vulnerabilities`), recomendaciones y su desglose
+   (`/api/recommendations`, `/api/assessments/{id}/breakdown`), tickets (`/api/tickets`), alertas (`/api/alerts`),
+   corridas (`/api/runs`), fuentes (`/api/sources`) y configuración (`/api/config`).
+5. Cambia un parámetro de la fórmula o la sensibilidad desde `/api/config` y comprueba la nueva versión en
+   `/api/config/versions`.
+6. Verifica la colección de Bruno de la demo (exige datos en cada lista con `demoMinItems=1`):
+   `cd bruno && npx @usebruno/cli run f13-1-demo --env local --env-var token=<token> --env-var demoMinItems=1`.
 
 ### 4. Salud y registros
 

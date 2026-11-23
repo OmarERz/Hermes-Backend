@@ -1,0 +1,24 @@
+meta {
+  name: demo-vulnerabilities
+  type: http
+  seq: 1
+}
+
+get {
+  url: {{baseUrl}}/api/vulnerabilities?limit=10
+  body: none
+  auth: bearer
+}
+
+auth:bearer {
+  token: {{token}}
+}
+
+assert {
+  res.status: eq 200
+  res.body.groups.length: gte {{demoMinItems}}
+}
+
+docs {
+  Vulnerabilities view with the demo findings. Run `make demo` first; with `--env-var demoMinItems=1` every list must show data.
+}
