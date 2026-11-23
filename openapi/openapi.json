@@ -8316,7 +8316,7 @@
     },
     "/api/runs": {
       "get": {
-        "description": "Scans, news runs and recalculations, newest first (ARQ-04).",
+        "description": "Scans, news runs and recalculations: those not started yet first, then the newest (ARQ-04).",
         "operationId": "list_runs_api_runs_get",
         "parameters": [
           {
