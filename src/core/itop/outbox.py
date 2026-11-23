@@ -86,7 +86,9 @@ def comment_payload(message: str, *, private: bool = False) -> dict[str, Any]:
     """A new entry in the ticket's public or private log (`core/update` of a case log appends an entry)."""
     if not message.strip():
         raise ValueError("a comment needs text")
-    return {"kind": "comment", "log": "private_log" if private else "public_log", "text": message}
+    # `marker: full`: queued by code that always writes the whole row id, so a retry never looks for the short marker
+    # of older rows (F5.1 #43); rows queued before F12.2 lack it.
+    return {"kind": "comment", "log": "private_log" if private else "public_log", "text": message, "marker": "full"}
 
 
 def stimulus_payload(stimulus: str) -> dict[str, Any]:
@@ -214,6 +216,11 @@ class _Claim:
     @property
     def marker(self) -> str:
         """Stable reference written into what we send, to recognise our own write on a retry."""
+        return f"[hermes:{self.row_id.hex}]"  # the whole id: the first 16 hex digits are mostly the timestamp
+
+    @property
+    def legacy_marker(self) -> str:
+        """The shorter marker written before F12.2: a retry of an older row still recognises it (PRE-02)."""
         return f"[hermes:{self.row_id.hex[:16]}]"
 
 
@@ -322,6 +329,11 @@ class ItopOutboxWorker:
                 return "abandoned"
             update = session.get_one(m.TicketUpdate, row.ticket_update_id)
             ticket = session.get_one(m.Ticket, update.ticket_id)
+            legacy = isinstance(row.payload, dict) and row.payload.get("kind") == "comment"
+            if row.attempts == 0 and legacy and "marker" not in row.payload:
+                # Queued before F12.2 but first sent now: it will write the whole id, so its retries must never look
+                # for the short marker (another row's could match its prefix; F5.1 #43).
+                row.payload = {**row.payload, "marker": "full"}
             row.status = "in_progress"
             row.attempts += 1
             row.next_attempt_at = now + self.lease
@@ -355,7 +367,13 @@ class ItopOutboxWorker:
         log_field = claim.payload["log"]
         if log_field not in LOG_FIELDS:
             raise _PermanentError("unknown log field")
-        if claim.attempts > 1 and self._remote_contains(key, log_field, claim.marker):
+        # Only a row first sent before F12.2 may have written the short marker; the others look for their own only.
+        markers: tuple[str, ...] = (claim.marker,)
+        if claim.payload.get("marker") != "full":
+            # The short marker alone could be another row's (same prefix): only this row's whole entry, its text then
+            # the short marker, counts as already written.
+            markers = (claim.marker, f"{claim.payload['text']}\n\n{claim.legacy_marker}")
+        if claim.attempts > 1 and self._remote_contains(key, log_field, markers):
             return _Result(note="already in iTop (retry)")  # a case log appends: never send twice (PRE-02)
         fields = {log_field: f"{claim.payload['text']}\n\n{claim.marker}"}
         self.writer.write({"operation": "core/update", "class": TICKET_CLASS, "key": key, "fields": fields})
@@ -373,9 +391,13 @@ class ItopOutboxWorker:
         self.writer.write({**operation, "fields": {}, "output_fields": "id"})
         return _Result()
 
-    def _remote_contains(self, key: str, field_name: str, marker: str) -> bool:
+    def _remote_contains(self, key: str, field_name: str, markers: tuple[str, ...]) -> bool:
         found = self.writer.get(TICKET_CLASS, key, [field_name])
-        return bool(found) and marker in json.dumps(found[0].fields.get(field_name), ensure_ascii=False)
+        if not found:
+            return False
+        text = json.dumps(found[0].fields.get(field_name), ensure_ascii=False)
+        # Compare in the same JSON-escaped form (a case log entry keeps its line breaks as \n).
+        return any(json.dumps(marker, ensure_ascii=False)[1:-1] in text for marker in markers)
 
     def _create(self, claim: _Claim) -> _Result:
         fields = dict(claim.payload["fields"])

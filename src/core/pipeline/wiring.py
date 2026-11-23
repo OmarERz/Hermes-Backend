@@ -14,7 +14,7 @@ from dataclasses import astuple
 from datetime import UTC, datetime, timedelta
 from typing import Any, Protocol
 
-from sqlalchemy import func, select
+from sqlalchemy import select
 from sqlalchemy.orm import Session, sessionmaker
 
 from core.analysts.cve import CveOptions, analyze_pending_cves, web_advisory_provider
@@ -24,9 +24,8 @@ from core.db import models as m
 from core.ingestion.embeddings import EmbedFn
 from core.ingestion.fetcher import Fetcher
 from core.ingestion.pipeline import PipelineOptions, run_news_pipeline
-from core.inventory.sync import SYNC_LOCK_KEY, sync_inventory
+from core.inventory.sync import sync_from_itop_unlocked_read
 from core.itop.client import ItopReader
-from core.itop.inventory import read_inventory
 from core.llm import LlmClient
 from core.pipeline.cycles import NewsCycleOutput, ScanCycleOutput, TicketApplier
 from core.pipeline.judging import JudgeFn
@@ -238,22 +237,10 @@ def inventory_refresh(factory: sessionmaker[Session], reader: ItopReader) -> Cal
     """
 
     def run() -> object:
-        with factory.kw["bind"].connect() as conn:
-            acquired = bool(conn.execute(select(func.pg_try_advisory_lock(SYNC_LOCK_KEY))).scalar())
-            conn.commit()
-            if not acquired:
-                log.info("inventory refresh skipped: another inventory sync is running")
-                return None
-            try:
-                inventory = read_inventory(reader)
-                with Session(bind=conn) as session:
-                    result = sync_inventory(session, inventory)
-                    session.commit()
-                return result
-            finally:
-                conn.rollback()
-                conn.execute(select(func.pg_advisory_unlock(SYNC_LOCK_KEY)))
-                conn.commit()
+        result = sync_from_itop_unlocked_read(factory, reader, wait=False)
+        if result is None:
+            log.info("inventory refresh skipped: another inventory sync is running")
+        return result
 
     return run
 

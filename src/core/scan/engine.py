@@ -28,7 +28,7 @@ from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session, sessionmaker
 
 from core.db import models as m
-from core.inventory.sync import sync_from_itop
+from core.inventory.sync import sync_from_itop_unlocked_read
 from core.itop.client import ItopReader
 from core.scan.versions import in_range
 from core.vulndata.http import JsonSource
@@ -195,7 +195,8 @@ def run_scan(
     options = options or ScanOptions()
     started = now or datetime.now(UTC)
     bind = factory.kw["bind"]
-    with bind.connect() as guard:
+    # Autocommit: the guard holds the session lock without an open transaction (no snapshot kept for the whole scan).
+    with bind.connect().execution_options(isolation_level="AUTOCOMMIT") as guard:
         if not guard.execute(select(func.pg_try_advisory_lock(SCAN_LOCK_KEY))).scalar():
             raise ScanAlreadyRunningError("a scan is already running")
         try:
@@ -208,9 +209,8 @@ def _run_locked(factory: sessionmaker[Session], options: ScanOptions, started: d
     run_id = _create_run(factory, options, started)
     result = ScanResult(run_id)
     try:
-        if options.reader is not None:
-            with factory() as session, session.begin():
-                sync_from_itop(session, options.reader, now=started)
+        if options.reader is not None:  # iTop is read outside any transaction; only the write is one (#106)
+            sync_from_itop_unlocked_read(factory, options.reader, now=started)
         _update_run(factory, run_id, progress=30)
         with factory() as session, session.begin():
             state = _State(session, run_id, started, result, options.osv, options.recency_days)

@@ -22,7 +22,7 @@ def run(stop: threading.Event, settings: Settings | None = None) -> None:
     settings = settings or Settings()
     configure_logging(settings.secret_values())
     log.info("workers started")
-    jobs = build_jobs(settings, make_session_factory(settings))
+    jobs = build_jobs(settings, make_session_factory(settings), stop=stop)
     if jobs:
         run_jobs_in_threads(stop, jobs)
     else:

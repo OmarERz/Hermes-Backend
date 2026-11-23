@@ -59,11 +59,13 @@ QUERIES: Final[dict[str, TextClause]] = {
         'delivered' AND e.assessment_id IS NOT NULL AND e.payload -> 'score' ->> 'level' = 'critical' AND
         e.delivered_at >= :start AND e.delivered_at < :end"""
     ),
-    # MET-07 · Use per judge reason (accepted reasons of the day's judge reviews).
+    # MET-07 · Use per judge reason: accepted reasons of the day's judge reviews whose adjustment reached the score
+    # (a review that fell back to `no_judge_review` keeps its accepted rows, but they were never used; F6.1 #68).
     "reason_usage": text(
         """SELECT 'reason:' || r.reason_code AS dimension, count(*)::numeric AS value FROM judge_reason r JOIN
         llm_review v ON v.id = r.llm_review_id WHERE v.agent = 'judge' AND r.status = 'accepted' AND
-        v.created_at >= :start AND v.created_at < :end GROUP BY r.reason_code"""
+        v.status IN ('applied', 'partial_review') AND v.created_at >= :start AND v.created_at < :end
+        GROUP BY r.reason_code"""
     ),
     # MET-10 · Rejections per rule (L5, L6, L7 ...).
     "rule_rejections": text(

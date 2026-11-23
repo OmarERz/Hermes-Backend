@@ -93,3 +93,30 @@ def test_a_reactivation_is_not_undone_by_re_evaluating_reviewed_days(factory: se
         transition = evaluate(session, tomorrow, d.NOW + timedelta(days=1))
         assert transition is not None
         assert transition.level == Level.WATCHED  # a new signal after the reactivation still counts
+
+
+def test_watched_returns_to_normal_seven_quiet_days_after_the_metric_day(factory: sessionmaker[Session]) -> None:
+    """The change is recorded the day after the metrics that caused it; the quiet days count from the metric day
+    (pending F8.1 #59)."""
+    with factory() as session, session.begin():
+        metric(session, TODAY, "validation_failure_rate", "0.25")
+        assert evaluate(session, TODAY, d.NOW) is not None  # recorded on TODAY + 1
+        later = TODAY + timedelta(days=7)
+        transition = evaluate(session, later, d.NOW + timedelta(days=7))
+        assert transition is not None
+        assert transition.level == Level.NORMAL
+
+
+def test_days_reviewed_at_a_reactivation_never_count_again(factory: sessionmaker[Session]) -> None:
+    """Even after a later automatic change, signal days before the reactivation stay reviewed (pending F8.1 #58)."""
+    with factory() as session, session.begin():
+        for back in (2, 1, 0):
+            metric(session, TODAY - timedelta(days=back), "double_review_disagreement", "0.4")
+        evaluate(session, TODAY, d.NOW)
+        reactivate(session, d.user(session).id, d.NOW + timedelta(hours=1), regression_passed=True, reason="Revisado")
+        tomorrow, after = TODAY + timedelta(days=1), TODAY + timedelta(days=2)
+        metric(session, tomorrow, "double_review_disagreement", "0.4")
+        assert evaluate(session, tomorrow, d.NOW + timedelta(days=1)) is not None  # watched (automatic)
+        metric(session, after, "double_review_disagreement", "0.4")
+        assert evaluate(session, after, d.NOW + timedelta(days=2)) is None  # TODAY was reviewed: no 3-day streak
+        assert current_level(session)[0] == Level.WATCHED

@@ -103,12 +103,14 @@ class DispatchJob:
     session_factory: sessionmaker[Session]
     itop_base_url: str | None = None
     consumers: dict[str, NotificationConsumer] = field(default_factory=dict)
+    stop: threading.Event | None = None  # the worker's shutdown signal, checked between events
 
     def __call__(self) -> int:
         with self.session_factory() as session:
             name = configured_consumer_name(session)
         consumer = self.consumers.get(name) or self.consumers.setdefault(name, consumer_for(name))
-        return NotificationDispatcher(self.session_factory, consumer, itop_base_url=self.itop_base_url).drain()
+        dispatcher = NotificationDispatcher(self.session_factory, consumer, itop_base_url=self.itop_base_url)
+        return dispatcher.drain(stop=self.stop)
 
 
 def run_jobs_in_threads(stop: threading.Event, jobs: Sequence[PeriodicJob], *, tick: float = 1.0) -> None:
@@ -138,6 +140,7 @@ def build_jobs(
     settings: Settings,
     session_factory: sessionmaker[Session],
     consumers: Mapping[str, NotificationConsumer] | None = None,
+    stop: threading.Event | None = None,
 ) -> list[PeriodicJob]:
     """The notification dispatcher, the nightly metrics and the pipeline cycles always (each on its own lane); the
     iTop jobs only when iTop is configured.
@@ -146,7 +149,7 @@ def build_jobs(
     F11); `log` is always available.
     """
     itop_url = str(settings.itop_url) if settings.itop_url is not None else None
-    dispatch = DispatchJob(session_factory, itop_url, dict(consumers or {}))
+    dispatch = DispatchJob(session_factory, itop_url, dict(consumers or {}), stop)
     jobs = [
         PeriodicJob("notification_dispatch", DISPATCH_SECONDS, dispatch, lane="notifications"),
         PeriodicJob("nightly_metrics", NIGHTLY_SECONDS, NightlyJob(session_factory), lane="nightly"),
