@@ -8,8 +8,8 @@ from datetime import UTC, datetime
 from decimal import Decimal
 from typing import Final
 
-CVE_ID: Final = re.compile(r"^CVE-\d{4}-\d{4,}$")
-CWE_ID: Final = re.compile(r"^CWE-\d+$")
+CVE_ID: Final = re.compile(r"^CVE-[0-9]{4}-[0-9]{4,}\Z")
+CWE_ID: Final = re.compile(r"^CWE-[0-9]+\Z")
 NVD_CPE: Final = "nvd_cpe"
 CNA_AFFECTED: Final = "cna_affected"
 

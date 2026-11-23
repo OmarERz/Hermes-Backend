@@ -11,7 +11,7 @@ import re
 from collections.abc import Callable
 from dataclasses import dataclass
 
-_CVE = re.compile(r"\bCVE-\d{4}-\d{4,7}\b", re.IGNORECASE)
+_CVE = re.compile(r"\bCVE-[0-9]{4}-[0-9]{4,7}\b", re.IGNORECASE)
 
 # First match wins: an exploited vulnerability that also has a patch is an exploitation story.
 _EVENT_HINTS: tuple[tuple[str, re.Pattern[str]], ...] = (
