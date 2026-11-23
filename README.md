@@ -21,6 +21,78 @@ make up          # local stack: writes the Docker secret files from your env fil
 Copy `.env.example` to `.env` and set at least `POSTGRES_PASSWORD`, `MIGRATOR_DB_PASSWORD`, `APP_DB_PASSWORD` and
 `RETENTION_DB_PASSWORD` before `make up`.
 
+## Guía de operación (español)
+
+Esta guía es para quien instala y mantiene Hermes en un servidor propio. Todo corre con Docker Compose; los puertos
+solo escuchan en `127.0.0.1`.
+
+### 1. Instalar
+
+1. Instala Docker (con Compose v2) y clona el repositorio.
+2. Copia `.env.example` a `.env` y llena **al menos**: `POSTGRES_PASSWORD`, `MIGRATOR_DB_PASSWORD`, `APP_DB_PASSWORD`,
+   `RETENTION_DB_PASSWORD` y `CURSOR_SIGNING_KEY` (mínimo 32 caracteres; genera una con
+   `python -c "import secrets; print(secrets.token_urlsafe(48))"`).
+3. `make up`. Escribe las llaves como archivos de Docker secrets (`.compose-secrets/`, nunca se versionan), construye
+   las imágenes y levanta el servicio. En cada arranque ocurre, en orden: el aprovisionamiento de la base
+   (`provision`), las migraciones (`migrate`) y la carga de los **valores de fábrica** (`bootstrap`: fórmula,
+   catálogos, parámetros y fuentes por defecto). `bootstrap` solo carga lo que falta, así que repetir `make up`
+   no cambia nada. Después arrancan la API (`http://127.0.0.1:8000`) y los trabajos periódicos (`workers`).
+
+### 2. Llaves y conexiones
+
+Las llaves de terceros son opcionales y van en `.env` (vacío = «no configurado»); ninguna respuesta de la API las
+devuelve y los registros las enmascaran.
+
+| Variable | Para qué |
+|---|---|
+| `ITOP_URL`, `ITOP_TOKEN`, `ITOP_SYSTEM_USER`, `ITOP_WEBHOOK_TOKEN` | Leer el CMDB y crear tickets en iTop; sin ellas no corren los trabajos de iTop |
+| `NVD_API_KEY` | Más cuota en NVD y consulta al diccionario CPE (sin llave solo hay candidatos locales) |
+| `DEEPSEEK_API_KEY`, `LLM_BASE_URL_JUDGE`, `LLM_BASE_URL_ANALYSTS` | Juez y analistas de IA; **la demo nunca las usa** |
+| `ABUSECH_AUTH_KEY`, `RANSOMWARELIVE_API_KEY` | Fuentes de indicadores y víctimas |
+| `FIREBASE_PROJECT_ID`, `FIREBASE_CREDENTIALS_FILE` | Inicio de sesión; con `demo-hermes` solo sirve el emulador de Firebase incluido |
+
+El primer administrador se asigna con el rol (*custom claim*) de Firebase; con el emulador local,
+`make emulator-token ROLE=admin` imprime un token de prueba. Después, un admin cambia roles con
+`PUT /api/admin/users/{uid}/role`.
+
+### 3. Datos de demostración
+
+Con la pila arriba, `make demo` carga el inventario de ejemplo, un par de CVE con su software, noticias ya
+analizadas, un indicador y corre **un ciclo completo**: escaneo simulado → correlación → puntuación → reglas de
+tickets. Deja evaluaciones, tickets pendientes en el *outbox* de iTop y eventos de notificación, así que todas las
+pantallas del front tienen datos. No usa red ni gasta tokens: el juez es un doble que registra un solo motivo
+aceptado, y nada se envía a iTop. Repetirlo agrega una evaluación por grupo, sin duplicar datos, tickets ni eventos.
+Para ver los eventos: `docker compose exec api python -m core.devtools.admin events`.
+
+### 4. Salud y registros
+
+- `curl -s http://127.0.0.1:8000/api/health` responde `{"status":"ok"}` sin autenticación.
+- `docker compose ps` muestra el estado; `provision`, `migrate` y `bootstrap` terminan en `exited (0)` por diseño.
+- `docker compose logs -f api workers` sigue los registros (JSON, una línea por evento, con las llaves enmascaradas).
+- Las métricas, las fuentes caídas y la escalera del juez están en `GET /api/metrics` y `GET /api/sources`.
+
+### 5. Respaldo y restauración
+
+Los datos viven en el volumen `hermes_db_data` (PostgreSQL).
+
+```bash
+make backup                      # backups/hermes-AAAAMMDD-HHMMSS.dump (formato personalizado de pg_dump)
+# restaurar en una base vacía (con la pila arriba):
+docker compose exec -T db pg_restore -U hermes -d hermes --clean --if-exists < backups/hermes-....dump
+```
+
+Guarda los respaldos fuera del servidor y prueba la restauración de vez en cuando. `docker compose down -v` **borra el
+volumen**: no lo uses en producción.
+
+### 6. Pasar las notificaciones a Slack
+
+Las notificaciones salen como eventos en la tabla `notification_event`; el consumidor por defecto es `log`. Cuando el
+módulo de Slack (otro equipo) esté integrado (F11), sus llaves `SLACK_BOT_TOKEN` y `SLACK_APP_TOKEN` se agregarán
+a `compose.yaml` junto con el módulo. El cambio de consumidor es entonces un parámetro que un admin edita
+(`PUT /api/config` con `{"expected_version": <versión actual>, "changes": {"notifications.consumer": "slack"}}`, o la
+pantalla de configuración); los eventos pendientes se entregan sin perderse y volver a `log` es repetir el cambio.
+Hasta entonces el único consumidor disponible es `log`.
+
 ## License
 
 Apache-2.0

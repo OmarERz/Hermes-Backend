@@ -4,7 +4,7 @@
 SHELL := /bin/bash
 .SHELLFLAGS := -eu -o pipefail -c
 
-.PHONY: up compose-secrets help openapi verify lint typecheck boundaries test coverage semgrep secrets audit verify-full schemathesis adversarial dynamic zap bruno ci-lint seed events emulator-token itop-up itop-install itop-seed itop-token itop-down review
+.PHONY: up demo backup compose-secrets help openapi verify lint typecheck boundaries test coverage semgrep secrets audit verify-full schemathesis adversarial dynamic zap bruno ci-lint seed events emulator-token itop-up itop-install itop-seed itop-token itop-down review
 
 help: ## List the available targets
 	@grep -E '^[a-z-]+:.*## ' $(MAKEFILE_LIST) | awk 'BEGIN {FS = ":.*## "}; {printf "  %-12s %s\n", $$1, $$2}'
@@ -167,3 +167,11 @@ compose-secrets: ## Write the Docker secret files compose.yaml mounts (from your
 
 up: compose-secrets ## Start the local stack: write the Docker secret files, then docker compose up --build -d
 	docker compose up --build -d --wait
+
+demo: ## Load the demo data and run one full cycle (no network, no tokens); the stack must be up
+	docker compose --profile demo run --rm --build demo
+
+backup: ## Dump the database to backups/hermes-<date>.dump (pg_dump custom format); the stack must be up
+	@mkdir -p backups
+	docker compose exec -T db pg_dump -U hermes -d hermes -Fc > "backups/hermes-$$(date +%Y%m%d-%H%M%S).dump"
+	@ls -1t backups | head -1

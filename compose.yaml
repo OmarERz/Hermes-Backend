@@ -61,7 +61,7 @@ x-backend: &backend
     - abusech_auth_key
     - ransomwarelive_api_key
   depends_on:
-    migrate:
+    bootstrap:
       condition: service_completed_successfully
     auth-emulator:
       condition: service_healthy
@@ -144,6 +144,39 @@ services:
       # One-shot job: dependants wait for successful completion; healthy while it runs.
       test: ["CMD", "python", "-c", "pass"]
       interval: 10s
+    restart: "no"
+
+  bootstrap:
+    # One-shot after the migrations (F-01 step 2): factory values and default sources, only what is missing, so a
+    # restart changes nothing. Runs as migrator, who owns the catalogs.
+    <<: *hardening
+    build: .
+    command: ["python", "-m", "core.devtools.admin", "bootstrap"]
+    environment:
+      MIGRATION_DATABASE_URL: postgresql://migrator@db:5432/hermes
+    secrets: [migrator_db_password]
+    depends_on:
+      migrate:
+        condition: service_completed_successfully
+    healthcheck:
+      # One-shot job: dependants wait for successful completion; healthy while it runs.
+      test: ["CMD", "python", "-c", "pass"]
+      interval: 10s
+    restart: "no"
+
+  demo:
+    # `make demo`: loads the demo inventory, synthetic news and one full cycle (scan, correlation, scoring, tickets
+    # in the outbox, notification events). It never calls an LLM or iTop. Only with `--profile demo`.
+    <<: *hardening
+    build: .
+    profiles: [demo]
+    command: ["python", "-m", "core.devtools.demo"]
+    environment:
+      MIGRATION_DATABASE_URL: postgresql://migrator@db:5432/hermes
+    secrets: [migrator_db_password]
+    depends_on:
+      bootstrap:
+        condition: service_completed_successfully
     restart: "no"
 
   api:
