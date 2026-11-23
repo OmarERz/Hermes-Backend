@@ -112,6 +112,39 @@ a `compose.yaml` junto con el módulo. El cambio de consumidor es entonces un pa
 pantalla de configuración); los eventos pendientes se entregan sin perderse y volver a `log` es repetir el cambio.
 Hasta entonces el único consumidor disponible es `log`.
 
+### 7. Proxy inverso: límites por IP y tamaño de petición
+
+La API no limita la frecuencia de peticiones por sí misma: en producción pon un proxy inverso (nginx o Caddy) delante,
+con TLS, un límite de peticiones por IP y un tamaño máximo de petición (la API rechaza cuerpos de más de 1 MiB con
+413, pero conviene cortarlos antes). Publica solo el proxy y deja el puerto 8000 de la API en `127.0.0.1`, como ya lo
+hace `compose.yaml`. Ejemplo mínimo con nginx (ajusta el dominio, los certificados y los límites a tu uso):
+
+```nginx
+limit_req_zone $binary_remote_addr zone=hermes_api:10m rate=10r/s;
+
+server {
+    listen 443 ssl;
+    server_name hermes.ejemplo.local;
+    ssl_certificate     /etc/nginx/tls/hermes.crt;
+    ssl_certificate_key /etc/nginx/tls/hermes.key;
+
+    client_max_body_size 1m;
+
+    location /api/ {
+        limit_req zone=hermes_api burst=20 nodelay;
+        limit_req_status 429;
+        proxy_pass http://127.0.0.1:8000;
+        proxy_set_header Host $host;
+        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+        proxy_set_header X-Forwarded-Proto $scheme;
+        proxy_buffering off;  # el progreso del escaneo llega por eventos del servidor (SSE)
+    }
+}
+```
+
+Con Caddy, `request_body { max_size 1MB }` y un módulo de límite de frecuencia (p. ej. `caddy-ratelimit`) cumplen lo
+mismo.
+
 ## License
 
 Apache-2.0
