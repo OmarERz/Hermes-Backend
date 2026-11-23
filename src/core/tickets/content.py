@@ -22,7 +22,6 @@ CRITICALITY_ES: Final[dict[str, str]] = {"high": "alta", "medium": "media", "low
 LEVEL_ES: Final[dict[str, str]] = {"critical": "Crítica", "high": "Alta", "medium": "Media", "low": "Baja"}
 # iTop's UserRequest impact codes ⚠️ (P-011): 1 department, 2 service.
 IMPACT_CODES: Final[dict[str, str]] = {"department": "1", "service": "2"}
-OWNER_ROLE: Final = "Dueño del activo"  # ⚠️ role field of lnkContactToTicket (P-011)
 
 
 @dataclass(frozen=True)

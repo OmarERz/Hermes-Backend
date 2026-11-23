@@ -1,4 +1,4 @@
-"""Per-app sample stores: created items stay retrievable until the real services and tables replace them."""
+"""Per-app read sources the routes depend on (overridable in tests): the metrics dashboard from the database."""
 
 from __future__ import annotations
 
@@ -9,20 +9,9 @@ from typing import Annotated
 from fastapi import Depends, Request
 from sqlalchemy.orm import Session, sessionmaker
 
-from api.routes.models import PeerCompany, Source
 from core.metrics.dashboard import Dashboard, build_dashboard
 
 DashboardSource = Callable[[datetime], Dashboard]
-
-
-def get_peers(request: Request) -> list[PeerCompany]:
-    peers: list[PeerCompany] = request.app.state.peers
-    return peers
-
-
-def get_sources(request: Request) -> list[Source]:
-    sources: list[Source] = request.app.state.sources
-    return sources
 
 
 def get_dashboard_source(request: Request) -> DashboardSource:
@@ -36,6 +25,4 @@ def get_dashboard_source(request: Request) -> DashboardSource:
     return read
 
 
-PeerStore = Annotated[list[PeerCompany], Depends(get_peers)]
-SourceStore = Annotated[list[Source], Depends(get_sources)]
 MetricsSource = Annotated[DashboardSource, Depends(get_dashboard_source)]
