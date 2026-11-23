@@ -68,17 +68,6 @@ Para la pila local, `API_PORT`, `DB_PORT` y `AUTH_EMULATOR_PORT` cambian los pue
 `COMPOSE_SECRETS_DIR` cambia dónde se escriben los archivos de secretos y `MIGRATION_DATABASE_URL` es la conexión del
 rol `migrator` para `make seed` fuera de Compose (ver `.env.example`).
 
-**Usuario de iTop para Hermes.** Instala en tu iTop la extensión `docker/itop/extensions/hermes-ci-attributes` (los
-atributos de CI de D-037 y el perfil «Hermes Backend») y crea un usuario de token (`UserToken`) con los perfiles «REST
-Services User» y «Hermes Backend»; su token va en `ITOP_TOKEN`. El perfil da lo mínimo: lectura del CMDB (`*`, que
-iTop limita a las clases de negocio), escritura de `UserRequest` y de los vínculos del ticket (grupo `Ticketing`) con
-los estímulos de su ciclo de vida, y **solo lectura** del historial de cambios (grupo `History`: `CMDBChange` y
-`CMDBChangeOp`). Sin esa lectura, la sincronización de tickets no sabe quién cambió la urgencia y se queda con la que
-guardó Hermes (D-007). Si usas otro perfil, dale al menos esas mismas lecturas, incluida la del grupo `History`.
-iTop no puede limitar esa lectura a los tickets: el token puede leer el historial de **todas** las clases con
-seguimiento, también el de usuarios y perfiles y los valores anteriores de atributos cifrados. Es un riesgo aceptado
-(no hay un permiso más estrecho); guarda `ITOP_TOKEN` como cualquier secreto y rótalo si se filtra.
-
 El primer administrador se asigna con el rol (*custom claim*) de Firebase; con el emulador local,
 `make emulator-token ROLE=admin` imprime un token de prueba. Después, un admin cambia roles con
 `PUT /api/admin/users/{uid}/role`.

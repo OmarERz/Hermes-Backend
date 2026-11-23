@@ -56,7 +56,7 @@
   </classes>
   <user_rights>
     <profiles>
-      <!-- Least privilege for the backend (C16): read the CMDB and the change history, write only tickets and their links. -->
+      <!-- Least privilege for the backend (C16): read everything, write only tickets and their links. -->
       <profile id="100" _delta="define">
         <name>Hermes Backend</name>
         <description>Reads the CMDB and creates and assigns the security tickets of Hermes</description>
@@ -74,15 +74,6 @@
               <action id="stimulus:ev_reassign">allow</action>
               <action id="stimulus:ev_resolve">allow</action>
               <action id="stimulus:ev_pending">allow</action>
-            </actions>
-          </group>
-          <!-- Change history (iTop's group History: CMDBChange, CMDBChangeOp). Those classes are grant_by_profile and
-               iTop keeps '*' for bizmodel classes, so they need their own read grant: TicketStateSync reads who changed
-               a ticket's urgency to tell our changes from a person's (D-007). Read only: the history is never written. -->
-          <group id="History">
-            <actions>
-              <action id="action:read">allow</action>
-              <action id="action:bulk read">allow</action>
             </actions>
           </group>
           <group id="*">
