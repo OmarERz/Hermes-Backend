@@ -34,6 +34,8 @@ jobs:
         run: make lint typecheck boundaries
       - name: Semgrep
         run: make semgrep
+      - name: KICS (compose.yaml)
+        run: make kics
       - name: Pick the Gitleaks base ref
         env:
           EVENT_NAME: ${{ github.event_name }}

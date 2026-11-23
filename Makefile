@@ -4,12 +4,12 @@
 SHELL := /bin/bash
 .SHELLFLAGS := -eu -o pipefail -c
 
-.PHONY: up demo backup compose-secrets help openapi verify lint typecheck boundaries test coverage semgrep secrets audit verify-full schemathesis adversarial dynamic zap bruno ci-lint seed events emulator-token itop-up itop-install itop-seed itop-token itop-down review
+.PHONY: up demo backup compose-secrets help openapi verify lint typecheck boundaries test coverage semgrep kics secrets audit verify-full schemathesis adversarial dynamic zap bruno ci-lint seed events emulator-token itop-up itop-install itop-seed itop-token itop-down review
 
 help: ## List the available targets
 	@grep -E '^[a-z-]+:.*## ' $(MAKEFILE_LIST) | awk 'BEGIN {FS = ":.*## "}; {printf "  %-12s %s\n", $$1, $$2}'
 
-verify: lint typecheck boundaries test coverage semgrep secrets audit ## Run the quality gate (same command locally and in CI)
+verify: lint typecheck boundaries test coverage semgrep kics secrets audit ## Run the quality gate (same command locally and in CI)
 
 lint: ## Formatting and lint (ruff)
 	uv run --locked ruff format --check .
@@ -33,7 +33,10 @@ coverage: test ## Coverage gate: 80% global, 95% core (runs the tests first)
 
 # Semgrep CE in Docker (docs/14 §3.2). Registry packs: python, owasp-top-ten, secrets, fastapi.
 # Mounted read-only; --no-git-ignore keeps it working in git worktrees (the .git file points outside the mount).
-SEMGREP_IMAGE ?= semgrep/semgrep:latest
+# Scanner images pinned by digest like the others (F12.3): a scanner that changes under us cannot pass or fail a build
+# for reasons outside the repository. The registry rule packs (p/...) still come fresh on every run.
+SEMGREP_IMAGE ?= semgrep/semgrep:1.185.0@sha256:67518c174185a2043fdbed16c70631b79209499b3671178e7194379b48295a0d
+KICS_IMAGE ?= checkmarx/kics:v2.2.1@sha256:49ccc54b6ae7f5d5fc95e96f8f95c18c57f3bba047ab611a03d80792bdff6757
 GITLEAKS_IMAGE ?= ghcr.io/gitleaks/gitleaks:v8.30.1@sha256:c00b6bd0aeb3071cbcb79009cb16a60dd9e0a7c60e2be9ab65d25e6bc8abbb7f
 
 # Only files git would version (tracked and untracked, minus ignored): local-only material stays out.
@@ -44,6 +47,10 @@ semgrep: ## Semgrep CE (Docker): registry packs + .semgrep/ project rules, fails
 	  --config p/python --config p/owasp-top-ten --config p/secrets --config p/fastapi \
 	  --config /src/.semgrep/ --metrics=off --no-git-ignore \
 	  --error --severity WARNING --severity ERROR --
+
+kics: ## KICS (Docker, pinned) on compose.yaml: fails on HIGH and MEDIUM findings (Trivy does not read Compose files)
+	docker run --rm -v "$(CURDIR)/compose.yaml:/scan/compose.yaml:ro" $(KICS_IMAGE) scan -p /scan/compose.yaml \
+	  --type DockerCompose --fail-on high,medium --disable-secrets --no-progress --ci
 
 # Working tree: tracked and untracked files minus ignored ones, streamed as a tar into the container, so
 # caches and virtualenvs are not scanned and no temp dir is needed.
