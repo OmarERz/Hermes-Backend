@@ -3,6 +3,7 @@ nightly recalculation. Built from the configuration; what is not configured is l
 
 from __future__ import annotations
 
+import importlib.util
 import logging
 from collections.abc import Callable
 from dataclasses import dataclass
@@ -20,12 +21,16 @@ from core.pipeline.wiring import (
     engine_dismissal_package,
     engine_evaluate,
     engine_recalculate,
+    inventory_refresh,
     news_step,
+    refresh_vulndata,
     scan_step,
 )
-from core.scan.engine import ScanAlreadyRunningError, next_queued_scan
+from core.scan.engine import ScanAlreadyRunningError, fail_stale_scans, next_queued_scan
 from core.tickets.content import ItopIdentity
 from core.tickets.lifecycle import TicketLifecycle
+from core.vulndata.http import JsonSource
+from core.vulndata.nvd import nvd_client
 
 if TYPE_CHECKING:
     from workers.jobs import PeriodicJob
@@ -35,16 +40,21 @@ log = logging.getLogger("workers.pipeline")
 NEWS_SECONDS = 3600.0  # D-010: news every hour
 SCAN_REQUEST_SECONDS = 10.0  # POST /api/scans is picked up within seconds
 NIGHTLY_RECALC_SECONDS = 24 * 3600.0  # F-17
+VULNDATA_SECONDS = 24 * 3600.0  # ESC-09: NVD recent publications, KEV and EPSS once a day (and at start)
+INVENTORY_SECONDS = 6 * 3600.0  # ARQ-03
 
 
 @dataclass
 class QueuedScans:
-    """Runs the oldest scan request (`POST /api/scans`) on its own run row; one per tick."""
+    """Runs the oldest scan request (`POST /api/scans`) on its own run row; one per tick. A scan left `running` by a
+    crashed worker is closed first (it would block every later scan, ARQ-04)."""
 
     pipeline: Pipeline
     session_factory: sessionmaker[Session]
 
     def __call__(self) -> bool:
+        with self.session_factory() as session, session.begin():
+            fail_stale_scans(session)
         with self.session_factory() as session:
             run_id = next_queued_scan(session)
         if run_id is None:
@@ -55,6 +65,14 @@ class QueuedScans:
             log.info("scan request %s waits: a scan is already running", run_id)
             return False
         return True
+
+
+def _embeddings() -> bool:
+    """News deduplication needs the local embeddings model (ING-07, optional `embeddings` extra)."""
+    if importlib.util.find_spec("sentence_transformers") is None:
+        log.error("sentence-transformers is not installed (extra `embeddings`): the news cycle is off")
+        return False
+    return True
 
 
 def _llm(settings: Settings, role: str) -> LlmClient | None:
@@ -76,7 +94,8 @@ def build_pipeline(settings: Settings, session_factory: sessionmaker[Session]) -
     reader = reader_from_settings(settings) if settings.itop_url and settings.itop_token else None
     tickets = _tickets(settings)
     steps = Steps(
-        news=news_step(Fetcher(), SentenceTransformerEmbedder(), _llm(settings, "analysts")),
+        news=news_step(Fetcher(), SentenceTransformerEmbedder(), _llm(settings, "analysts")) if _embeddings() else None,
+        refresh=refresh_vulndata(nvd_client(settings.nvd_api_key), JsonSource()),
         scan=scan_step(session_factory, reader),
         evaluate=engine_evaluate,
         recalculate=engine_recalculate(tickets),
@@ -97,7 +116,16 @@ def pipeline_jobs(
         job("news_cycle", NEWS_SECONDS, pipeline.news_cycle),
         job("scan_requests", SCAN_REQUEST_SECONDS, QueuedScans(pipeline, session_factory)),
         job("nightly_recalculation", NIGHTLY_RECALC_SECONDS, pipeline.nightly_cycle),
+        job("vulndata_refresh", VULNDATA_SECONDS, pipeline.refresh_cycle),
     ]
     if settings.scan_interval_hours:
         jobs.append(job("scheduled_scan", settings.scan_interval_hours * 3600.0, pipeline.scan_cycle))
+    if settings.itop_url is not None and settings.itop_token is not None:
+        jobs.append(
+            job(
+                "inventory_refresh",
+                INVENTORY_SECONDS,
+                inventory_refresh(session_factory, reader_from_settings(settings)),
+            )
+        )
     return jobs

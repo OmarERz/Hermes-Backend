@@ -82,6 +82,7 @@ PIPELINE = [
     ("news_cycle", NEWS_SECONDS, "pipeline"),
     ("scan_requests", SCAN_REQUEST_SECONDS, "pipeline"),
     ("nightly_recalculation", NIGHTLY_RECALC_SECONDS, "pipeline"),
+    ("vulndata_refresh", 24 * 3600.0, "pipeline"),
 ]
 
 
@@ -100,6 +101,7 @@ def test_with_itop_the_outbox_and_the_sync_run() -> None:
         ("notification_dispatch", DISPATCH_SECONDS),
         ("nightly_metrics", NIGHTLY_SECONDS),
         *[(name, interval) for name, interval, _ in PIPELINE],
+        ("inventory_refresh", 6 * 3600.0),
         ("itop_outbox", ITOP_OUTBOX_SECONDS),
         ("ticket_sync", TICKET_SYNC_SECONDS),
     ]

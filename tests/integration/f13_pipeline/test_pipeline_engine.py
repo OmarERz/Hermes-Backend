@@ -6,7 +6,7 @@ import uuid
 
 import pytest
 from pipeline_support import NOW, judge_caller
-from sqlalchemy import select
+from sqlalchemy import func, select
 from sqlalchemy.orm import Session, sessionmaker
 
 from core.db import models as m
@@ -75,10 +75,14 @@ def test_a_scan_cycle_scores_with_the_judge_and_opens_tickets(factory: sessionma
         )
         assert {e.event_type for e in events} == {"new_ticket"}
 
-    # the same scan again changes nothing: no new assessment and no second judge call
+    # the same scan again: no new assessment and no second judge call; the standing one reaches the ticket rules
+    with factory() as session:
+        before = session.scalar(select(func.count()).select_from(m.Assessment))
     report = Pipeline(factory, steps, clock=lambda: NOW).scan_cycle()
-    assert report.assessments == 0
+    assert (report.assessments, report.failures) == (1, 0)
     double.assert_calls(1)
+    with factory() as session:
+        assert session.scalar(select(func.count()).select_from(m.Assessment)) == before
 
 
 def test_a_fully_fixed_group_still_reaches_the_ticket_lifecycle(factory: sessionmaker[Session]) -> None:

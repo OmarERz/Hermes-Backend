@@ -21,6 +21,7 @@ from core.db import models as m
 from core.ingestion.embeddings import EmbedFn
 from core.ingestion.fetcher import Fetcher
 from core.ingestion.pipeline import PipelineOptions, run_news_pipeline
+from core.inventory.sync import sync_from_itop
 from core.itop.client import ItopReader
 from core.llm import LlmClient
 from core.pipeline.cycles import NewsCycleOutput, ScanCycleOutput, TicketApplier
@@ -35,6 +36,10 @@ from core.scoring.evaluate import (
     recalculate_open_groups,
 )
 from core.scoring.formula_repo import load_active_formula
+from core.vulndata.epss import refresh_epss
+from core.vulndata.http import JsonSource
+from core.vulndata.kev import fetch_catalogue, load_kev
+from core.vulndata.nvd import NvdClient, load_nvd
 
 
 def news_step(fetcher: Fetcher, embed: EmbedFn, analyst: LlmClient | None) -> Callable[[Session, str], NewsCycleOutput]:
@@ -71,19 +76,25 @@ def engine_evaluate(
 ) -> uuid.UUID | None:
     """F4.3 `evaluate_group` with the pipeline's judge; the assessment to apply tickets with, if any.
 
-    A group with no current finding left (every CI fixed) is not assessed again: its latest assessment is returned
-    so the ticket lifecycle still reports the fixes (comment and `fixed` event, TIC-05).
+    A group with no current finding left (every CI fixed), or whose score did not change, is not assessed again: its
+    latest assessment is returned so the ticket lifecycle still applies CI changes and fixes (TIC-05).
     """
     verdicts = (lambda package: JudgeVerdict(*astuple(judge(package)))) if judge is not None else None
     try:
-        return evaluate_group(session, group_id, run_id, trigger, EvaluationOptions(judge=verdicts)).assessment_id
+        evaluation = evaluate_group(session, group_id, run_id, trigger, EvaluationOptions(judge=verdicts))
     except GroupNotActiveError:
-        return session.scalar(
-            select(m.Assessment.id)
-            .where(m.Assessment.finding_group_id == group_id)
-            .order_by(m.Assessment.assessed_at.desc(), m.Assessment.id.desc())
-            .limit(1)
-        )
+        return _latest_assessment(session, group_id)
+    # Unchanged scores still go through the ticket rules (new CIs, fixes) with the assessment that stands.
+    return evaluation.assessment_id or _latest_assessment(session, group_id)
+
+
+def _latest_assessment(session: Session, group_id: uuid.UUID) -> uuid.UUID | None:
+    return session.scalar(
+        select(m.Assessment.id)
+        .where(m.Assessment.finding_group_id == group_id)
+        .order_by(m.Assessment.assessed_at.desc(), m.Assessment.id.desc())
+        .limit(1)
+    )
 
 
 def engine_recalculate(tickets: TicketApplier | None) -> Callable[[Session], object]:
@@ -99,3 +110,25 @@ def engine_dismissal_package(session: Session, story_id: uuid.UUID) -> dict[str,
     """The mode 2 package of a dismissal candidate, scored with the active formula (F4.3 `EngineScorer`)."""
     _, formula = load_active_formula(session)
     return build_dismissal_package(session, story_id, EngineScorer(formula))
+
+
+def refresh_vulndata(nvd: NvdClient, source: JsonSource) -> Callable[[Session], object]:
+    """ESC-09: the recent NVD publications (recency window), the KEV catalogue and today's EPSS scores."""
+
+    def run(session: Session) -> object:
+        nvd_result = load_nvd(session, nvd)
+        kev_result = load_kev(session, fetch_catalogue(source))
+        epss_result = refresh_epss(session, source)
+        return nvd_result, kev_result, epss_result
+
+    return run
+
+
+def inventory_refresh(factory: sessionmaker[Session], reader: ItopReader) -> Callable[[], object]:
+    """ARQ-03: the iTop cache every six hours (the scan refreshes it too); a failure leaves the cache as it was."""
+
+    def run() -> object:
+        with factory() as session, session.begin():
+            return sync_from_itop(session, reader)
+
+    return run

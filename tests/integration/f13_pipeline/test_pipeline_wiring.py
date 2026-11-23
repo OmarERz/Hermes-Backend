@@ -13,7 +13,7 @@ from core.analysts.news import NewsResult
 from core.db import models as m
 from core.ingestion.fetcher import Fetcher
 from core.ingestion.pipeline import PipelineResult
-from core.pipeline.wiring import news_step, scan_step
+from core.pipeline.wiring import inventory_refresh, news_step, refresh_vulndata, scan_step
 from core.scan.engine import ScanResult
 from doubles.web import FakeWeb
 
@@ -64,3 +64,21 @@ def test_the_scan_step_runs_on_the_queued_run(monkeypatch: pytest.MonkeyPatch, f
     monkeypatch.setattr("core.pipeline.wiring.run_scan", scan)
     assert scan_step(factory, None)(queued, "manual").run_id == queued
     assert calls == [(queued, "manual", None)]
+
+
+def test_the_vulnerability_refresh_loads_nvd_kev_and_epss(monkeypatch: pytest.MonkeyPatch) -> None:
+    calls: list[str] = []
+    monkeypatch.setattr("core.pipeline.wiring.load_nvd", lambda _s, _c: calls.append("nvd") or "n")
+    monkeypatch.setattr("core.pipeline.wiring.fetch_catalogue", lambda _src: calls.append("kev-fetch") or [])
+    monkeypatch.setattr("core.pipeline.wiring.load_kev", lambda _s, _e: calls.append("kev") or "k")
+    monkeypatch.setattr("core.pipeline.wiring.refresh_epss", lambda _s, _src: calls.append("epss") or "e")
+    assert refresh_vulndata(object(), object())(object()) == ("n", "k", "e")
+    assert calls == ["nvd", "kev-fetch", "kev", "epss"]
+
+
+def test_the_inventory_refresh_syncs_from_itop(factory: sessionmaker[Session], monkeypatch: pytest.MonkeyPatch) -> None:
+    seen: list[Any] = []
+    monkeypatch.setattr("core.pipeline.wiring.sync_from_itop", lambda _s, reader: seen.append(reader) or "synced")
+    reader = object()
+    assert inventory_refresh(factory, reader)() == "synced"
+    assert seen == [reader]

@@ -23,8 +23,16 @@ SETTINGS = Settings(
 )
 
 
+def test_without_the_embeddings_extra_the_news_cycle_is_off(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr("workers.pipeline_jobs.importlib.util.find_spec", lambda _name: None)
+    assert build_pipeline(SETTINGS, MagicMock()).steps.news is None
+    monkeypatch.setattr("workers.pipeline_jobs.importlib.util.find_spec", lambda _name: object())
+    assert build_pipeline(SETTINGS, MagicMock()).steps.news is not None
+
+
 def test_without_keys_there_is_no_judge_nor_tickets_but_scoring_runs() -> None:
     steps = build_pipeline(SETTINGS, MagicMock()).steps
+    assert steps.refresh is not None
     assert (steps.judge_caller, steps.tickets) == (None, None)
     assert steps.evaluate is engine_evaluate
     assert steps.recalculate is not None
@@ -47,6 +55,13 @@ def test_with_keys_and_identity_the_judge_and_tickets_are_wired() -> None:
     assert steps.tickets is not None
 
 
+def test_the_inventory_refresh_needs_itop() -> None:
+    assert "inventory_refresh" not in [job.name for job in pipeline_jobs(SETTINGS, MagicMock(), PeriodicJob)]
+    with_itop = SETTINGS.model_copy(update={"itop_url": "http://localhost:8080", "itop_token": SecretStr("tok")})
+    refresh = [j for j in pipeline_jobs(with_itop, MagicMock(), PeriodicJob) if j.name == "inventory_refresh"]
+    assert [j.interval for j in refresh] == [6 * 3600.0]
+
+
 def test_the_scheduled_scan_is_optional() -> None:
     names = [job.name for job in pipeline_jobs(SETTINGS, MagicMock(), PeriodicJob)]
     assert "scheduled_scan" not in names
@@ -55,7 +70,14 @@ def test_the_scheduled_scan_is_optional() -> None:
     assert [j.interval for j in scheduled] == [6 * 3600.0]
 
 
-def test_queued_scans_run_one_request_per_tick(monkeypatch: pytest.MonkeyPatch) -> None:
+@pytest.fixture(autouse=True)
+def no_stale_scans(monkeypatch: pytest.MonkeyPatch) -> list[object]:
+    closed: list[object] = []
+    monkeypatch.setattr("workers.pipeline_jobs.fail_stale_scans", closed.append)
+    return closed
+
+
+def test_queued_scans_run_one_request_per_tick(monkeypatch: pytest.MonkeyPatch, no_stale_scans: list[object]) -> None:
     pipeline = MagicMock()
     queued = uuid.uuid4()
     waiting = [queued, None]
@@ -64,6 +86,7 @@ def test_queued_scans_run_one_request_per_tick(monkeypatch: pytest.MonkeyPatch) 
     assert job() is True
     pipeline.scan_cycle.assert_called_once_with(queued, "manual")
     assert job() is False
+    assert len(no_stale_scans) == 2  # a crashed scan is closed before each pick
 
 
 def test_a_request_waits_while_another_scan_runs(monkeypatch: pytest.MonkeyPatch) -> None:
