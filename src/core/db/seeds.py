@@ -424,6 +424,15 @@ def _edge_cases(session: Session, product: m.SoftwareProduct, payments: m.Asset,
     session.add(m.SoftwareProduct(id=_id(), itop_name="Software sin mapeo CPE", first_seen_at=NOW))
 
 
+def seed_demo_inventory(session: Session) -> bool:
+    """The `demo` inventory on a database that already has its factory values; False if it is already there."""
+    if session.scalar(select(m.Asset.id).where(m.Asset.itop_ci_id == "CI-1")) is not None:
+        return False
+    _inventory(session, edge=False)
+    session.flush()
+    return True
+
+
 def seed(session: Session, scenario: str) -> None:
     """Load a scenario in the caller's transaction. Refuses a database that already has a formula version."""
     if scenario not in SCENARIOS:
