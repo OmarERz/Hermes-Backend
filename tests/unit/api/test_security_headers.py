@@ -28,6 +28,7 @@ def test_security_headers_on_success_and_errors(path: str, status: int) -> None:
     assert headers["cache-control"] == "no-store"
     assert headers["content-security-policy"] == "default-src 'none'; frame-ancestors 'none'"
     assert "camera=()" in headers["permissions-policy"]
+    assert headers["strict-transport-security"] == "max-age=31536000; includeSubDomains"
 
 
 def test_the_development_docs_keep_a_csp_that_lets_swagger_load() -> None:

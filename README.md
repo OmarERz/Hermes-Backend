@@ -154,6 +154,9 @@ server {
 Con Caddy, `request_body { max_size 1MB }` y un módulo de límite de frecuencia (p. ej. `caddy-ratelimit`) cumplen lo
 mismo.
 
+La API ya envía `Strict-Transport-Security` (un año, con subdominios) y no envía el encabezado `server`; en nginx
+agrega `server_tokens off;` para que el proxy tampoco anuncie su versión.
+
 ## License
 
 Apache-2.0
