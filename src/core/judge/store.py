@@ -4,7 +4,8 @@ Append-only (A-2): a review is assembled in memory and written once, complete, w
 review fell back to the base (L11) gets one `error_queue` entry (PRE-01), retried in the next runs and given up
 (shown as pending in the front) after `QUEUE_RETRIES`; a later successful review resolves it. A review skipped on
 purpose (degradation ladder) is not queued. Package CIs are iTop CI IDs (`asset.itop_ci_id`); an asset UUID is
-accepted too.
+accepted too. A review is always stored, even when a CI it cites left the inventory while the model answered: its
+tokens were paid and count for the daily budget (F6.1 #69).
 """
 
 from __future__ import annotations
@@ -12,7 +13,7 @@ from __future__ import annotations
 import logging
 import uuid
 from collections.abc import Callable, Iterable, Mapping
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from datetime import date, datetime
 from decimal import Decimal
 from typing import Any
@@ -36,6 +37,7 @@ from core.db.models import (
 )
 from core.judge.budget import FALLBACK_PRICE, TURN_ESTIMATE, LedgerDailyBudget, ModelPrice
 from core.judge.catalog import MORE_CRITICAL_ASSET, JudgeSettings, SensitivityProfile, load_reason_catalog
+from core.judge.mitigation import MitigationResult, MitigationStatus
 from core.judge.mode2 import AlertDecision, relation_identity
 from core.judge.session import Failure, JudgeEnvironment, ReviewOutcome, ReviewStatus
 from core.validation.budget import BudgetConfig, spent_on
@@ -59,8 +61,7 @@ _SETTING_KEYS = (
 )
 
 
-class JudgeStoreError(RuntimeError):
-    """The review cannot be stored consistently (e.g. a cited CI is not in the inventory)."""
+MISSING_CI_RULE = "JUE-MIT-04"  # a mitigation step cites a CI that is not (any more) in the inventory
 
 
 @dataclass(frozen=True)
@@ -125,9 +126,16 @@ def save_review(
     status: ReviewStatus | None = None,
     second_review_of: uuid.UUID | None = None,
 ) -> uuid.UUID:
-    """Insert the review with its reasons and accepted mitigation; returns the `llm_review.id`."""
+    """Insert the review with its reasons and accepted mitigation; returns the `llm_review.id`.
+
+    The cited CIs are resolved before anything is inserted (F6.1 #69), so a CI missing from the inventory never rolls
+    the review back: an accepted `more_critical_asset` without its CI keeps no `judge_reason` row (it stays in
+    `calls`), and a mitigation step that cites one discards the whole draft (JUE-MIT-05) with rule JUE-MIT-04."""
     cited = {r.ci_id for r in outcome.reasons if r.ci_id} | {s.ci_id for s in outcome.mitigation.steps if s.ci_id}
     assets = resolve_assets(session, (ci for ci in cited if ci is not None))
+    if any(step.ci_id and step.ci_id not in assets for step in outcome.mitigation.steps):
+        logger.warning("a mitigation step cites a CI that is not in the inventory: the draft is discarded")
+        outcome = replace(outcome, mitigation=MitigationResult(MitigationStatus.DISCARDED, rule=MISSING_CI_RULE))
     review = LlmReview(id=new_id(), **_review_columns(outcome, target, status))
     review.second_review_of_id = second_review_of
     session.add(review)
@@ -218,10 +226,14 @@ def _reason_rows(review_id: uuid.UUID, outcome: ReviewOutcome, assets: Mapping[s
         if record.code == MORE_CRITICAL_ASSET:
             asset_id = assets.get(record.ci_id or "")
             if asset_id is None:
-                if record.status == "accepted":
-                    raise JudgeStoreError("an accepted more_critical_asset cites a CI that is not in the inventory")
-                # judge_reason requires the asset for this reason: the rejected call stays in llm_review.calls
-                logger.info("rejected more_critical_asset without an inventory CI kept only in calls")
+                # judge_reason requires the asset for this reason: the call stays in llm_review.calls. An accepted
+                # one only happens when the CI left the inventory while the model answered; it adjusts no score,
+                # since asset scores exist only for inventory CIs.
+                logger.log(
+                    logging.WARNING if record.status == "accepted" else logging.INFO,
+                    "%s more_critical_asset without an inventory CI kept only in calls",
+                    record.status,
+                )
                 continue
         rows.append(
             JudgeReason(
@@ -244,10 +256,8 @@ def _mitigation_rows(
     review_id: uuid.UUID, outcome: ReviewOutcome, assets: Mapping[str, uuid.UUID]
 ) -> list[MitigationDraftStep]:
     rows: list[MitigationDraftStep] = []
-    for step in outcome.mitigation.steps:
+    for step in outcome.mitigation.steps:  # save_review already discarded a draft that cites a missing CI
         asset_id = assets.get(step.ci_id) if step.ci_id else None
-        if step.ci_id and asset_id is None:
-            raise JudgeStoreError("a mitigation step cites a CI that is not in the inventory")
         rows.append(
             MitigationDraftStep(
                 llm_review_id=review_id,
