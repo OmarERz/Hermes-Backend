@@ -10,7 +10,7 @@ from __future__ import annotations
 import os
 import re
 from pathlib import Path
-from typing import Any, Self
+from typing import Any, Literal, Self
 
 from pydantic import Field, HttpUrl, SecretStr, field_validator, model_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
@@ -18,6 +18,11 @@ from pydantic_settings import BaseSettings, SettingsConfigDict
 DOCKER_SECRETS_DIR = Path("/run/secrets")
 MIN_CURSOR_KEY_LENGTH = 32
 DEFAULT_LLM_BASE_URL = "https://api.deepseek.com/beta"  # strict tool mode (JUE-03) ⚠️ verified in F0.5
+# A Claude Code model alias or name (opus, sonnet, claude-opus-5-5, sonnet[1m]): it reaches the CLI as the value of
+# --model, so it can never start with "-" and be read as another flag (D-084).
+CLAUDE_MODEL_PATTERN = r"^[A-Za-z0-9][A-Za-z0-9._:\[\]-]{0,99}$"
+# Effort levels of `claude --effort` (checked against `claude --help` 2.1.330)
+ClaudeEffort = Literal["low", "medium", "high", "xhigh", "max"]
 
 
 def read_secret(name: str, secrets_dir: Path = DOCKER_SECRETS_DIR) -> str | None:
@@ -130,6 +135,17 @@ class Settings(BaseSettings):
     deepseek_api_key: SecretStr | None = None
     llm_base_url_judge: HttpUrl = HttpUrl(DEFAULT_LLM_BASE_URL)
     llm_base_url_analysts: HttpUrl | None = None
+
+    # LLM provider (D-084): "deepseek" (the OpenAI-compatible API above) or "claude-code" (the Claude Code CLI with the
+    # operator's Claude subscription). claude-code works only for a worker run on the host (make worker-host): the CLI
+    # and its login are not in the images, so a container fails closed (analysts and judge off).
+    llm_provider: Literal["deepseek", "claude-code"] = "deepseek"
+    # Claude Code model of each role (an alias such as opus or sonnet, or a full model name), effort and the timeout
+    # of one CLI call in seconds
+    claude_code_model_judge: str = Field(default="opus", pattern=CLAUDE_MODEL_PATTERN)
+    claude_code_model_analysts: str = Field(default="sonnet", pattern=CLAUDE_MODEL_PATTERN)
+    claude_code_effort: ClaudeEffort = "medium"
+    claude_code_timeout_seconds: int = Field(default=300, ge=30, le=3600)
 
     @field_validator("database_url")
     @classmethod

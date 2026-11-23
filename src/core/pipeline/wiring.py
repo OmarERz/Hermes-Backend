@@ -25,7 +25,7 @@ from core.ingestion.fetcher import Fetcher
 from core.ingestion.pipeline import PipelineOptions, run_news_pipeline
 from core.inventory.sync import sync_from_itop_unlocked_read
 from core.itop.client import ItopReader
-from core.llm import LlmClient
+from core.llm import ToolCaller
 from core.pipeline.cycles import NewsCycleOutput, ScanCycleOutput, TicketApplier
 from core.pipeline.judging import PipelineJudge
 from core.scan.engine import ScanOptions, run_scan
@@ -47,7 +47,9 @@ from core.vulndata.store import store_cve
 log = logging.getLogger(__name__)
 
 
-def news_step(fetcher: Fetcher, embed: EmbedFn, analyst: LlmClient | None) -> Callable[[Session, str], NewsCycleOutput]:
+def news_step(
+    fetcher: Fetcher, embed: EmbedFn, analyst: ToolCaller | None
+) -> Callable[[Session, str], NewsCycleOutput]:
     """F-05 + F-06: ingestion, deduplication, keyword filter, source health, then the analyst on pending stories."""
 
     def run(session: Session, trigger_reason: str) -> NewsCycleOutput:
@@ -243,7 +245,7 @@ def inventory_refresh(factory: sessionmaker[Session], reader: ItopReader) -> Cal
     return run
 
 
-def cve_step(analyst: LlmClient, fetcher: Fetcher) -> Callable[[Session], object]:
+def cve_step(analyst: ToolCaller, fetcher: Fetcher) -> Callable[[Session], object]:
     """F-04 step 8 (F3.3): the CVE analyst on the pending CVEs of active groups, reading vendor advisories only from
     the allowed domains (`ADVISORY_DOMAINS`, default list in `core.analysts.cve`)."""
     options = CveOptions(advisory=web_advisory_provider(fetcher))

@@ -55,6 +55,7 @@ devuelve y los registros las enmascaran.
 | `ITOP_URL`, `ITOP_TOKEN`, `ITOP_SYSTEM_USER`, `ITOP_WEBHOOK_TOKEN` | Leer el CMDB y crear tickets en iTop; sin ellas no corren los trabajos de iTop |
 | `NVD_API_KEY` | Más cuota en NVD y consulta al diccionario CPE (sin llave solo hay candidatos locales). Sin llave, la primera carga de 90 días de NVD al arrancar tarda varios minutos y un escaneo pedido mientras tanto espera en cola |
 | `DEEPSEEK_API_KEY`, `LLM_BASE_URL_JUDGE`, `LLM_BASE_URL_ANALYSTS` | Juez y analistas de IA; **la demo nunca las usa** |
+| `LLM_PROVIDER`, `CLAUDE_CODE_MODEL_JUDGE`, `CLAUDE_CODE_MODEL_ANALYSTS`, `CLAUDE_CODE_EFFORT`, `CLAUDE_CODE_TIMEOUT_SECONDS` | Proveedor del juez y los analistas: `deepseek` (por defecto) o `claude-code`, la CLI de Claude Code con tu suscripción, solo en tu equipo (ver la sección 8) |
 | `ABUSECH_AUTH_KEY`, `RANSOMWARELIVE_API_KEY` | Fuentes de indicadores y víctimas |
 | `FIREBASE_PROJECT_ID`, `FIREBASE_CREDENTIALS_FILE` | Inicio de sesión; con `demo-hermes` solo sirve el emulador de Firebase incluido |
 | `EMBEDDINGS_URL` | Servicio de *embeddings* del ciclo de noticias; por defecto `http://embeddings:8080` dentro de Compose. Vacío apaga el ciclo de noticias |
@@ -184,6 +185,45 @@ llegando a `127.0.0.1:8000`, es la puerta de enlace de la red de Compose del pro
 `docker network inspect hermes_default --format '{{(index .IPAM.Config 0).Gateway}}'`. El proxy de entrada debe **sobrescribir** `X-Forwarded-For` con la dirección que
 ve (`$remote_addr`, como en el ejemplo), no agregarla a la que mande el cliente: si no, el cliente podría escribir su
 propia IP en los logs.
+
+### 8. Pruebas con lotes reales usando Claude (`LLM_PROVIDER=claude-code`)
+
+Por ahora el juez y los analistas pueden usar **Claude con tu suscripción** a través de la CLI de Claude Code en modo no
+interactivo (D-084), en lugar de DeepSeek. La CLI y tu sesión viven en tu equipo, no en las imágenes: con
+`claude-code`, el trabajador de Compose deja apagados el juez y los analistas (lo anota en el registro). Para probar
+con lotes reales, el trabajador corre **en tu equipo**, contra la base de la pila de Compose:
+
+1. Instala Claude Code, inicia sesión con tu cuenta (`claude`, luego `/login`) y comprueba `claude auth status`
+   (`"loggedIn": true`). `claude` debe estar en el `PATH`.
+2. Levanta la pila (`make up`) y, si quieres datos de ejemplo, `make demo`.
+3. `make worker-host`. Detiene el trabajador del contenedor (solo debe correr uno), publica el servicio de
+   *embeddings* en `127.0.0.1:${EMBEDDINGS_PORT:-8081}` (`compose.host.yaml`) y corre `python -m workers` en tu equipo
+   como el rol `app`, con las llaves de `.compose-secrets/`. Lo demás sale de `.env`, como siempre. Si una URL de
+   `.env` solo la resuelven los contenedores (p. ej. `ITOP_URL` con `host.docker.internal`), pásala al llamar:
+   `ITOP_URL=http://127.0.0.1:8080 make worker-host`.
+4. Pide un escaneo (`POST /api/scans`) y sigue el registro: cada llamada deja una línea `claude-code call` con el modelo,
+   la latencia, los tokens y el costo que estima la CLI.
+5. Al terminar, `Ctrl+C` (puede tardar hasta que acabe el trabajo en curso) y `docker compose start workers` para
+   volver al trabajador del contenedor; `make up` devuelve el servicio de *embeddings* a su red interna.
+
+Ajustes (todos opcionales): `CLAUDE_CODE_MODEL_JUDGE` (por defecto `opus`) y `CLAUDE_CODE_MODEL_ANALYSTS` (por defecto
+`sonnet`) aceptan un alias o el nombre completo de un modelo; `CLAUDE_CODE_EFFORT` (`low` … `max`, por defecto
+`medium`) y `CLAUDE_CODE_TIMEOUT_SECONDS` (por defecto 300). Con `LLM_PROVIDER=deepseek make worker-host` el mismo
+trabajador en tu equipo usa DeepSeek.
+
+Qué conviene saber:
+
+- **Cada llamada consume los límites de uso de tu plan.** Un ciclo con muchos CVE o grupos hace muchas llamadas (el
+  juez hace una por turno). Si se alcanza el límite, esas llamadas fallan y el pipeline sigue sin juez (puntuación base)
+  y deja los análisis en la cola de errores, como cuando el proveedor no responde.
+- El costo que reporta la CLI es un equivalente de la API: la suscripción no lo cobra. El presupuesto diario sigue
+  contando los tokens con la tabla de precios configurada, así que sigue limitando cuántas llamadas se hacen al día.
+- La CLI corre sin herramientas, sin servidores MCP, sin tus ajustes ni tu `CLAUDE.md`, sin guardar la sesión y en una
+  carpeta temporal vacía: el modelo solo puede responder. Recibe un entorno mínimo (`PATH`, `HOME`, idioma, proxy):
+  nunca las contraseñas de la base, Firebase, iTop ni DeepSeek, y nunca `ANTHROPIC_API_KEY`, que cobraría a una cuenta
+  de la API en lugar de usar tu suscripción.
+- La salida pasa por las mismas tres capas de validación que con DeepSeek, y las pruebas automáticas nunca llaman a la
+  CLI real.
 
 ## License
 

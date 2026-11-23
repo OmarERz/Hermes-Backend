@@ -79,6 +79,9 @@ x-backend: &backend
     ADVISORY_DOMAINS:
     LLM_BASE_URL_JUDGE: ${LLM_BASE_URL_JUDGE:-}
     LLM_BASE_URL_ANALYSTS: ${LLM_BASE_URL_ANALYSTS:-}
+    # D-084: with claude-code the images have no Claude Code CLI, so the containers turn the analysts and the judge off
+    # (logged) instead of falling back to DeepSeek; blank = deepseek. make worker-host runs the worker on the host.
+    LLM_PROVIDER: ${LLM_PROVIDER:-}
   secrets:
     - source: app_db_password
       target: pgpassword

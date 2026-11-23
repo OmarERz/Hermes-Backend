@@ -20,6 +20,7 @@ SETTINGS = Settings(
     database_url=SecretStr("postgresql://app:pw@db/hermes"),
     firebase_project_id="demo-hermes",
     cursor_signing_key=SecretStr("k" * 40),
+    llm_provider="deepseek",  # a developer may export LLM_PROVIDER=claude-code for make worker-host (D-084)
 )
 
 

@@ -42,7 +42,7 @@ from core.correlation.keys import normalize_name, same_product
 from core.db import models as m
 from core.db.ids import new_id
 from core.ingestion.settings import get_decimal, get_setting
-from core.llm.client import LlmClient
+from core.llm.client import ToolCaller
 from core.llm.tools import ToolDefinition, default_schemas_dir, load_tools
 from core.validation.budget import BudgetConfig, can_start
 from core.validation.budget import spent_on as spent_on_day
@@ -146,7 +146,7 @@ def primary_event_type(event_types: list[str]) -> str:
 
 
 def analyze_story(
-    session: Session, client: LlmClient, story_id: uuid.UUID, options: NewsOptions | None = None
+    session: Session, client: ToolCaller, story_id: uuid.UUID, options: NewsOptions | None = None
 ) -> NewsResult:
     """Analyze one story. Commits twice: the read transaction before the model call (with anything the caller's
     session already held) and the write transaction after it. Idempotent: a story with an analysis is not analyzed
@@ -425,7 +425,7 @@ def pending_stories(session: Session, limit: int = 50) -> list[uuid.UUID]:
 
 
 def analyze_pending(
-    session: Session, client: LlmClient, options: NewsOptions | None = None, limit: int = 50
+    session: Session, client: ToolCaller, options: NewsOptions | None = None, limit: int = 50
 ) -> list[NewsResult]:
     """Analyze the pending stories one by one; a failing story never stops the next one. Commits per story (each
     story is a read transaction and a write transaction, with the model call between them)."""

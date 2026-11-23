@@ -4,7 +4,7 @@
 SHELL := /bin/bash
 .SHELLFLAGS := -eu -o pipefail -c
 
-.PHONY: up demo backup compose-secrets help openapi verify lint typecheck boundaries test coverage semgrep kics secrets audit verify-full schemathesis adversarial dynamic zap bruno ci-lint seed events emulator-token itop-up itop-install itop-seed itop-token itop-down review
+.PHONY: up demo worker-host backup compose-secrets help openapi verify lint typecheck boundaries test coverage semgrep kics secrets audit verify-full schemathesis adversarial dynamic zap bruno ci-lint seed events emulator-token itop-up itop-install itop-seed itop-token itop-down review
 
 help: ## List the available targets
 	@grep -E '^[a-z-]+:.*## ' $(MAKEFILE_LIST) | awk 'BEGIN {FS = ":.*## "}; {printf "  %-12s %s\n", $$1, $$2}'
@@ -183,6 +183,24 @@ up: compose-secrets ## Start the local stack: write the Docker secret files, the
 
 demo: ## Load the demo data and run one full cycle (no network, no tokens); the stack must be up
 	docker compose --profile demo run --rm --build demo
+
+# Worker on the host (D-084): the Claude Code CLI and its subscription login are on this machine, not in the images.
+# Stops the containerized worker (one worker at a time; `docker compose start workers` brings it back), publishes the
+# embeddings service on 127.0.0.1 (compose.host.yaml) and runs `python -m workers` here as the app role with the
+# compose secret files; every other setting comes from the env file or the environment, as usual (FIREBASE_PROJECT_ID
+# falls back to demo-hermes like in compose.yaml).
+HOST_COMPOSE ?= docker compose -f compose.yaml -f compose.host.yaml
+
+worker-host: ## Run the worker on this machine with the Claude Code CLI (LLM_PROVIDER=claude-code); stack must be up
+	@command -v claude >/dev/null || echo "WARNING: claude is not on PATH: the analysts and the judge stay off" >&2
+	$(HOST_COMPOSE) up -d --wait embeddings
+	docker compose stop workers
+	@dir="$${COMPOSE_SECRETS_DIR:-.compose-secrets}"; \
+	grep -qs '^FIREBASE_PROJECT_ID=.' .env || export FIREBASE_PROJECT_ID="$${FIREBASE_PROJECT_ID:-demo-hermes}"; \
+	DATABASE_URL="postgresql://app@$$(docker compose port db 5432)/hermes" \
+	PGPASSWORD="$$(cat "$$dir/app_db_password")" CURSOR_SIGNING_KEY="$$(cat "$$dir/cursor_signing_key")" \
+	EMBEDDINGS_URL="http://$$($(HOST_COMPOSE) port embeddings 8080)" LLM_PROVIDER="$${LLM_PROVIDER:-claude-code}" \
+	uv run --locked python -m workers
 
 backup: ## Dump the database to backups/hermes-<date>.dump (pg_dump custom format); the stack must be up
 	@mkdir -p backups
