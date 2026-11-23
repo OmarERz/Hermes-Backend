@@ -8,6 +8,7 @@ valid empty key (prototype conflict C5).
 from __future__ import annotations
 
 import os
+import re
 from pathlib import Path
 from typing import Any, Self
 
@@ -99,6 +100,23 @@ class Settings(BaseSettings):
 
     # Swagger UI, ReDoc and /openapi.json: off unless explicitly enabled for development (API-01, docs/14 §10.4)
     api_docs_enabled: bool = False
+
+    # Browser origins allowed to call the API cross-origin (the React front on another origin), comma-separated
+    # exact origins such as "https://hermes-front.example.com". Empty (default) = same origin only, e.g. front and
+    # API behind one reverse proxy. A wildcard is refused: the API carries bearer tokens.
+    cors_allowed_origins: str = ""
+
+    @property
+    def cors_origins(self) -> list[str]:
+        return [origin.strip().rstrip("/") for origin in self.cors_allowed_origins.split(",") if origin.strip()]
+
+    @field_validator("cors_allowed_origins")
+    @classmethod
+    def _cors_origins_are_exact(cls, value: str) -> str:
+        for origin in (o.strip().rstrip("/") for o in value.split(",") if o.strip()):
+            if not re.fullmatch(r"https?://[A-Za-z0-9.-]+(:[0-9]{1,5})?", origin):
+                raise ValueError("CORS_ALLOWED_ORIGINS must list exact origins like https://front.example.com")
+        return value
 
     # LLM endpoints (OpenAI-compatible API, D-029)
     deepseek_api_key: SecretStr | None = None

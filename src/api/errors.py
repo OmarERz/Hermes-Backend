@@ -144,3 +144,36 @@ ERROR_RESPONSES: dict[int | str, dict[str, Any]] = {
     status: {"model": ErrorResponse, "description": message} for status, (_code, message) in _STATUS_CODES.items()
 }
 ERROR_RESPONSES[500] = {"model": ErrorResponse, "description": _GENERIC_SERVER[1]}
+
+
+class UnhandledErrorMiddleware:
+    """Turn an unhandled exception into the 500 envelope *inside* the user middleware stack.
+
+    FastAPI's own catch-all runs in ServerErrorMiddleware, outside every middleware added with `add_middleware`, so
+    a 500 would skip CORS and a browser on an allowed origin would only see a network error. Added before CORS,
+    this keeps the 500 envelope (API-02) visible to the front. Once a response has started it re-raises.
+    """
+
+    def __init__(self, app: Any) -> None:
+        self.app = app
+
+    async def __call__(self, scope: Any, receive: Any, send: Any) -> None:
+        if scope["type"] != "http":
+            await self.app(scope, receive, send)
+            return
+        started = False
+
+        async def tracking_send(message: Any) -> None:
+            nonlocal started
+            if message["type"] == "http.response.start":
+                started = True
+            await send(message)
+
+        try:
+            await self.app(scope, receive, tracking_send)
+        except Exception:
+            if started:
+                raise
+            logger.exception("unhandled error on %s %s", scope.get("method"), scope.get("path"))
+            code, message = _GENERIC_SERVER
+            await error_response(500, code, message)(scope, receive, send)
