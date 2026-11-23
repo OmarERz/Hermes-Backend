@@ -601,3 +601,35 @@ def test_formula_values_with_more_places_than_the_database_keeps_are_refused(cli
     response = put(client, 1, **{"weights.S": "0.25004", "weights.P": "0.30004", "weights.T": "0.19992"})
     assert response.status_code == 422
     assert "too_many_decimals" in {d["issue"] for d in response.json()["error"]["details"]}
+
+
+def test_every_formula_save_or_restore_queues_its_own_recalculation_run(client: TestClient, engine: Engine) -> None:
+    add_user(engine, "u1", "admin")
+    as_role(client, Role.ADMIN)
+    queued = "SELECT kind, status, trigger_reason FROM run WHERE kind = 'recalculation' AND status = 'queued'"
+    assert put(client, 1, double_review_threshold="16").json()["version"] == 2  # no scoring effect
+    assert rows(engine, queued) == []
+    values = client.get("/api/config").json()["values"]
+    shifted = {
+        "weights.S": str(Decimal(values["weights.S"]) - Decimal("0.05")),
+        "weights.D": str(Decimal(values["weights.D"]) + Decimal("0.05")),
+    }
+    assert put(client, 2, **shifted).json()["version"] == 3
+    assert rows(engine, queued) == [("recalculation", "queued", "formula_change")]
+    with engine.begin() as conn:  # the worker served it
+        conn.execute(text("UPDATE run SET status = 'succeeded', finished_at = now() WHERE kind = 'recalculation'"))
+    restored = client.post("/api/config/versions/1/restore", json={"expected_version": 3})
+    assert restored.status_code == 200, restored.text
+    assert rows(engine, queued) == [("recalculation", "queued", "formula_change")]  # the restore queued its own
+    again = client.post("/api/config/versions/1/restore", json={"expected_version": 4})
+    assert again.status_code == 200 and again.json()["version"] == 4  # nothing differs: no new version, no request
+    assert rows(engine, "SELECT count(*) FROM run WHERE kind = 'recalculation'") == [(2,)]
+
+
+def test_changing_only_the_dead_zone_also_queues_a_recalculation(client: TestClient, engine: Engine) -> None:
+    add_user(engine, "u1", "admin")
+    as_role(client, Role.ADMIN)
+    assert put(client, 1, dead_zone="6").json()["version"] == 2
+    assert rows(engine, "SELECT status, formula_version_id IS NOT NULL FROM run WHERE kind = 'recalculation'") == [
+        ("queued", True)
+    ]

@@ -293,17 +293,16 @@ class DbInventory:
 
 
 def refuted_relationships(session: Session) -> Callable[[str, str, str], bool]:
-    """Relationships a person refuted (verified_relationship): mode 2 never proposes them again (docs/07 §7). The type
-    and each end are compared separately by identity (`relation_identity`), so 'Nginx Proxy Manager' is not 'Nginx'."""
+    """Relationships a person refuted (verified_relationship): mode 2 never proposes them again (docs/07 §7). Each end
+    is compared by identity (`relation_identity`), so 'Nginx Proxy Manager' is not 'Nginx'; the type is not: the same
+    two ends refuted as `component` stay refuted as `supplier`, `chain` or a direct link (pending F6.4 #83)."""
     rows = session.execute(
-        select(VerifiedRelationship.relationship_type, VerifiedRelationship.subject, VerifiedRelationship.object).where(
+        select(VerifiedRelationship.subject, VerifiedRelationship.object).where(
             VerifiedRelationship.status == "refuted"
         )
     ).all()
-    refuted = {
-        (str(kind).casefold(), relation_identity(str(sub)), relation_identity(str(obj))) for kind, sub, obj in rows
-    }
-    return lambda kind, subject, obj: (kind.casefold(), subject, obj) in refuted
+    refuted = {(relation_identity(str(sub)), relation_identity(str(obj))) for sub, obj in rows}
+    return lambda _kind, subject, obj: (subject, obj) in refuted
 
 
 def save_alert(session: Session, decision: AlertDecision, review_id: uuid.UUID, now: datetime) -> uuid.UUID:

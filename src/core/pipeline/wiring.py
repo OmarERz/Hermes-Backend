@@ -14,7 +14,7 @@ from dataclasses import astuple
 from datetime import UTC, datetime, timedelta
 from typing import Any, Protocol
 
-from sqlalchemy import func, select
+from sqlalchemy import select
 from sqlalchemy.orm import Session, sessionmaker
 
 from core.analysts.cve import CveOptions, analyze_pending_cves, web_advisory_provider
@@ -24,9 +24,8 @@ from core.db import models as m
 from core.ingestion.embeddings import EmbedFn
 from core.ingestion.fetcher import Fetcher
 from core.ingestion.pipeline import PipelineOptions, run_news_pipeline
-from core.inventory.sync import SYNC_LOCK_KEY, sync_inventory
+from core.inventory.sync import sync_from_itop_unlocked_read
 from core.itop.client import ItopReader
-from core.itop.inventory import read_inventory
 from core.llm import LlmClient
 from core.pipeline.cycles import NewsCycleOutput, ScanCycleOutput, TicketApplier
 from core.pipeline.judging import JudgeFn
@@ -39,7 +38,7 @@ from core.scoring.evaluate import (
     evaluate_group,
     recalculate_open_groups,
 )
-from core.scoring.formula_repo import load_active_formula
+from core.scoring.formula_repo import load_active_formula, load_formula
 from core.vulndata.epss import EpssResult, fetch_daily, load_epss
 from core.vulndata.http import JsonSource
 from core.vulndata.kev import KevResult, fetch_catalogue, load_kev
@@ -112,6 +111,36 @@ def engine_recalculate(tickets: TicketApplier | None) -> Callable[[Session], obj
         return recalculate_open_groups(session, "nightly", EvaluationOptions(tickets=tickets))
 
     return run
+
+
+def engine_recalculate_queued(tickets: TicketApplier | None) -> Callable[[Session, uuid.UUID], object]:
+    """A queued formula-change request (FRO-08): the same recalculation, on the request's own run row, with the
+    formula version the save created. A request whose version was replaced by a later save is superseded: that
+    save queued its own pass, so this one has nothing left to do."""
+
+    def run(session: Session, run_id: uuid.UUID) -> object:
+        request = session.get_one(m.Run, run_id)
+        try:
+            version_id = request.formula_version_id
+            active_id, _ = load_active_formula(session)
+            if version_id is None or version_id != active_id:
+                _finish(session, request, "succeeded", 100)
+                return None
+            # One formula for the whole pass: every assessment of this run carries the run's version (D-061); a save
+            # that lands mid-pass queues its own request, which re-evaluates with the newer version afterwards.
+            options = EvaluationOptions(tickets=tickets, formula=(version_id, load_formula(session, version_id)))
+        except Exception:
+            session.rollback()
+            _finish(session, session.get_one(m.Run, run_id), "failed", 0)  # never left running (ARQ-04)
+            raise
+        return recalculate_open_groups(session, "formula_change", options, run_id=run_id)
+
+    return run
+
+
+def _finish(session: Session, request: m.Run, status: str, progress: int) -> None:
+    request.status, request.progress, request.finished_at = status, progress, datetime.now(UTC)
+    session.commit()
 
 
 def engine_dismissal_package(session: Session, story_id: uuid.UUID) -> dict[str, Any]:
@@ -208,22 +237,10 @@ def inventory_refresh(factory: sessionmaker[Session], reader: ItopReader) -> Cal
     """
 
     def run() -> object:
-        with factory.kw["bind"].connect() as conn:
-            acquired = bool(conn.execute(select(func.pg_try_advisory_lock(SYNC_LOCK_KEY))).scalar())
-            conn.commit()
-            if not acquired:
-                log.info("inventory refresh skipped: another inventory sync is running")
-                return None
-            try:
-                inventory = read_inventory(reader)
-                with Session(bind=conn) as session:
-                    result = sync_inventory(session, inventory)
-                    session.commit()
-                return result
-            finally:
-                conn.rollback()
-                conn.execute(select(func.pg_advisory_unlock(SYNC_LOCK_KEY)))
-                conn.commit()
+        result = sync_from_itop_unlocked_read(factory, reader, wait=False)
+        if result is None:
+            log.info("inventory refresh skipped: another inventory sync is running")
+        return result
 
     return run
 

@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import threading
 import uuid
 from dataclasses import dataclass, field
 from datetime import datetime, timedelta
@@ -310,3 +311,22 @@ def test_with_the_default_budget_the_tenth_failure_is_final(factory: sessionmake
 
     row = stored(factory, event_id)
     assert (row.status, row.attempts, row.next_attempt_at) == ("failed", 10, None)
+
+
+def test_a_shutdown_stops_the_drain_between_events(factory: sessionmaker[Session]) -> None:
+    """The event in hand is finished; the rest stay pending for the next worker (pending F5.3 #65)."""
+    stop = threading.Event()
+
+    @dataclass
+    class StoppingConsumer(Consumer):
+        def process(self, event: NotificationEvent) -> None:
+            super().process(event)
+            stop.set()  # the shutdown signal arrives while the first event is being delivered
+
+    consumer, clock = StoppingConsumer(), Clock()
+    first, _ = record(factory, priority="immediate", itop_id="511")
+    second, _ = record(factory, priority="normal", itop_id="512")
+
+    assert dispatcher(factory, consumer, clock).drain(stop=stop) == 1
+    assert [e.event_id for e in consumer.received] == [str(first)]
+    assert (stored(factory, first).status, stored(factory, second).status) == ("delivered", "pending")

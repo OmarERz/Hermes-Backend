@@ -1,15 +1,16 @@
 """Configuration, formula simulation, company profile and peer companies (docs/13 §3 to §4, API-03, API-05).
 
 The services live in `core.configuration`; this module authenticates (the role table), converts and maps errors.
-`POST /api/formula/simulate` still answers a sample result: the simulation engine (F4.3) is not integrated yet, but
-the changes are already validated against the real active formula.
+`POST /api/formula/simulate` runs the F4.3 simulation with the proposed formula; saving or restoring a formula
+queues a recalculation run (FRO-08).
 """
 
 from __future__ import annotations
 
-from typing import Annotated
+from typing import Annotated, Final
 
 from fastapi import APIRouter, Path
+from sqlalchemy import select
 
 from api.pagination import PAGINATED_RESPONSES, Page, PageQuery, Signer, paginate
 from api.routes._auth import guard
@@ -31,6 +32,8 @@ from api.routes.models import (
 )
 from core.configuration import formula_store, profile, service
 from core.configuration.errors import ConfigError, Problem, ValidationFailedError
+from core.db import models as m
+from core.scoring.evaluate import simulate as simulate_formula
 
 router = APIRouter(tags=["configuration"])
 PeerId = Annotated[str, Path(alias="id")]
@@ -122,9 +125,14 @@ def restore_version(
     return ConfigDocument(version=version, values=values)
 
 
+LEVEL_OF_URGENCY: Final = {1: "critical", 2: "high", 3: "medium", 4: "low"}  # TIC-03 bands, most urgent first
+TOP_MOVERS: Final = 5
+
+
 @router.post("/api/formula/simulate", dependencies=[guard("POST", "/api/formula/simulate")])
 def simulate(request: SimulationRequest, session: SessionDep) -> SimulationResult:
-    """Preview only: it never changes data (FRO-06). The changes are checked against the active formula."""
+    """Preview only: it never changes data (FRO-06). The proposed formula is validated (FRO-05) and compared with
+    the last assessment of every open finding, keeping the stored judge adjustments (no judge call)."""
     foreign = [key for key in request.changes if not formula_store.is_formula_key(key)]
     try:
         if foreign:
@@ -133,14 +141,35 @@ def simulate(request: SimulationRequest, session: SessionDep) -> SimulationResul
                 tuple(Problem(f"body.changes.{key}", "unknown_parameter") for key in foreign),
             )
         _, formula = service.load_active_formula(session)
-        formula_store.apply_changes(formula, request.changes)
+        proposed = formula_store.apply_changes(formula, request.changes)
     except ConfigError as error:
         raise to_api_error(error) from None
+    result = simulate_formula(session, proposed)
+    matrix: dict[str, dict[str, int]] = {}
+    for change in result.moves:
+        before, after = LEVEL_OF_URGENCY[change.before_urgency], LEVEL_OF_URGENCY[change.after_urgency]
+        matrix.setdefault(before, {})[after] = matrix.get(before, {}).get(after, 0) + 1
+    names = dict(
+        session.execute(
+            select(m.Asset.id, m.Asset.name).where(m.Asset.id.in_({c.asset_id for c in result.moves}))
+        ).all()
+    )
+    movers = sorted(
+        (c for c in result.moves if c.after_final != c.before_final),
+        key=lambda c: (-abs(c.after_final - c.before_final), c.cve_id, str(c.asset_id)),
+    )
     return SimulationResult(
-        changed_findings=7,
-        level_matrix={"high": {"high": 10, "critical": 3}, "medium": {"medium": 22, "high": 4}},
-        last_30_days_effect="3 hallazgos habrían subido a Alta en los últimos 30 días",
-        top_movers=["CVE-2099-0002 en srv-example-02", "CVE-2099-0003 en srv-proxy-04"],
+        changed_findings=result.changed_level,
+        level_matrix=matrix,
+        # The engine compares with the last assessment of each open finding; it cannot replay the last 30 days.
+        last_30_days_effect=(
+            f"{result.changed_level} de {result.findings} hallazgos abiertos cambiarían de nivel "
+            "con la fórmula propuesta."
+        ),
+        top_movers=[
+            f"{c.cve_id} en {names.get(c.asset_id, 'un activo')}: {c.before_final} a {c.after_final}"
+            for c in movers[:TOP_MOVERS]
+        ],
     )
 
 

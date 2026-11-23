@@ -188,3 +188,17 @@ def test_lengths_the_strict_mode_cannot_express(bad: dict[str, Any]) -> None:
 def test_too_many_steps() -> None:
     steps = [step(i) for i in range(1, 22)]
     assert validate_mitigation(steps, package()).rule == "VAL-02"
+
+
+def test_a_step_from_a_suspicious_vendor_advisory_discards_the_draft() -> None:
+    """SEG-03: an N1 element flagged as suspicious is never a source for a step (pending F6.1 #63)."""
+    content = finding_package()
+    news = content["news"][0]
+    news["source_level"], news["suspicious"] = "N1", True
+    quote = "Researchers observed mass exploitation of CVE-2026-1111"
+    draft = [step(action="Revisar los servidores expuestos.", element_id="news-1", quote=quote)]
+    trusted = validate_mitigation(draft, package(content))
+    assert (trusted.status, trusted.rule) == (MitigationStatus.DISCARDED, "JUE-MIT-01")
+    news["suspicious"] = False
+    clean = validate_mitigation(draft, package(content))
+    assert clean.status is MitigationStatus.ACCEPTED

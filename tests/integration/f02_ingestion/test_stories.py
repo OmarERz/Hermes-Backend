@@ -19,6 +19,8 @@ from doubles.embedding import fake_embed
 
 pytestmark = pytest.mark.integration
 NOW = datetime(2026, 11, 22, 12, 0, tzinfo=UTC)
+# Factory defaults (docs/02 §4, 23 nov 2026, #108): calibrated for multilingual-e5-small.
+SIMILARITY, GRAY_ZONE = Decimal("0.90"), Decimal("0.84")
 
 BASE = "acme firewall appliances contain a flaw that lets remote attackers run arbitrary code on exposed devices"
 OTHER = "quarterly earnings call transcript mentions revenue growth across several european retail markets"
@@ -39,7 +41,7 @@ def test_republished_note_makes_one_story_with_both_urls(session: Session) -> No
     placements = group_new_articles(session, fake_embed, clock=clock)
     assert layers(placements) == ["new", "similarity"]
     assert placements[1].similarity is not None
-    assert placements[1].similarity >= Decimal("0.85")
+    assert placements[1].similarity >= SIMILARITY
     story = session.scalars(select(m.Story)).one()
     assert story.relevance_status == "pending"
     assert story.embedding_model == EMBEDDING_MODEL
@@ -80,29 +82,28 @@ def analyst_entities(title: str, body: str | None) -> ArticleEntities:
 
 
 def test_gray_zone_needs_analyst_entities_and_checks_every_neighbor(session: Session) -> None:
-    words = BASE.split()[:15]
-    gray = " ".join(words) + " plus several extra unrelated words about weather and travel plans today"
+    words = BASE.split()
     feed = Feed(session)
     feed.article("outlet_a", "t", BASE)
-    feed.article("outlet_b", "t", gray, hours=1)
-    # Similar enough for the gray zone (0.75 to 0.85) but regex entities cannot settle it: two stories.
+    feed.article("outlet_b", "t", " ".join(words[:13]) + " weather today", hours=1)  # 0.87 to the first
+    # Similar enough for the gray zone (0.84 to 0.90) but regex entities cannot settle it: two stories.
     placements = group_new_articles(session, fake_embed, clock=clock)
     assert layers(placements) == ["new", "new"]
     # With analyst entities the same kind of pair (far in time, so a fresh window) is one story.
     # (one side cites a CVE, so layer 4, for attacks without CVE, does not apply; the victim and actor decide)
     feed.article("outlet_c", "t", BASE + " CVE-2026-0042", hours=300)
-    feed.article("outlet_d", "t", " ".join(words[:13]) + " weather today", hours=301)
+    feed.article("outlet_d", "t", " ".join(words[:15]) + " weather today", hours=301)  # 0.86 to outlet_c
     placements = group_new_articles(session, fake_embed, entities=analyst_entities, clock=clock)
     assert layers(placements) == ["new", "gray_zone"]
     assert placements[1].similarity is not None
-    assert Decimal("0.75") <= placements[1].similarity < Decimal("0.85")
+    assert GRAY_ZONE <= placements[1].similarity < SIMILARITY
 
 
 def test_gray_zone_skips_a_closer_neighbor_whose_entities_disagree(session: Session) -> None:
     words = BASE.split()
     feed = Feed(session)
-    feed.article("outlet_a", "t", " ".join(words[:12]) + " weather today")  # 0.79 to the new note: the closer one
-    feed.article("outlet_b", "t", " ".join(words[4:]) + " sports scores tonight")  # 0.77
+    feed.article("outlet_a", "t", " ".join(words[:15]) + " weather today")  # 0.86 to the new note: the closer one
+    feed.article("outlet_b", "t", " ".join(words[1:]) + " sports scores tonight")  # 0.84
     assert layers(group_new_articles(session, fake_embed, clock=clock)) == ["new", "new"]
     farther = session.scalars(select(m.RawArticle).where(m.RawArticle.canonical_url.like("%outlet_b%"))).one()
 

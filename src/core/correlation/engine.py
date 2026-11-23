@@ -353,27 +353,39 @@ def _ensure_alert(session: Session, story_id: uuid.UUID, relevance: str, now: da
 
 def _alert_assets(session: Session, alert_id: uuid.UUID, facts: StoryFacts) -> None:
     """The CIs an alert touches: those running a product the news names. `version_confirmed` when versions agree."""
-    known = set(session.scalars(select(m.AlertAsset.asset_id).where(m.AlertAsset.alert_id == alert_id)))
+    query = select(m.AlertAsset).where(m.AlertAsset.alert_id == alert_id)
+    links = {row.asset_id: row for row in session.scalars(query)}
     for item in _present_products(session):
         for mention in facts.products:
-            if item.asset_id in known or not _mentioned(mention, item):
+            if not _mentioned(mention, item):
                 continue
             confirmed = mention.version is not None and compare_versions(item.version, mention.version) == 0
-            session.add(
-                m.AlertAsset(
+            existing = links.get(item.asset_id)
+            if existing is None:
+                link = m.AlertAsset(
                     alert_id=alert_id,
                     asset_id=item.asset_id,
                     installed_software_id=item.installed_software_id,
                     version_confirmed=confirmed,
                 )
-            )
-            known.add(item.asset_id)
+                session.add(link)
+                links[item.asset_id] = link
+            elif confirmed and not existing.version_confirmed:
+                # A link inferred earlier (e.g. by the judge, never confirmed) is upgraded when the versions agree
+                # (E = 1.0, COR-05).
+                existing.version_confirmed = True
+                existing.installed_software_id = item.installed_software_id  # the installation whose version agreed
     for asset_id in _os_asset_ids(session, facts):
-        if asset_id not in known:
-            session.add(
-                m.AlertAsset(alert_id=alert_id, asset_id=asset_id, installed_software_id=None, version_confirmed=True)
+        existing = links.get(asset_id)
+        if existing is None:
+            os_link = m.AlertAsset(
+                alert_id=alert_id, asset_id=asset_id, installed_software_id=None, version_confirmed=True
             )
-            known.add(asset_id)
+            session.add(os_link)
+            links[asset_id] = os_link
+        elif not existing.version_confirmed:
+            existing.version_confirmed = True  # the OS family and version agree (E = 1.0)
+            existing.installed_software_id = None
 
 
 def correlate_story(
