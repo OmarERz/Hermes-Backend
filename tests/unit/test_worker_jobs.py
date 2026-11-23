@@ -77,10 +77,11 @@ def test_a_stop_during_a_round_skips_the_remaining_jobs() -> None:
     assert runs == ["a"]
 
 
-def test_without_itop_the_dispatcher_and_the_nightly_metrics_run() -> None:
+def test_without_itop_the_dispatcher_metrics_and_calibration_run() -> None:
     assert [(job.name, job.interval, job.lane) for job in build_jobs(SETTINGS, MagicMock())] == [
         ("notification_dispatch", DISPATCH_SECONDS, "notifications"),
         ("nightly_metrics", NIGHTLY_SECONDS, "nightly"),
+        ("weekly_calibration", NIGHTLY_SECONDS, "nightly"),
     ]
 
 
@@ -90,6 +91,7 @@ def test_with_itop_the_outbox_and_the_sync_run() -> None:
     assert [(job.name, job.interval) for job in jobs] == [
         ("notification_dispatch", DISPATCH_SECONDS),
         ("nightly_metrics", NIGHTLY_SECONDS),
+        ("weekly_calibration", NIGHTLY_SECONDS),
         ("itop_outbox", ITOP_OUTBOX_SECONDS),
         ("ticket_sync", TICKET_SYNC_SECONDS),
     ]

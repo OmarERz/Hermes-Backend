@@ -85,7 +85,6 @@ def test_a_lower_role_gets_403(client: TestClient) -> None:
 
 GET_SAMPLES = [
     "/api/runs",
-    "/api/calibration/proposals",
     "/api/connections/status",
     "/api/setup/status",
     "/api/audit",
@@ -176,28 +175,9 @@ def test_runs_stix_calibration_and_notifications(client: TestClient) -> None:
     assert (
         client.post("/api/stix/export", json={"scope": "run"}).status_code == 422
     )  # scope data checked before the database
-    assert client.post("/api/calibration/proposals/cal-1/approve").json()["status"] == "approved"
-    assert client.post("/api/calibration/proposals/cal-1/reject").json()["status"] == "rejected"
-    assert client.post("/api/calibration/proposals/zzz/approve").status_code == 404
     assert client.post("/api/connections/test", json={"names": ["itop"]}).json()[0]["name"] == "itop"
     assert client.put("/api/setup/steps/3", json={"done": True}).json()["done"] is True
     assert client.put("/api/setup/steps/99", json={}).status_code == 404
-
-
-def test_a_decided_proposal_conflicts() -> None:
-    from api.routes import operations, samples  # noqa: PLC0415 - patched sample data
-
-    decided = samples.PROPOSALS[0].model_copy(update={"status": "approved"})
-    original = list(samples.PROPOSALS)
-    try:
-        samples.PROPOSALS[:] = [decided]
-        as_role(Role.ADMIN)
-        with TestClient(APP) as test_client:
-            assert test_client.post("/api/calibration/proposals/cal-1/approve").status_code == 409
-    finally:
-        samples.PROPOSALS[:] = original
-        APP.dependency_overrides.clear()
-    assert operations.router
 
 
 def test_openapi_documents_error_envelope_for_every_route() -> None:
