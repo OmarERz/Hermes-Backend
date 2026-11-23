@@ -38,6 +38,7 @@ LABEL: Final = "dev.hermes.test"
 HOST: Final = socket.gethostname()
 LABELS: Final = {LABEL: "1", f"{LABEL}.run": RUN_ID, f"{LABEL}.pid": str(os.getpid()), f"{LABEL}.host": HOST}
 COMPOSE_PROJECT: Final = "com.docker.compose.project"
+PORT_RANGE: Final = (20000, 39999)  # published test ports: below the 49152+ ranges Windows may reserve (WSL)
 # A Compose project of the e2e tests: run_name("hermes-...e2e") = prefix-<repo hash>-<pid>-<random>
 E2E_PROJECT: Final = re.compile(r"^hermes-[a-z0-9-]*e2e-[0-9a-f]{8}-(\d+)-[0-9a-f]{6}$")
 
@@ -47,11 +48,21 @@ def run_name(prefix: str) -> str:
     return f"{prefix}-{RUN_ID}".lower()
 
 
-def free_port() -> int:
-    """A local TCP port that was free a moment ago, for a Compose stack that publishes ports."""
-    with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as probe:
-        probe.bind(("127.0.0.1", 0))
-        return int(probe.getsockname()[1])
+def free_port(attempts: int = 200) -> int:
+    """A local TCP port that was free a moment ago, for a Compose stack that publishes ports.
+
+    Drawn from `PORT_RANGE`, never from the kernel's ephemeral range: Docker Desktop on WSL cannot publish the
+    ports Windows reserves above 49152, which `bind(0)` hands out. Each candidate is bound once to check it.
+    """
+    for _ in range(attempts):
+        port = secrets.randbelow(PORT_RANGE[1] - PORT_RANGE[0] + 1) + PORT_RANGE[0]
+        with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as probe:
+            try:
+                probe.bind(("127.0.0.1", port))
+            except OSError:
+                continue  # taken: try another one
+            return port
+    raise RuntimeError(f"no free port in {PORT_RANGE} after {attempts} attempts")
 
 
 @contextmanager

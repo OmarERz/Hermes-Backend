@@ -158,9 +158,19 @@ def test_group_detail_lists_each_scored_ci_with_its_snapshot(get: Get, scenario:
         "classification_at_evaluation": "highly_classified",
         "finding_status": "new",
         "score": 90,
+        "finding_id": str(scenario.findings[("G1", "CI-1")]),
     }
     assert (ci2["ci_id"], ci2["finding_status"], ci2["score"]) == ("CI-2", "fixed", 62)
+    assert ci2["finding_id"] == str(scenario.findings[("G1", "CI-2")])
     assert (ci2["classification"], ci2["classification_at_evaluation"]) == ("classified", "public")
+
+
+def test_the_finding_id_of_an_asset_opens_its_history(get: Get, scenario: Scenario) -> None:
+    """F13.8: a client reaches GET /api/findings/{id}/history from the vulnerability detail alone."""
+    detail = get(f"/api/vulnerabilities/{scenario.groups['G1']}")
+    points = get(f"/api/findings/{detail['assets'][0]['finding_id']}/history")
+    assert points
+    assert points[-1]["final"] == detail["assets"][0]["score"]
 
 
 def test_asset_detail_carries_the_score_of_that_ci(get: Get, scenario: Scenario) -> None:

@@ -53,6 +53,18 @@
             "title": "Exposed",
             "type": "boolean"
           },
+          "finding_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Id del hallazgo de este CI en la vulnerabilidad: se usa en GET /api/findings/{id}/history. Viene en el detalle de vulnerabilidad; es nulo en una recomendación (su CI puede ser el de una alerta, sin hallazgo de escaneo).",
+            "title": "Finding Id"
+          },
           "finding_status": {
             "description": "Estado del hallazgo en ese activo. Valores: `new`: Apareció en el último escaneo; `persistent`: Sigue presente desde un escaneo anterior; `reopened`: Estaba corregido y volvió a aparecer; `fixed`: Ya no aparece; `no_data`: No hay datos suficientes para decidir.",
             "enum": [

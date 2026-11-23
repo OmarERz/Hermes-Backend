@@ -21,10 +21,7 @@ METHODS = ("get", "post", "put", "patch", "delete")
 HTTP = re.compile(r"^meta \{[^}]*^\s*type: http\s*$", re.MULTILINE | re.DOTALL)
 REQUEST = re.compile(r"^(get|post|put|patch|delete) \{\s*\n\s*url: \{\{baseUrl\}\}(\S+)", re.MULTILINE)
 TAG = re.compile(r"^\s*operationId: ([a-z_]+)\s*$", re.MULTILINE)
-# Operations a client cannot call successfully yet, with the reason; each still needs a request (its error path).
-KNOWN_GAPS = {
-    "get_finding_history": "no API response carries a finding id yet (reported in F13.6)",
-}
+REQUIRE = re.compile(r"require\(\"(\./[^\"]+)\"\)")
 # An explicit success: `res.status: eq 2xx` in `assert`, or `expect(res.status).to.equal(2xx)` in `tests`.
 SUCCESS = re.compile(r"^\s*res\.status: eq 2\d\d\s*$|expect\(res\.status\)\.to\.equal\(2\d\d\)", re.MULTILINE)
 
@@ -83,11 +80,9 @@ def test_every_operation_has_a_request_that_expects_success() -> None:
     covered = {r.operation for r in REQUESTS}
     succeeding = {r.operation for r in REQUESTS if r.expects_success}
     missing = sorted(set(OPERATIONS) - covered)
-    unhappy = sorted(set(OPERATIONS) - succeeding - set(missing) - set(KNOWN_GAPS))
+    unhappy = sorted(set(OPERATIONS) - succeeding - set(missing))
     assert not missing, f"operations without a Bruno request: {missing}"
     assert not unhappy, f"operations whose Bruno requests never expect a 2xx: {unhappy}"
-    stale = sorted(gap for gap in KNOWN_GAPS if gap in succeeding or gap not in OPERATIONS)
-    assert not stale, f"known gaps that are closed or gone, remove them: {stale}"
 
 
 def test_protected_routes_are_checked_without_a_token_and_with_a_lower_role() -> None:
@@ -96,3 +91,18 @@ def test_protected_routes_are_checked_without_a_token_and_with_a_lower_role() ->
     forbidden = sum("res.status: eq 403" in t for t in texts)
     assert unauthenticated >= 3
     assert forbidden >= 3
+
+
+def required_modules() -> set[str]:
+    return {
+        match for file in (ROOT / "bruno").rglob("*.bru") for match in REQUIRE.findall(file.read_text(encoding="utf-8"))
+    }
+
+
+def test_every_helper_a_request_requires_exists() -> None:
+    """A required module that is missing makes every request using it fail with 'Cannot find module'.
+    tests/integration/f00_harness/test_bruno_helpers.py also checks that git does not ignore it."""
+    modules = required_modules()
+    assert modules, "the requests share bruno/lib/hermes.js"
+    missing = sorted(m for m in modules if not (ROOT / "bruno" / m).with_suffix(".js").is_file())
+    assert not missing, f"modules required by requests but absent: {missing}"
