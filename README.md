@@ -126,7 +126,16 @@ Hasta entonces el único consumidor disponible es `log`.
 La API no limita la frecuencia de peticiones por sí misma: en producción pon un proxy inverso (nginx o Caddy) delante,
 con TLS, un límite de peticiones por IP y un tamaño máximo de petición (la API rechaza cuerpos de más de 1 MiB con
 413, pero conviene cortarlos antes). Publica solo el proxy y deja el puerto 8000 de la API en `127.0.0.1`, como ya lo
-hace `compose.yaml`. Ejemplo mínimo con nginx (ajusta el dominio, los certificados y los límites a tu uso):
+hace `compose.yaml`.
+
+La API ya envía `Strict-Transport-Security` (un año, con subdominios) y no envía el encabezado `server`; en nginx
+agrega `server_tokens off;` para que el proxy tampoco anuncie su versión y **no** agregues otro
+`Strict-Transport-Security` (saldría duplicado). Sirve la API desde su propio nombre de host: con `includeSubDomains`,
+un navegador exige HTTPS durante un año en todos los subdominios del host que la sirve. Los límites de memoria y CPU
+de cada servicio no vienen en `compose.yaml` porque dependen del equipo y de la carga: agrégalos (`mem_limit`,
+`cpus`) según tu instalación.
+
+Ejemplo mínimo con nginx (ajusta el dominio, los certificados y los límites a tu uso):
 
 ```nginx
 limit_req_zone $binary_remote_addr zone=hermes_api:10m rate=10r/s;
@@ -153,13 +162,6 @@ server {
 
 Con Caddy, `request_body { max_size 1MB }` y un módulo de límite de frecuencia (p. ej. `caddy-ratelimit`) cumplen lo
 mismo.
-
-La API ya envía `Strict-Transport-Security` (un año, con subdominios) y no envía el encabezado `server`; en nginx
-agrega `server_tokens off;` para que el proxy tampoco anuncie su versión y **no** agregues otro
-`Strict-Transport-Security` (saldría duplicado). Sirve la API desde su propio nombre de host: con `includeSubDomains`,
-un navegador exige HTTPS durante un año en todos los subdominios del host que la sirve. Los límites de memoria y CPU
-de cada servicio no vienen en `compose.yaml` porque dependen del equipo y de la carga: agrégalos (`mem_limit`,
-`cpus`) según tu instalación.
 
 ## License
 
