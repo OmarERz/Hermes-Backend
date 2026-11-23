@@ -97,3 +97,14 @@ def test_in_range_agrees_with_the_order(version: str, start: str, end: str, star
 @given(versions)
 def test_a_range_without_bounds_covers_every_readable_version(version: str) -> None:
     assert in_range(version, None, None, None, None) is True
+
+
+@given(st.text(alphabet="0123456789.\u0660\u0661\u0662\u0966\u0967\uff11\uff12", min_size=1, max_size=12))
+def test_digits_of_other_scripts_are_not_version_numbers(text: str) -> None:
+    if not text.isascii():
+        assert parse_version(text) is None
+
+
+def test_arabic_indic_digits_are_not_a_version() -> None:
+    assert parse_version("\u0661.\u0662") is None
+    assert compare_versions("\u0661.\u0662", "1.2") is None
