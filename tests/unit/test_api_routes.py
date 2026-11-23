@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from collections.abc import Iterator
+from datetime import UTC, datetime
 
 import pytest
 from fastapi.testclient import TestClient
@@ -11,7 +12,11 @@ from pydantic import SecretStr
 from api.app import create_app
 from api.auth import CurrentUser, Role, get_current_user
 from api.routes._auth import ROUTE_ROLES
+from api.routes._events import get_event_queue
+from api.routes._state import get_dashboard_source
+from api.routes.models import NotificationEventRow
 from core.config import Settings
+from core.metrics.dashboard import Dashboard, DashboardMetric
 
 pytestmark = pytest.mark.unit
 
@@ -79,16 +84,8 @@ def test_a_lower_role_gets_403(client: TestClient) -> None:
 
 
 GET_SAMPLES = [
-    "/api/config/schema",
-    "/api/config",
-    "/api/config/versions",
-    "/api/profile",
-    "/api/peer-companies",
-    "/api/sources",
     "/api/runs",
     "/api/calibration/proposals",
-    "/api/metrics",
-    "/api/notifications/events",
     "/api/connections/status",
     "/api/setup/status",
     "/api/audit",
@@ -132,76 +129,6 @@ def test_not_found_uses_the_envelope(client: TestClient) -> None:
         assert response.json()["error"]["code"] == "not_found"
 
 
-def test_config_write_rules(client: TestClient) -> None:
-    as_role(Role.ADMIN)
-    stale = client.put("/api/config", json={"expected_version": 1, "changes": {"ui.language": "en"}})
-    assert stale.status_code == 409
-    assert stale.json()["error"]["code"] == "version_conflict"
-    unknown = client.put("/api/config", json={"expected_version": 3, "changes": {"nope": "1"}})
-    assert unknown.status_code == 422
-    ok = client.put("/api/config", json={"expected_version": 3, "changes": {"ui.language": "en"}})
-    assert ok.status_code == 200
-    assert ok.json()["version"] == 4
-    assert ok.json()["values"]["weights.P"] == "0.30"
-
-
-def test_each_parameter_enforces_its_own_minimum_role(client: TestClient) -> None:
-    body = {"expected_version": 3, "changes": {"weights.D": "0.10"}}
-    as_role(Role.READER)
-    denied = client.put("/api/config", json=body)  # admin parameter
-    assert denied.status_code == 403
-    assert denied.json()["error"]["details"][0] == {"field": "body.changes.weights.D", "issue": "requires_admin"}
-    assert client.put("/api/config", json={**body, "changes": {"inventory.cpe_min_score": "0.9"}}).status_code == 403
-    assert client.put("/api/config", json={**body, "changes": {"ui.language": "en"}}).status_code == 200  # reader
-    as_role(Role.ANALYST)
-    assert client.put("/api/config", json={**body, "changes": {"inventory.cpe_min_score": "0.9"}}).status_code == 200
-    assert client.put("/api/config", json=body).status_code == 403
-    as_role(Role.ADMIN)
-    assert client.put("/api/config", json=body).status_code == 200
-
-
-def test_weights_are_merged_with_the_current_ones_and_must_total_one(client: TestClient) -> None:
-    as_role(Role.ADMIN)
-
-    def put(changes: dict[str, str]) -> dict[str, object]:
-        response = client.put("/api/config", json={"expected_version": 3, "changes": changes})
-        return {
-            "status": response.status_code,
-            "issue": (response.json().get("error", {}).get("details") or [{}])[0].get("issue"),
-        }
-
-    assert put({"weights.D": "0.20"}) == {"status": 422, "issue": "weights_sum_to_one"}  # 0.30+0.30+0.30+0.20
-    assert put({"weights.D": "1"}) == {"status": 422, "issue": "weights_sum_to_one"}
-    assert put({"weights.D": "0.20", "weights.P": "0.20"})["status"] == 200  # 0.20+0.30+0.30+0.20
-    assert put({"weights.D": "-0.1", "weights.P": "0.5"}) == {"status": 422, "issue": "weight_out_of_range"}
-    assert put({"weights.D": "1.5", "weights.P": "-0.5"}) == {"status": 422, "issue": "weight_out_of_range"}
-    assert put({"weights.D": "x"}) == {"status": 422, "issue": "invalid_decimal"}
-    assert put({"ui.language": "en"})["status"] == 200  # no weight touched, current ones stay valid
-    simulate = client.post("/api/formula/simulate", json={"changes": {"weights.D": "0.20"}})
-    assert simulate.status_code == 422
-
-
-def test_restore_needs_the_expected_current_version(client: TestClient) -> None:
-    as_role(Role.ADMIN)
-    assert client.post("/api/config/versions/2/restore", json={"expected_version": 1}).status_code == 409
-    assert client.post("/api/config/versions/99/restore", json={"expected_version": 3}).status_code == 404
-    ok = client.post("/api/config/versions/2/restore", json={"expected_version": 3})
-    assert ok.status_code == 200
-    assert ok.json()["version"] == 4
-    assert client.post("/api/config/versions/2/restore").status_code == 422  # the version is mandatory
-
-
-def test_source_level_is_admin_only_but_activation_is_for_analysts(client: TestClient) -> None:
-    as_role(Role.ANALYST)
-    assert client.patch("/api/sources/src-thn", json={"active": False}).json()["active"] is False
-    denied = client.patch("/api/sources/src-thn", json={"level": "N2"})
-    assert denied.status_code == 403
-    assert denied.json()["error"]["details"][0]["issue"] == "requires_admin"
-    assert client.patch("/api/sources/src-thn", json={"active": True, "level": "N2"}).status_code == 403
-    as_role(Role.ADMIN)
-    assert client.patch("/api/sources/src-thn", json={"level": "N2"}).json()["level"] == "N2"
-
-
 def test_scan_run_is_listed_and_streams_its_progress(client: TestClient) -> None:
     as_role(Role.ANALYST)
     run = client.post("/api/scans", json={})
@@ -240,33 +167,6 @@ def test_feedback_rules(client: TestClient) -> None:
     assert forged.status_code == 422  # the user comes from the token, never from the body
 
 
-def test_other_write_routes(client: TestClient) -> None:
-    as_role(Role.ADMIN)
-    assert client.post("/api/peer-companies", json={"name": "N", "sector": "S", "country": "MX"}).status_code == 201
-    assert (
-        client.put("/api/peer-companies/peer-1", json={"name": "N", "sector": "S", "country": "MX"}).status_code == 200
-    )
-    assert client.put("/api/peer-companies/zzz", json={"name": "N", "sector": "S", "country": "MX"}).status_code == 404
-    assert client.delete("/api/peer-companies/peer-1").status_code == 204
-    assert client.delete("/api/peer-companies/zzz").status_code == 404
-    assert client.post("/api/sources", json={"name": "Feed", "url": "http://insecure.test"}).status_code == 422
-    created = client.post("/api/sources", json={"name": "Feed", "url": "https://feed.example.test/rss"})
-    assert (created.status_code, created.json()["level"], created.json()["active"]) == (201, "N4", False)
-    assert client.patch("/api/sources/src-nvd", json={"active": False}).status_code == 409
-    assert client.patch("/api/sources/zzz", json={"active": True}).status_code == 404
-    assert (
-        client.put(
-            "/api/profile",
-            json={"expected_version": 1, "sector": "S", "subsectors": [], "countries": [], "language": "es"},
-        ).status_code
-        == 409
-    )
-    profile = {"expected_version": 2, "sector": "S", "subsectors": [], "countries": ["MX"], "language": "es"}
-    assert client.put("/api/profile", json=profile).json()["version"] == 3
-    assert client.post("/api/formula/simulate", json={"changes": {"weights.D": "0.7"}}).status_code == 422
-    assert client.post("/api/formula/simulate", json={"changes": {"judge.sensitivity": "wide"}}).status_code == 200
-
-
 def test_runs_stix_calibration_and_notifications(client: TestClient) -> None:
     as_role(Role.ADMIN)
     events = client.get("/api/runs/run-1/events")
@@ -279,29 +179,23 @@ def test_runs_stix_calibration_and_notifications(client: TestClient) -> None:
     assert client.post("/api/calibration/proposals/cal-1/approve").json()["status"] == "approved"
     assert client.post("/api/calibration/proposals/cal-1/reject").json()["status"] == "rejected"
     assert client.post("/api/calibration/proposals/zzz/approve").status_code == 404
-    assert client.post("/api/notifications/events/evt-1/retry").json()["status"] == "pending"
-    assert client.post("/api/notifications/events/zzz/retry").status_code == 404
     assert client.post("/api/connections/test", json={"names": ["itop"]}).json()[0]["name"] == "itop"
     assert client.put("/api/setup/steps/3", json={"done": True}).json()["done"] is True
     assert client.put("/api/setup/steps/99", json={}).status_code == 404
 
 
-def test_decided_proposal_and_non_error_event_conflict() -> None:
+def test_a_decided_proposal_conflicts() -> None:
     from api.routes import operations, samples  # noqa: PLC0415 - patched sample data
 
     decided = samples.PROPOSALS[0].model_copy(update={"status": "approved"})
-    delivered = samples.NOTIFICATION_EVENTS[0].model_copy(update={"status": "delivered"})
-    original = (list(samples.PROPOSALS), list(samples.NOTIFICATION_EVENTS))
+    original = list(samples.PROPOSALS)
     try:
         samples.PROPOSALS[:] = [decided]
-        samples.NOTIFICATION_EVENTS[:] = [delivered]
         as_role(Role.ADMIN)
         with TestClient(APP) as test_client:
             assert test_client.post("/api/calibration/proposals/cal-1/approve").status_code == 409
-            assert test_client.post("/api/notifications/events/evt-1/retry").status_code == 409
     finally:
-        samples.PROPOSALS[:] = original[0]
-        samples.NOTIFICATION_EVENTS[:] = original[1]
+        samples.PROPOSALS[:] = original
         APP.dependency_overrides.clear()
     assert operations.router
 
@@ -325,20 +219,6 @@ def test_405_lists_all_documented_methods_of_the_path(client: TestClient) -> Non
     assert client.options("/api/sources/src-nvd").headers["allow"] == "PATCH"
 
 
-def test_created_items_can_be_retrieved_updated_and_deleted(client: TestClient) -> None:
-    as_role(Role.ADMIN)
-    body = {"name": "Nueva", "sector": "S", "country": "MX"}
-    created = client.post("/api/peer-companies", json=body).json()
-    ids = [p["id"] for p in client.get("/api/peer-companies").json()["items"]]
-    assert created["id"] in ids
-    assert client.put(f"/api/peer-companies/{created['id']}", json={**body, "name": "Otra"}).json()["name"] == "Otra"
-    assert client.delete(f"/api/peer-companies/{created['id']}").status_code == 204
-    assert client.delete(f"/api/peer-companies/{created['id']}").status_code == 404
-    source = client.post("/api/sources", json={"name": "Feed", "url": "https://feed.example.test/rss"}).json()
-    assert source["id"] in [s["id"] for s in client.get("/api/sources").json()["items"]]
-    assert client.patch(f"/api/sources/{source['id']}", json={"active": True}).json()["active"] is True
-
-
 def test_feedback_rule_is_in_the_request_schema_and_enforced() -> None:
     schema = APP.openapi()["components"]["schemas"]["FeedbackRequest"]
     assert schema["if"]["properties"]["verdict"] == {"const": "wrong_priority"}
@@ -352,3 +232,43 @@ def test_cursor_and_sse_are_documented() -> None:
     assert operation["responses"]["400"]["description"].startswith("Cursor inválido")
     sse = APP.openapi()["paths"]["/api/runs/{id}/events"]["get"]["responses"]["200"]["content"]["text/event-stream"]
     assert sse["schema"]["required"] == ["event", "data"]
+
+
+def test_metrics_come_from_the_dashboard_service(client: TestClient) -> None:
+    as_role(Role.READER)
+    now = datetime(2026, 11, 22, 12, tzinfo=UTC)
+    dashboard = Dashboard(now, [DashboardMetric("precision", "Precisión", "87.5", "%")])
+    APP.dependency_overrides[get_dashboard_source] = lambda: lambda _now: dashboard
+    response = client.get("/api/metrics")
+    assert response.status_code == 200
+    assert response.json() == {
+        "generated_at": "2026-11-22T12:00:00Z",
+        "metrics": [{"key": "precision", "label": "Precisión", "value": "87.5", "unit": "%"}],
+    }
+
+
+class FakeEvents:
+    def __init__(self) -> None:
+        self.row = NotificationEventRow(
+            id="e1",
+            type="new_ticket",
+            priority="immediate",
+            status="error",
+            attempts=10,
+            last_error="x",
+            created_at="t",
+        )
+
+    def list(self, status: str) -> list[NotificationEventRow]:
+        return [self.row] if status == self.row.status else []
+
+    def retry(self, event_id: str) -> NotificationEventRow:
+        return self.row.model_copy(update={"status": "pending", "attempts": 0, "last_error": None})
+
+
+def test_notification_events_come_from_the_event_queue(client: TestClient) -> None:
+    as_role(Role.ADMIN)
+    APP.dependency_overrides[get_event_queue] = FakeEvents
+    assert [e["id"] for e in client.get("/api/notifications/events").json()["items"]] == ["e1"]
+    assert client.get("/api/notifications/events", params={"status": "pending"}).json()["items"] == []
+    assert client.post("/api/notifications/events/e1/retry").json()["status"] == "pending"

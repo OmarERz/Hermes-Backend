@@ -10,7 +10,7 @@ import re
 from datetime import datetime
 from typing import Annotated, Any, Literal, Self
 
-from pydantic import AfterValidator, BaseModel, BeforeValidator, ConfigDict, Field, model_validator
+from pydantic import AfterValidator, BaseModel, BeforeValidator, ConfigDict, Field, field_validator, model_validator
 
 
 class _Contract(BaseModel):
@@ -174,6 +174,17 @@ class FeedbackInput(_Contract):
     )
     proposed_score: Percent | None = Field(description="Optional, for users who want precision")
     comment: str | None = Field(max_length=2000, description="Optional but recommended")
+    ticket_itop_id: str | None = Field(
+        default=None,
+        pattern=r"^([0-9]{1,12})?$",
+        description="Optional: iTop id of the ticket the user acted on; scopes ticket-level effects to it. "
+        "Empty (an event delivered before iTop created the ticket) counts as absent",
+    )
+
+    @field_validator("ticket_itop_id")
+    @classmethod
+    def _empty_ticket_is_absent(cls, value: str | None) -> str | None:
+        return value or None
 
     @model_validator(mode="after")
     def _wrong_priority_needs_level(self) -> Self:

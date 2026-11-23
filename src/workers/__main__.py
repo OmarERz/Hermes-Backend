@@ -13,7 +13,7 @@ import threading
 from core.config import Settings
 from core.db.session import make_session_factory
 from core.logging import configure_logging
-from workers.jobs import build_jobs, run_jobs
+from workers.jobs import build_jobs, run_jobs_in_threads
 
 log = logging.getLogger("workers")
 
@@ -24,7 +24,7 @@ def run(stop: threading.Event, settings: Settings | None = None) -> None:
     log.info("workers started")
     jobs = build_jobs(settings, make_session_factory(settings))
     if jobs:
-        run_jobs(stop, jobs)
+        run_jobs_in_threads(stop, jobs)
     else:
         stop.wait()
     log.info("workers stopped")

@@ -53,6 +53,39 @@ checks.positive_data_acceptance.expected-statuses = ["2xx", "3xx", "400", "401",
 include-name = "GET /api/vulnerabilities"
 checks.positive_data_acceptance.expected-statuses = ["2xx", "3xx", "400", "401", "403", "404", "409", "429", "5xx"]
 
+# Configuration and catalog writes validate semantics the schema cannot express (parameter keys of the formula and
+# settings catalog, ISO country and language codes, formula rules of FRO-05, catalog sector codes, the source rules of D-041). A request that is
+# schema-valid but breaks one of those rules is correctly refused with 422 `validation_error` (documented on every
+# operation), so for these operations, and only for them, 422 counts as accepted for positive data.
+
+[[operations]]
+include-name = "POST /api/formula/simulate"
+checks.positive_data_acceptance.expected-statuses = ["2xx", "3xx", "401", "403", "404", "409", "422", "429", "5xx"]
+
+[[operations]]
+include-name = "PUT /api/config"
+checks.positive_data_acceptance.expected-statuses = ["2xx", "3xx", "401", "403", "404", "409", "422", "429", "5xx"]
+
+[[operations]]
+include-name = "PUT /api/profile"
+checks.positive_data_acceptance.expected-statuses = ["2xx", "3xx", "401", "403", "404", "409", "422", "429", "5xx"]
+
+[[operations]]
+include-name = "POST /api/peer-companies"
+checks.positive_data_acceptance.expected-statuses = ["2xx", "3xx", "401", "403", "404", "409", "422", "429", "5xx"]
+
+[[operations]]
+include-name = "PUT /api/peer-companies/{id}"
+checks.positive_data_acceptance.expected-statuses = ["2xx", "3xx", "401", "403", "404", "409", "422", "429", "5xx"]
+
+[[operations]]
+include-name = "POST /api/sources"
+checks.positive_data_acceptance.expected-statuses = ["2xx", "3xx", "401", "403", "404", "409", "422", "429", "5xx"]
+
+[[operations]]
+include-name = "PATCH /api/sources/{id}"
+checks.positive_data_acceptance.expected-statuses = ["2xx", "3xx", "401", "403", "404", "409", "422", "429", "5xx"]
+
 # The iTop webhook (ARQ-02, F5.1) fails closed: without ITOP_WEBHOOK_TOKEN and iTop configured it answers the
 # documented 503 `webhook_disabled`. The CI stack has no iTop, so that 503 is the designed behavior there, not a
 # server error. Only this operation skips the server-error check.

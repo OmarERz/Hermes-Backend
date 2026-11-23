@@ -1,0 +1,27 @@
+meta {
+  name: config-invalid-weights
+  type: http
+  seq: 4
+}
+
+put {
+  url: {{baseUrl}}/api/config
+  body: json
+  auth: bearer
+}
+
+auth:bearer {
+  token: {{token}}
+}
+
+body:json {
+  {"expected_version": 1, "changes": {"weights.S": "0.99"}}
+}
+
+assert {
+  res.status: eq 422
+}
+
+docs {
+  Weights that do not sum to 1.0 answer 422 weights_sum_to_one (FRO-05). Needs the version of the instance.
+}
