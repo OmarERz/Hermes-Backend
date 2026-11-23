@@ -14,7 +14,7 @@ from api.auth import CurrentUser, Role, get_current_user
 from api.errors import ApiError
 from api.routes._auth import ROUTE_ROLES
 from api.routes._events import get_event_queue
-from api.routes._runs import get_run_source
+from api.routes._runs import RunKey, get_run_source
 from api.routes._state import get_dashboard_source
 from api.routes.models import NotificationEventRow, Run
 from core.config import Settings
@@ -49,8 +49,11 @@ class SampleRuns:
             Run(id="run-2", kind="recalculation", status="running", started_at="t", finished_at=None, progress=40),
         ]
 
-    def list(self) -> list[Run]:
-        return list(self.runs)
+    def page(self, after: RunKey | None, limit: int) -> tuple[list[Run], RunKey | None]:
+        start = 0 if after is None else next(i for i, r in enumerate(self.runs) if r.id == after[2]) + 1
+        kept = self.runs[start : start + limit]
+        more = start + limit < len(self.runs)
+        return kept, ((0, datetime(2026, 1, 15, tzinfo=UTC), kept[-1].id) if more else None)
 
     def queue_scan(self, firebase_uid: str | None) -> Run:
         run = Run(

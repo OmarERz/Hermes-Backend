@@ -14,7 +14,7 @@ from sqlalchemy import select
 
 from api.auth import CurrentUser
 from api.errors import ApiError, ErrorDetail
-from api.pagination import PAGINATED_RESPONSES, Page, PageQuery, Signer, paginate
+from api.pagination import PAGINATED_RESPONSES, Page, PageQuery, Signer, decode_key, encode_key, paginate
 from api.routes._auth import guard
 from api.routes._config_support import CurrentUserDep, app_user_id, now, to_api_error
 from api.routes._db import SessionDep
@@ -60,8 +60,10 @@ def launch_scan(_request: ScanRequest, runs: Runs, user: CurrentUserDep) -> Run:
 
 @router.get("/api/runs", dependencies=[guard("GET", "/api/runs")], responses=PAGINATED_RESPONSES)
 def list_runs(params: PageQuery, signer: Signer, runs: Runs) -> Page[Run]:
-    """Scans, news runs and recalculations, newest first (ARQ-04)."""
-    return paginate(runs.list(), params, signer)
+    """Scans, news runs and recalculations: those not started yet first, then the newest (ARQ-04)."""
+    key = decode_key(params, "runs", ("int", "time", "str"))
+    items, next_key = runs.page(None if key is None else (key[0], key[1], key[2]), params.limit)
+    return Page[Run](items=items, next_cursor=encode_key(signer, "runs", next_key))
 
 
 @router.get(

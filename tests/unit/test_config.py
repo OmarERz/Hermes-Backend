@@ -181,6 +181,7 @@ EXAMPLE_EXTRAS = {
     "AUTH_EMULATOR_PORT",
     "COMPOSE_SECRETS_DIR",
     "MIGRATION_DATABASE_URL",  # core.devtools.admin (make seed)
+    "FORWARDED_ALLOW_IPS",  # read by uvicorn (trusted proxies for X-Forwarded-For)
 }
 NOT_IN_EXAMPLE = {"PGPASSWORD"}  # the app role's password reaches Settings as the pgpassword secret file only
 

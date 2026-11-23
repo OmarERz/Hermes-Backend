@@ -64,3 +64,10 @@ def test_unhandled_errors_keep_cors_and_the_envelope() -> None:
     assert response.headers["access-control-allow-origin"] == FRONT
     assert response.json()["error"]["code"] == "internal_error"
     assert "database down" not in response.text
+
+
+def test_a_cross_origin_front_can_read_the_request_id() -> None:
+    """F12.3: the front quotes X-Request-ID in its error messages, so CORS exposes it to the allowed origin."""
+    response = client_with(FRONT).get("/api/nope", headers={"Origin": FRONT})
+    assert response.headers["access-control-expose-headers"] == "X-Request-ID"
+    assert response.headers["x-request-id"]

@@ -101,6 +101,9 @@ class ItopDouble:
     before_write: Callable[[Fields], None] | None = None
     data: dict[str, dict[str, Fields]] = field(default_factory=dict)
     calls: list[RecordedCall] = field(default_factory=list)
+    # iTop refuses a write without `comment` (F12.3); opt-in so the double's own older scenarios keep working.
+    require_comment: bool = False
+    write_comments: list[str] = field(default_factory=list)  # the `comment` of each write (iTop's userinfo)
     _next_id: int = 1000
 
     def __post_init__(self) -> None:
@@ -161,8 +164,10 @@ class ItopDouble:
             return {"code": CODE_OK, "message": "", "operations": [{"verb": v} for v in verbs]}
         if name == "core/get":
             return self._get(op)
-        if name not in {"core/create", "core/update", "core/apply_stimulus"}:
-            return {"code": CODE_UNKNOWN_OPERATION, "message": f"Error: unknown operation '{name}'"}
+        refusal = self._write_refusal(name, op)
+        if refusal is not None:
+            return refusal
+        self.write_comments.append(str(op.get("comment", "")))
         if self.before_write:
             self.before_write(op)
         if name == "core/create":
@@ -170,6 +175,14 @@ class ItopDouble:
         if name == "core/update":
             return self._update(op)
         return self._stimulus(op)
+
+    def _write_refusal(self, name: str, op: Fields) -> Fields | None:
+        if name not in {"core/create", "core/update", "core/apply_stimulus"}:
+            return {"code": CODE_UNKNOWN_OPERATION, "message": f"Error: unknown operation '{name}'"}
+        if self.require_comment and not op.get("comment"):
+            # Like iTop 3.2.2 (checked live, F12.3): every write needs `comment`, which becomes the change's userinfo.
+            return {"code": CODE_ERROR, "message": "Error: Missing parameter 'comment'"}
+        return None
 
     def _classes_of(self, class_name: str) -> list[str]:
         result = [class_name]

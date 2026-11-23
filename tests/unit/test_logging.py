@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import contextvars
 import io
 import json
 import logging
@@ -9,7 +10,7 @@ from collections.abc import Iterator
 
 import pytest
 
-from core.logging import MASK, JsonFormatter, SecretMaskingFilter, configure_logging
+from core.logging import MASK, JsonFormatter, SecretMaskingFilter, bind_request, configure_logging, request_context
 
 CONFIGURED = "itop-configured-token-123"
 # Fake tokens are assembled at runtime so secret scanners do not flag the test source.
@@ -105,3 +106,43 @@ def test_uvicorn_records_are_masked(capture: io.StringIO, name: str) -> None:
     logging.getLogger(name).info('"GET /api/x?q=%s HTTP/1.1" 200', CONFIGURED)
     assert CONFIGURED not in capture.getvalue()
     assert MASK in capture.getvalue()
+
+
+def test_lines_inside_a_request_carry_its_masked_context(capture: io.StringIO) -> None:
+    """F12.3 (ASVS V16.2.1): who, from where and which request; the context is masked like the message."""
+    with request_context(request_id="r-1", client="10.0.0.9", method="GET", path="/api/x/ana@example.com", other="no"):
+        bind_request(user="uid-7", unknown="ignored")
+        logging.getLogger("hermes.test").warning("inside")
+    logging.getLogger("hermes.test").warning("outside")
+    inside, outside = lines(capture)
+    assert inside["request_id"] == "r-1"
+    assert (inside["client"], inside["method"], inside["user"]) == ("10.0.0.9", "GET", "uid-7")
+    assert inside["path"] == f"/api/x/{MASK}"
+    assert "other" not in inside and "unknown" not in inside
+    assert set(outside) == {"ts", "level", "logger", "message"}
+
+
+def test_binding_outside_a_request_does_nothing(capture: io.StringIO) -> None:
+    bind_request(user="uid-7")
+    logging.getLogger("hermes.test").warning("plain")
+    assert "user" not in lines(capture)[0]
+
+
+def test_an_error_leaving_the_block_keeps_the_context_for_the_servers_log(capture: io.StringIO) -> None:
+    """The server logs an escaped error right after, in the same task: the context must still be there."""
+
+    def handler() -> None:
+        with request_context(request_id="r-9", path="/api/x"):
+            fail_with_secret()
+
+    def request_that_fails() -> None:
+        try:
+            handler()
+        except RuntimeError:
+            logging.getLogger("uvicorn.error").exception("Exception in ASGI application")
+
+    contextvars.copy_context().run(request_that_fails)  # one request, one context, as in a server task
+    logging.getLogger("hermes.test").warning("after the request")
+    during, after = lines(capture)
+    assert during["request_id"] == "r-9"
+    assert "request_id" not in after
