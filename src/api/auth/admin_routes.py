@@ -6,10 +6,10 @@ import logging
 from typing import Annotated
 
 from fastapi import APIRouter, Depends, Path, Request
-from pydantic import BaseModel, ConfigDict
+from pydantic import BaseModel, ConfigDict, Field
 
 from api.auth.dependencies import CurrentUser, require_role
-from api.auth.directory import UserDirectory
+from api.auth.directory import RoleConflictError, UserDirectory
 from api.auth.identity import AuthUnavailableError
 from api.auth.role_admin import RevocationPendingError, RoleManager, UnknownUserError
 from api.auth.roles import Role
@@ -25,6 +25,9 @@ class RoleAssignment(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     role: Role
+    expected_role: Role | None = Field(
+        default=None, description="Role the admin read; 409 `role_changed` if it changed since (API-03)"
+    )
 
 
 class RoleAssigned(BaseModel):
@@ -43,7 +46,11 @@ def build_admin_router() -> APIRouter:
             401: {"model": ErrorResponse, "description": "Missing, invalid, expired or revoked token"},
             403: {"model": ErrorResponse, "description": "Not an admin, or inactive user"},
             404: {"model": ErrorResponse, "description": "The uid does not exist in Firebase"},
-            409: {"model": ErrorResponse, "description": "An admin cannot change their own role"},
+            409: {
+                "model": ErrorResponse,
+                "description": "Own role, the last active admin (`last_admin`) or a stale `expected_role` "
+                "(`role_changed`)",
+            },
             422: {"model": ErrorResponse, "description": "Invalid uid or body"},
             503: {"model": ErrorResponse, "description": "Identity provider unavailable"},
         },
@@ -72,9 +79,17 @@ def build_admin_router() -> APIRouter:
             return outcome["revoked"]
 
         try:
-            record = directory.change_role(uid, body.role, admin.uid, apply)
+            record = directory.change_role(uid, body.role, admin.uid, apply, body.expected_role)
         except UnknownUserError as exc:
             raise ApiError(404, "user_not_found", "El usuario no existe en Firebase.") from exc
+        except RoleConflictError as exc:
+            if exc.code == "actor_not_admin":
+                raise ApiError(403, "forbidden", "No tienes permiso para realizar esta acción.") from exc
+            if exc.code == "last_admin":
+                raise ApiError(409, "last_admin", "No puede quedar el sistema sin un administrador activo.") from exc
+            raise ApiError(
+                409, "role_changed", "El rol cambió desde que lo leíste (o no se puede comprobar); vuelve a cargarlo."
+            ) from exc
         except AuthUnavailableError as exc:
             raise ApiError(503, "auth_unavailable", "No se pudo asignar el rol. Intenta de nuevo.") from exc
         logger.info("role assigned: user %s -> %s by %s", uid, body.role.value, admin.uid)

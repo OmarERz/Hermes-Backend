@@ -34,6 +34,8 @@ BASE = {"database_url": "postgresql://a:b@db/h", "firebase_project_id": "p", "cu
 ALL_KEYS = {
     "itop_url": "https://itop.example.test",
     "itop_token": FAKE_KEY,
+    "itop_org_id": "1",
+    "itop_caller_id": "2",
     "deepseek_api_key": FAKE_KEY,
     "nvd_api_key": FAKE_KEY,
     "abusech_auth_key": FAKE_KEY,
@@ -305,3 +307,14 @@ def test_the_deadline_bounds_the_whole_batch() -> None:
 )
 def test_messages_follow_the_output_language(language: str, code: str, expected: str) -> None:
     assert connection_text(code, "NVD_API_KEY", language) == expected
+
+
+@pytest.mark.parametrize(
+    ("missing_key", "variable"), [("itop_org_id", "ITOP_ORG_ID"), ("itop_caller_id", "ITOP_CALLER_ID")]
+)
+def test_itop_without_organization_or_caller_cannot_open_tickets(missing_key: str, variable: str) -> None:
+    """iTop answers, but tickets would never be created: the wizard must say what is missing (pending F13.0 #77)."""
+    values = {k: v for k, v in ALL_KEYS.items() if k != missing_key}
+    result = probes(ok_for_every_service, **values).itop()
+    assert (result.ok, result.message, result.missing_variable) == (False, MSG_MISSING, variable)
+    assert result.latency_ms == 250

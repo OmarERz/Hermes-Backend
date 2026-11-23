@@ -35,7 +35,7 @@ def seed_day(session: Session) -> None:
     disagreeing = session.scalars(select(m.LlmReview).where(m.LlmReview.status == "judge_disagreement")).one()
     d.review(session, "applied", second_review_of_id=disagreeing.id)
     d.review(session, "no_judge_review", attempts=3, parameters={"failure": "format"})
-    d.review(session, "no_judge_review")
+    fallen = d.review(session, "no_judge_review")
     d.review(session, "applied", agent="news_analyst")
     d.review(session, "applied", at=d.NOON - timedelta(days=1))  # another day: ignored
     session.add(
@@ -59,6 +59,17 @@ def seed_day(session: Session) -> None:
             quote="q",
             status="rejected",
             rejection_rule="L5",
+        )
+    )
+    session.add(  # accepted before the review fell back: never used (pending F6.1 #68)
+        m.JudgeReason(
+            llm_review_id=fallen.id,
+            seq=1,
+            reason_code="ransomware",
+            points=8,
+            element_id="n1",
+            quote="q",
+            status="accepted",
         )
     )
     adjusted = [d.assessment(session, adj) for adj in (10, -5, 0, 20)]
@@ -101,6 +112,7 @@ def test_the_nightly_job_stores_every_metric_with_data(factory: sessionmaker[Ses
     assert q(values[("feedback_rate", "")]) == q(1)
     assert q(values[("critical_precision", "")]) == q(Decimal("0.5"))
     assert q(values[("reason_usage", "reason:mass_exploitation")]) == q(1)
+    assert ("reason_usage", "reason:ransomware") not in values
     assert q(values[("rule_rejections", "rule:L5")]) == q(1)
     assert q(values[("double_review_rate", "")]) == q(Decimal("0.25"))
     assert q(values[("double_review_disagreement", "")]) == q(1)

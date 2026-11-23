@@ -4,7 +4,8 @@ role changes behave as the API expects (D-030, docs/13)."""
 from __future__ import annotations
 
 import threading
-from collections.abc import Iterator
+import time
+from collections.abc import Callable, Iterator
 from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 
@@ -16,7 +17,7 @@ from sqlalchemy import select, update
 from sqlalchemy.orm import Session, sessionmaker
 
 from api.auth import Role, VerifiedIdentity
-from api.auth.directory import SqlUserDirectory, UserConflictError
+from api.auth.directory import RoleConflictError, SqlUserDirectory, UserConflictError
 from core.db.models import AppUser, AuditLog
 from core.db.session import make_engine
 
@@ -122,20 +123,83 @@ def test_recreated_account_with_the_same_email_is_a_conflict(sessions: sessionma
     assert owner == "old-uid"
 
 
-def test_reciprocal_role_changes_do_not_deadlock(sessions: sessionmaker[Session]) -> None:
-    """Two admins changing each other's role at the same time both commit (FOR NO KEY UPDATE vs FK KEY SHARE)."""
+def test_reciprocal_demotions_never_leave_the_system_without_an_admin(sessions: sessionmaker[Session]) -> None:
+    """Two admins demoting each other at the same time: the second change waits for the first and is then refused
+    (its actor is no longer an admin), without a deadlock (pending F0 #19). The first change holds its protected
+    section until the second one has started, so without the global lock both would read two admins and commit."""
     directory = SqlUserDirectory(sessions)
     directory.sync_login(identity("a1", Role.ADMIN))
     directory.sync_login(identity("a2", Role.ADMIN))
-    barrier = threading.Barrier(2)
+    in_section, release = threading.Event(), threading.Event()
+    applied: list[str] = []
 
-    def change(target: str, actor: str) -> None:
-        directory.change_role(target, Role.ANALYST, actor, lambda: barrier.wait(5) is not None)
+    def first() -> bool:
+        applied.append("a2")
+        in_section.set()
+        return release.wait(10)
+
+    def demote(target: str, actor: str, apply: Callable[[], bool]) -> str:
+        try:
+            directory.change_role(target, Role.ANALYST, actor, apply)
+        except RoleConflictError as exc:
+            return exc.code
+        return "changed"
 
     with ThreadPoolExecutor(max_workers=2) as pool:
-        futures = [pool.submit(change, "a1", "a2"), pool.submit(change, "a2", "a1")]
-        for future in futures:
-            future.result(timeout=30)  # re-raises a deadlock error from either transaction
+        one = pool.submit(demote, "a2", "a1", first)
+        assert in_section.wait(10)
+        two = pool.submit(demote, "a1", "a2", lambda: applied.append("a1") is None)
+        time.sleep(0.5)  # the second change reaches the global lock while the first is still inside
+        release.set()
+        outcomes = (one.result(timeout=30), two.result(timeout=30))
+    assert outcomes == ("changed", "actor_not_admin")
+    assert applied == ["a2"]  # Firebase is never touched for the refused change
     with sessions() as session:
         roles = dict(session.execute(select(AppUser.firebase_uid, AppUser.role)).tuples().all())
-    assert roles == {"a1": "analyst", "a2": "analyst"}
+    assert roles == {"a1": "admin", "a2": "analyst"}
+
+
+def test_a_stale_expected_role_is_refused_before_firebase(sessions: sessionmaker[Session]) -> None:
+    """API-03: the admin read `reader`, someone made the user an analyst meanwhile (pending F0 #20)."""
+    directory = SqlUserDirectory(sessions)
+    directory.sync_login(identity("boss", Role.ADMIN))
+    directory.sync_login(identity("u1", Role.ADMIN))
+    directory.change_role("u1", Role.ANALYST, "boss", lambda: True)
+    touched: list[str] = []
+    with pytest.raises(RoleConflictError, match="role_changed"):
+        directory.change_role("u1", Role.ADMIN, "boss", lambda: touched.append("u1") is None, Role.READER)
+    assert touched == []
+    record = directory.change_role("u1", Role.ADMIN, "boss", lambda: True, Role.ANALYST)
+    assert record is not None and record.role is Role.ADMIN
+    with pytest.raises(RoleConflictError, match="role_changed"):  # no stored copy: the expectation cannot be checked
+        directory.change_role("never-logged", Role.ANALYST, "boss", lambda: touched.append("x") is None, Role.READER)
+    assert touched == []
+
+
+def test_the_only_active_admin_is_never_demoted(sessions: sessionmaker[Session]) -> None:
+    """An inactive admin does not count: demoting the only active one is refused before Firebase (pending F0 #19)."""
+    directory = SqlUserDirectory(sessions)
+    directory.sync_login(identity("a1", Role.ADMIN))
+    directory.sync_login(identity("a2", Role.ADMIN))
+    with sessions.begin() as session:
+        session.execute(update(AppUser).where(AppUser.firebase_uid == "a2").values(active=False))
+    touched: list[str] = []
+    with pytest.raises(RoleConflictError, match="last_admin"):
+        directory.change_role("a1", Role.READER, "a1", lambda: touched.append("a1") is None)
+    assert touched == []
+    with sessions() as session:
+        assert session.scalar(select(AppUser.role).where(AppUser.firebase_uid == "a1")) == "admin"
+
+
+def test_a_first_login_during_the_assignment_gets_the_new_role(sessions: sessionmaker[Session]) -> None:
+    """The row created by a first login while Firebase is written is updated too (D-030)."""
+    directory = SqlUserDirectory(sessions)
+    directory.sync_login(identity("boss", Role.ADMIN))
+
+    def firebase_then_first_login() -> bool:
+        with ThreadPoolExecutor(max_workers=1) as pool:  # another connection, as a real login would be
+            pool.submit(directory.sync_login, identity("newbie", Role.READER)).result(timeout=10)
+        return True
+
+    record = directory.change_role("newbie", Role.ANALYST, "boss", firebase_then_first_login)
+    assert record is not None and record.role is Role.ANALYST

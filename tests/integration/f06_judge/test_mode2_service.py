@@ -236,7 +236,7 @@ def test_refuted_relationships_and_inventory_come_from_the_database(engine: Engi
         refuted = refuted_relationships(session)
         identity = "openssl sistema operativo ubuntu"  # the stored "OpenSSL  del sistema operativo Ubuntu"
         assert refuted("component", "nginx", identity)
-        assert not refuted("fork", "nginx", identity)
+        assert refuted("fork", "nginx", identity)  # the same two ends, another type (pending F6.4 #83)
         assert not refuted("component", "nginx proxy manager", identity)
         responses = [
             tool_call_completion("propose_alert", ALERT, call_id="a"),

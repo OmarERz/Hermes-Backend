@@ -14,7 +14,7 @@ from firebase_admin import exceptions as firebase_exceptions
 
 from api.app import create_app
 from api.auth import AuthUnavailableError, InMemoryUserDirectory, Role
-from api.auth.directory import AuditEntry, UserConflictError
+from api.auth.directory import AuditEntry, RoleConflictError, UserConflictError
 from api.auth.firebase import FirebaseTokenVerifier
 from api.auth.role_admin import FirebaseRoleManager, RevocationPendingError, UnknownUserError
 
@@ -290,6 +290,7 @@ def test_login_never_writes_the_role_back(parts: tuple[FakeVerifier, InMemoryUse
     verifier, directory, _ = parts
     identity = verifier.add("tok", Role.ANALYST, uid="u9")
     directory.sync_login(identity)
+    directory.sync_login(verifier.add("admin-tok", Role.ADMIN, uid="admin-1"))  # the actor is a known admin
     directory.change_role("u9", Role.READER, "admin-1", lambda: True)
     record = directory.sync_login(identity)  # a request verified before the change, finishing after it
     assert record.role is Role.READER
@@ -326,3 +327,74 @@ def test_manager_recovers_when_a_retry_succeeds(
     monkeypatch.setattr(auth, "revoke_refresh_tokens", once_down)
     role_manager.assign("u1", Role.ANALYST)
     assert len(attempts) == 2
+
+
+def test_a_stale_expected_role_is_a_conflict(
+    client: TestClient, parts: tuple[FakeVerifier, InMemoryUserDirectory, FakeRoleManager]
+) -> None:
+    """API-03 for roles: the admin read `reader`, the stored copy is `analyst` (pending F0 #20)."""
+    _, _, manager = parts
+    client.get("/api/me", headers=bearer("analyst"))
+    body = {"role": "admin", "expected_role": "reader"}
+    response = client.put("/api/admin/users/analyst-1/role", json=body, headers=bearer("admin"))
+    assert (response.status_code, response.json()["error"]["code"]) == (409, "role_changed")
+    assert manager.calls == []
+    ok = client.put(
+        "/api/admin/users/analyst-1/role", json={"role": "reader", "expected_role": "analyst"}, headers=bearer("admin")
+    )
+    assert ok.status_code == 200
+
+
+def test_the_last_active_admin_is_never_demoted(
+    client: TestClient, parts: tuple[FakeVerifier, InMemoryUserDirectory, FakeRoleManager]
+) -> None:
+    """The directory refuses to demote the only active admin (pending F0 #19); the route already refuses an admin's
+    own change, so this guards any other caller of the directory."""
+    _, directory, manager = parts
+    client.get("/api/me", headers=bearer("admin"))
+    with pytest.raises(RoleConflictError, match="last_admin"):
+        directory.change_role("admin-1", Role.READER, "admin-1", lambda: True)
+    assert manager.calls == []
+
+
+def test_an_actor_who_lost_the_role_meanwhile_is_refused(
+    client: TestClient, parts: tuple[FakeVerifier, InMemoryUserDirectory, FakeRoleManager]
+) -> None:
+    """The actor is re-checked under the lock: a request that waited while its admin was demoted changes nothing."""
+    _, directory, manager = parts
+    client.get("/api/me", headers=bearer("admin"))
+    client.get("/api/me", headers=bearer("analyst"))
+    directory.deactivate("admin-1")
+    with pytest.raises(RoleConflictError, match="actor_not_admin"):
+        directory.change_role("analyst-1", Role.READER, "admin-1", lambda: True)
+    assert manager.calls == []
+
+
+def test_a_last_admin_refusal_is_a_conflict(
+    client: TestClient,
+    parts: tuple[FakeVerifier, InMemoryUserDirectory, FakeRoleManager],
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    _, directory, _ = parts
+
+    def refuse(*_args: object) -> None:
+        raise RoleConflictError("last_admin")
+
+    monkeypatch.setattr(directory, "change_role", refuse)
+    response = client.put("/api/admin/users/analyst-1/role", json={"role": "reader"}, headers=bearer("admin"))
+    assert (response.status_code, response.json()["error"]["code"]) == (409, "last_admin")
+
+
+def test_an_actor_refused_under_the_lock_gets_403(
+    client: TestClient,
+    parts: tuple[FakeVerifier, InMemoryUserDirectory, FakeRoleManager],
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    _, directory, _ = parts
+
+    def refuse(*_args: object) -> None:
+        raise RoleConflictError("actor_not_admin")
+
+    monkeypatch.setattr(directory, "change_role", refuse)
+    response = client.put("/api/admin/users/analyst-1/role", json={"role": "reader"}, headers=bearer("admin"))
+    assert (response.status_code, response.json()["error"]["code"]) == (403, "forbidden")

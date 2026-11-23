@@ -82,7 +82,7 @@ def _step(raw: Mapping[str, Any], package: ReviewPackage) -> MitigationStep:
     if not action or len(action) > MAX_ACTION_CHARS or len(quote) > MAX_QUOTE_CHARS:
         raise _DiscardError("VAL-02")
     element = package.elements.get(str(raw["element_id"]))
-    if element is None or element.kind is ElementKind.CI:
+    if element is None or element.kind is ElementKind.CI or element.suspicious:  # SEG-03: never from a suspect
         raise _DiscardError("JUE-MIT-01")
     if len(quote) < MIN_QUOTE_CHARS or not element.contains(quote):
         raise _DiscardError("JUE-MIT-02")

@@ -135,6 +135,27 @@ def test_a_product_outside_the_range_does_not_cross_the_group_but_is_still_an_al
     assert all(a.version_confirmed for a in assets)  # the news names 3.0.7 and the CIs run 3.0.7
 
 
+def test_an_inferred_link_is_confirmed_when_a_later_correlation_sees_the_same_version(session: Session) -> None:
+    """The judge links a CI without confirming the version; deterministic correlation upgrades it (COR-05)."""
+    add_range(session, end="3.0.5")
+    story = add_story(session, products=[("openssl", "openssl", "3.0.7")])
+    alert = m.Alert(id=new_id(), story_id=story.id, relevance="R2", status="open", created_at=NOW)
+    session.add(alert)
+    session.flush()
+    asset_id = session.scalars(select(m.Asset.id).where(m.Asset.itop_ci_id == "CI-1")).one()
+    session.add(m.AlertAsset(alert_id=alert.id, asset_id=asset_id, installed_software_id=None, version_confirmed=False))
+    session.flush()
+    outcome = correlate_story(session, story.id, NOW)
+    assert outcome is not None
+    assert outcome.alert_id == alert.id
+    link = session.scalars(
+        select(m.AlertAsset).where(m.AlertAsset.alert_id == alert.id, m.AlertAsset.asset_id == asset_id)
+    ).one()
+    assert link.version_confirmed is True
+    installed = session.scalars(select(m.InstalledSoftware.id).where(m.InstalledSoftware.asset_id == asset_id)).one()
+    assert link.installed_software_id == installed  # the installation whose version agreed
+
+
 def test_product_without_range_data_is_the_weaker_product_key(session: Session) -> None:
     story = add_story(session, products=[("OpenSSL", "OpenSSL", None)])
     outcome = correlate_story(session, story.id, NOW)
@@ -336,3 +357,27 @@ def test_a_news_item_naming_an_os_in_itop_is_an_r2_alert_on_those_cis(session: S
     assert outcome.alert_id is not None
     touched = session.scalars(select(m.AlertAsset.asset_id).where(m.AlertAsset.alert_id == outcome.alert_id)).all()
     assert touched == [asset.id]
+
+
+def test_an_inferred_link_is_confirmed_by_a_matching_os(session: Session) -> None:
+    """The judge linked the CI without a version; the OS family and version agree, so E = 1.0 (COR-05)."""
+    asset = m.Asset(
+        id=new_id(),
+        itop_ci_id="CI-901",
+        itop_class="Server",
+        name="srv-windows-2",
+        os="Windows Server 2019",
+        criticality="medium",
+        confidentiality="public",
+        synced_at=NOW,
+    )
+    session.add(asset)
+    story = add_story(session, products=[("microsoft", "windows server", "2019")])
+    alert = m.Alert(id=new_id(), story_id=story.id, relevance="R2", status="open", created_at=NOW)
+    session.add(alert)
+    session.flush()
+    session.add(m.AlertAsset(alert_id=alert.id, asset_id=asset.id, installed_software_id=None, version_confirmed=False))
+    session.flush()
+    assert correlate_story(session, story.id, NOW) is not None
+    link = session.scalars(select(m.AlertAsset).where(m.AlertAsset.alert_id == alert.id)).one()
+    assert link.version_confirmed is True

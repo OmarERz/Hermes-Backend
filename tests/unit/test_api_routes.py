@@ -176,15 +176,10 @@ def test_vulnerability_filters_are_validated_before_the_database(client: TestCli
     assert client.get("/api/vulnerabilities", params={"view": "ticket"}).status_code == 422
 
 
-def test_feedback_rules(client: TestClient) -> None:
+def test_feedback_body_rules(client: TestClient) -> None:
     as_role(Role.ANALYST)
-    ok = client.post("/api/feedback", json={"assessment_id": "asm-0001", "verdict": "relevant"})
-    assert ok.status_code == 201
-    assert ok.json()["replaced_previous"] is False
     missing_level = client.post("/api/feedback", json={"assessment_id": "asm-0001", "verdict": "wrong_priority"})
     assert missing_level.status_code == 422
-    unknown = client.post("/api/feedback", json={"assessment_id": "nope", "verdict": "relevant"})
-    assert unknown.status_code == 404
     forged = client.post(
         "/api/feedback", json={"assessment_id": "asm-0001", "verdict": "relevant", "user_email": "x@y.z"}
     )

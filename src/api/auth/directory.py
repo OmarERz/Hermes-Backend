@@ -41,13 +41,40 @@ class UserRecord:
     last_login_at: datetime | None
 
 
+class RoleConflictError(Exception):
+    """A role change refused before touching Firebase: `actor_not_admin`, `role_changed` (the expected role is stale or
+    cannot be checked) or `last_admin`."""
+
+    def __init__(self, code: str) -> None:
+        super().__init__(code)
+        self.code = code
+
+
+def _check_change(
+    actor_is_admin: bool, current: str | None, role: Role, expected_role: Role | None, other_admins: int
+) -> None:
+    """The rules every directory applies under its locks (pending F0 #19, #20). `actor_not_admin`: the actor lost the
+    role (or the account) while the request waited; an expected role cannot be checked without a stored copy."""
+    if not actor_is_admin:
+        raise RoleConflictError("actor_not_admin")
+    if expected_role is not None and (current is None or current != expected_role.value):
+        raise RoleConflictError("role_changed")
+    if current == Role.ADMIN.value and role is not Role.ADMIN and other_admins == 0:
+        raise RoleConflictError("last_admin")
+
+
 class UserDirectory(Protocol):
     def sync_login(self, identity: VerifiedIdentity) -> UserRecord:
         """Create the user on first login or refresh e-mail, name, role copy and ``last_login_at``."""
         ...
 
-    def change_role(self, uid: str, role: Role, actor_uid: str, apply: Callable[[], bool]) -> UserRecord | None:
+    def change_role(
+        self, uid: str, role: Role, actor_uid: str, apply: Callable[[], bool], expected_role: Role | None = None
+    ) -> UserRecord | None:
         """Assign a role through ``apply`` (Firebase) with a durable audit trail, one change per user at a time.
+
+        Before ``apply`` runs: ``expected_role`` (optional, API-03) must match the stored copy, and an admin is never
+        demoted when no other active admin would remain; both raise ``RoleConflictError`` and change nothing.
 
         ``role_assignment_requested`` is committed before ``apply`` runs; then, holding a per-user lock,
         ``apply`` runs (it returns whether the user's sessions were revoked) and the copy plus ``role_assigned``
@@ -101,12 +128,21 @@ class InMemoryUserDirectory:
             self._users[identity.uid] = record
             return record
 
-    def change_role(self, uid: str, role: Role, actor_uid: str, apply: Callable[[], bool]) -> UserRecord | None:
+    def change_role(
+        self, uid: str, role: Role, actor_uid: str, apply: Callable[[], bool], expected_role: Role | None = None
+    ) -> UserRecord | None:
         after = {"role": role.value}
         with self._lock:
             self.audit.append(AuditEntry(actor_uid, "role_assignment_requested", uid, None, after))
         with self._role_lock:
             try:
+                with self._lock:
+                    target, actor = self._users.get(uid), self._users.get(actor_uid)
+                    others = sum(
+                        1 for u in self._users.values() if u.firebase_uid != uid and u.active and u.role is Role.ADMIN
+                    )
+                actor_is_admin = actor is not None and actor.active and actor.role is Role.ADMIN
+                _check_change(actor_is_admin, target.role.value if target else None, role, expected_role, others)
                 revoked = apply()
             except Exception:
                 with self._lock:
@@ -169,7 +205,9 @@ class SqlUserDirectory:
             raise UserConflictError(identity.uid) from exc
         return record
 
-    def change_role(self, uid: str, role: Role, actor_uid: str, apply: Callable[[], bool]) -> UserRecord | None:
+    def change_role(
+        self, uid: str, role: Role, actor_uid: str, apply: Callable[[], bool], expected_role: Role | None = None
+    ) -> UserRecord | None:
         after = {"role": role.value}
         with self._sessions.begin() as session:
             actor_id = self._actor(session, actor_uid)
@@ -178,10 +216,31 @@ class SqlUserDirectory:
             with self._sessions.begin() as session:
                 # One role change per user at a time, from before the Firebase write until the audit commits,
                 # so Firebase, the copy and the audit trail see concurrent changes in the same order.
+                # Role changes are serialized globally (always before the per-user lock, so no deadlock): two admins
+                # demoting each other at once can never leave the system without an admin, and an actor demoted
+                # meanwhile is seen as such (pending #19).
+                session.execute(select(func.pg_advisory_xact_lock(func.hashtextextended("role:admins", 0))))
                 session.execute(select(func.pg_advisory_xact_lock(func.hashtextextended(f"role:{uid}", 0))))
+                # The checks read without a row lock: the advisory locks already serialize role changes, and a row
+                # lock held while Firebase answers would make every request of the user wait in `sync_login`.
+                current = session.scalar(select(AppUser.role).where(AppUser.firebase_uid == uid))
+                others = session.scalar(
+                    select(func.count())
+                    .select_from(AppUser)
+                    .where(AppUser.firebase_uid != uid, AppUser.active, AppUser.role == Role.ADMIN.value)
+                )
+                actor_is_admin = bool(
+                    session.scalar(
+                        select(func.count())
+                        .select_from(AppUser)
+                        .where(AppUser.firebase_uid == actor_uid, AppUser.active, AppUser.role == Role.ADMIN.value)
+                    )
+                )
+                _check_change(actor_is_admin, current, role, expected_role, int(others or 0))
                 revoked = apply()
-                # FOR NO KEY UPDATE: compatible with the KEY SHARE lock the audit_log foreign key check takes, so two
-                # admins changing each other's role do not deadlock.
+                # FOR NO KEY UPDATE only for the local write (it also sees a row a first login created meanwhile):
+                # compatible with the KEY SHARE lock the audit_log foreign key check takes, so two admins changing
+                # each other's role do not deadlock.
                 user = session.scalar(
                     select(AppUser).where(AppUser.firebase_uid == uid).with_for_update(key_share=True)
                 )
