@@ -101,6 +101,7 @@ def test_all_services_running(stack: dict[str, str]) -> None:
         "bootstrap": "exited",
         "api": "running",
         "workers": "running",
+        "embeddings": "running",
     }
 
 
