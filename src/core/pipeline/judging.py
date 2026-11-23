@@ -22,7 +22,13 @@ from sqlalchemy.orm import Session
 
 from core.correlation.packages import store_package
 from core.judge.package import ReviewPackage
-from core.judge.service import DismissalService, JudgeResult, JudgeService, StoredDismissalReview
+from core.judge.service import (
+    DismissalService,
+    JudgeResult,
+    JudgeService,
+    StoredDismissalReview,
+    StoredJudgeResult,
+)
 from core.judge.session import JudgeEnvironment, ToolCaller
 from core.judge.store import ReviewTarget, judge_environment
 from core.metrics.ladder import current_level, effects
@@ -57,11 +63,20 @@ class PipelineJudge:
         return self.service.evaluate(ReviewPackage.from_content(package), self.spent_usd)
 
     def record(self, session: Session, package: dict[str, Any], assessed: JudgeResult) -> JudgeVerdict:
-        _, target = _target(session, package, self.now)
-        stored = self.service.store(session, target, assessed)
-        second = assessed.second.cost_usd if assessed.second is not None else Decimal(0)
-        self.spent_usd += assessed.first.cost_usd + second
+        stored = self._store(session, package, assessed, stale=False)
         return JudgeVerdict(stored.result.adjustment, stored.review_id)
+
+    def discard(self, session: Session, package: dict[str, Any], assessed: JudgeResult) -> None:
+        self._store(session, package, assessed, stale=True)
+
+    def _store(
+        self, session: Session, package: dict[str, Any], assessed: JudgeResult, *, stale: bool
+    ) -> StoredJudgeResult:
+        _, target = _target(session, package, self.now)
+        stored = self.service.store(session, target, assessed, stale=stale)
+        second = assessed.second.cost_usd if assessed.second is not None else Decimal(0)
+        self.spent_usd += assessed.first.cost_usd + second  # stored now: the next review counts it (L12)
+        return stored
 
 
 def judge_for(session: Session, caller: ToolCaller, now: datetime) -> PipelineJudge | None:
@@ -77,17 +92,16 @@ def dismiss_story(
 ) -> StoredDismissalReview | None:
     """Mode 2 on one dismissal candidate; None when the ladder turned the judge off.
 
-    Three steps (F12.2 #105): the read transaction (environment, the candidate's checks, the inventory snapshot and
-    the refuted relationships) is committed with anything the session held; the model reviews the candidate with no
-    transaction open; a new transaction stores the package, the review(s), the alert (re-checked against the
-    inventory) and the error queue, and the caller commits it."""
+    Three steps (F12.2 #105): the first transaction (environment, the stored package and the candidate's checks
+    against it, the inventory snapshot and the refuted relationships) is committed with anything the session held;
+    the model reviews the candidate with no transaction open; a new transaction stores the review(s), the alert
+    (re-checked against the inventory) and the error queue, and the caller commits it."""
     env = environment(session, now)
     if env is None:
         return None
     service = DismissalService(caller, env)
-    parsed = ReviewPackage.from_content(package)
-    context = service.context(session, parsed)
+    parsed, target = _target(session, package, now)  # stored first: it is checked before any token is spent
+    context = service.context(session, parsed, target.review_package_id)
     session.commit()  # no transaction stays open while the model answers
     result = service.evaluate(parsed, context)
-    parsed, target = _target(session, package, now)
     return service.store(session, parsed, target, result)

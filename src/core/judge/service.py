@@ -19,7 +19,14 @@ from core.db.models import ReviewPackage as ReviewPackageRow
 from core.judge.budget import OffsetDailyBudget
 from core.judge.double_review import combine_outcomes, needs_double_review
 from core.judge.mitigation import MitigationResult
-from core.judge.mode2 import Mode2Context, Mode2Result, mode2_min_confidence, review_candidate, still_holds
+from core.judge.mode2 import (
+    Inventory,
+    Mode2Context,
+    Mode2Result,
+    mode2_min_confidence,
+    review_candidate,
+    still_holds,
+)
 from core.judge.package import ReviewPackage
 from core.judge.session import Failure, JudgeEnvironment, JudgeSession, ReviewOutcome, ReviewStatus, ToolCaller
 from core.judge.store import (
@@ -102,18 +109,27 @@ class JudgeService:
         open in between (`core.pipeline.judging`)."""
         return self.store(session, target, self.evaluate(package))
 
-    def store(self, session: Session, target: ReviewTarget, result: JudgeResult) -> StoredJudgeResult:
+    def store(
+        self, session: Session, target: ReviewTarget, result: JudgeResult, *, stale: bool = False
+    ) -> StoredJudgeResult:
         """Store an evaluation: the first review carries the final status, the blind one links to it (A-2); the
-        package is queued for a later run when the result fell back to the base (PRE-01)."""
+        package is queued for a later run when the result fell back to the base (PRE-01).
+
+        `stale`: the package changed while the model answered, so the review is never applied (F12.2 #105). It is
+        stored as `no_judge_review` with failure `stale` and no mitigation, its accepted reasons do not count as
+        used (MET-07), and the queue of that outdated package is left alone."""
         first = result.first
-        if result.status is ReviewStatus.NO_JUDGE_REVIEW and first.adjustment is not None:
+        if stale:
+            result = JudgeResult(ReviewStatus.NO_JUDGE_REVIEW, None, {}, first, result.second)
+            first = replace(first, failure=Failure.STALE, mitigation=MitigationResult.absent())
+        elif result.status is ReviewStatus.NO_JUDGE_REVIEW and first.adjustment is not None:
             # the blind review failed: final = base, so no drafted mitigation is kept (JUE-MIT-09); record the cause
             first = replace(first, failure=result.failure, mitigation=MitigationResult.absent())
         first_id = save_review(session, first, target, status=result.status)
         second_id: uuid.UUID | None = None
         if result.second is not None:
             second_id = save_review(session, result.second, target, second_review_of=first_id)
-        queued = sync_error_queue(session, target.review_package_id, result.failure, target.now)
+        queued = False if stale else sync_error_queue(session, target.review_package_id, result.failure, target.now)
         return StoredJudgeResult(result, first_id, second_id, queued)
 
 
@@ -142,19 +158,17 @@ class DismissalService:
 
     def review(self, session: Session, package: ReviewPackage, target: ReviewTarget) -> StoredDismissalReview:
         """The three steps in the caller's session (tools and tests)."""
-        _check_candidate(session, package, target.review_package_id)
-        return self.store(session, package, target, self.evaluate(package, self.context(session, package)))
+        context = self.context(session, package, target.review_package_id)
+        return self.store(session, package, target, self.evaluate(package, context))
 
-    def context(self, session: Session, package: ReviewPackage) -> Mode2Context:
-        """The read step: the candidate's own checks, then everything code validates the proposals against."""
-        _check_candidate(session, package, None)
-        return Mode2Context(
-            mode2_min_confidence(self._env), SnapshotInventory.load(session), refuted_relationships(session)
-        )
+    def context(self, session: Session, package: ReviewPackage, review_package_id: uuid.UUID | None) -> Mode2Context:
+        """The read step, before any token is spent: the candidate's checks (with its stored package row, when
+        given), then everything code validates the proposals against."""
+        _check_candidate(session, package, review_package_id)
+        return self._context(session, SnapshotInventory.load(session))
 
-    def _live(self, session: Session) -> Mode2Context:
-        """The inventory and refutations as they are now, in the write transaction."""
-        return Mode2Context(mode2_min_confidence(self._env), DbInventory(session), refuted_relationships(session))
+    def _context(self, session: Session, inventory: Inventory) -> Mode2Context:
+        return Mode2Context(mode2_min_confidence(self._env), inventory, refuted_relationships(session))
 
     def evaluate(self, package: ReviewPackage, context: Mode2Context) -> Mode2Result:
         """The model's review(s) of the candidate; no database access."""
@@ -166,7 +180,7 @@ class DismissalService:
         """The write step: an alert whose inventory facts changed meanwhile is not raised (`Failure.STALE`, queued
         for a retry); the reviews are stored either way (their tokens were paid)."""
         _check_candidate(session, package, target.review_package_id)
-        stale = result.alert is not None and not still_holds(result.alert, self._live(session))
+        stale = result.alert is not None and not still_holds(result.alert, self._context(session, DbInventory(session)))
         if stale:
             result = Mode2Result(
                 ReviewStatus.NO_JUDGE_REVIEW, replace(result.first, failure=Failure.STALE), result.second

@@ -2,12 +2,16 @@
 
 from __future__ import annotations
 
+from dataclasses import replace
+from decimal import Decimal
+
 import pytest
 from pipeline_support import NOW, judge_caller, make_story, one_reason_review
 from sqlalchemy import Engine, select
 from sqlalchemy.orm import Session, sessionmaker
 
 from core.db import models as m
+from core.judge.service import JudgeResult
 from core.pipeline.judging import dismiss_story, judge_for
 from doubles.llm import tool_call_completion
 from harness.judge import dismissal_package, finding_package
@@ -28,6 +32,9 @@ def test_mode1_stores_the_package_and_the_review_and_answers_the_adjustment(fact
         verdict = judge.record(session, package, assessed)
         assert verdict.adjustment == 10
         assert judge.spent_usd == assessed.first.cost_usd  # counted against the day by its next review
+        blind = replace(assessed.first, cost_usd=Decimal("0.25"))
+        judge.discard(session, package, JudgeResult(assessed.status, assessed.adjustment, {}, assessed.first, blind))
+        assert judge.spent_usd == 2 * assessed.first.cost_usd + Decimal("0.25")  # the blind review counts too
         review = session.get_one(m.LlmReview, verdict.llm_review_id)
         assert (review.status, review.input_ref.startswith("review_package:")) == ("applied", True)
         stored = session.scalars(select(m.ReviewPackage).where(m.ReviewPackage.finding_group_id == group_id)).one()

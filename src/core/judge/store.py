@@ -136,8 +136,9 @@ def save_review(
     `calls`), and a mitigation step that cites one discards the whole draft (JUE-MIT-05) with rule JUE-MIT-04."""
     cited = {r.ci_id for r in outcome.reasons if r.ci_id} | {s.ci_id for s in outcome.mitigation.steps if s.ci_id}
     assets = resolve_assets(session, (ci for ci in cited if ci is not None))
-    if any(step.ci_id and step.ci_id not in assets for step in outcome.mitigation.steps):
-        logger.warning("a mitigation step cites a CI that is not in the inventory: the draft is discarded")
+    missing = sorted({step.ci_id for step in outcome.mitigation.steps if step.ci_id and step.ci_id not in assets})
+    if missing:
+        logger.warning("mitigation steps cite CIs not in the inventory (%s): the draft is discarded", missing)
         outcome = replace(outcome, mitigation=MitigationResult(MitigationStatus.DISCARDED, rule=MISSING_CI_RULE))
     review = LlmReview(id=new_id(), **_review_columns(outcome, target, status))
     review.second_review_of_id = second_review_of
@@ -234,8 +235,9 @@ def _reason_rows(review_id: uuid.UUID, outcome: ReviewOutcome, assets: Mapping[s
                 # since asset scores exist only for inventory CIs.
                 logger.log(
                     logging.WARNING if record.status == "accepted" else logging.INFO,
-                    "%s more_critical_asset without an inventory CI kept only in calls",
+                    "%s more_critical_asset for CI %r, not in the inventory: kept only in calls",
                     record.status,
+                    record.ci_id,
                 )
                 continue
         rows.append(

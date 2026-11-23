@@ -85,6 +85,7 @@ class StagedJudgeDouble(JudgeDouble):
         super().__init__(session, adjustment)
         self.assessed: list[str] = []
         self.recorded: list[uuid.UUID | None] = []
+        self.discarded: list[uuid.UUID] = []
         self.meanwhile = list(meanwhile or [])
 
     def assess(self, package: dict[str, Any]) -> int | None:
@@ -98,6 +99,10 @@ class StagedJudgeDouble(JudgeDouble):
         verdict = self(package)
         self.recorded.append(verdict.llm_review_id)
         return verdict
+
+    def discard(self, session: Session, package: dict[str, Any], assessed: int | None) -> None:
+        assert session is self.session
+        self.discarded.append(self.review_for(store_package(session, package, NOW).id).id)
 
 
 class TicketsDouble:
@@ -654,9 +659,8 @@ def test_a_group_that_changed_while_the_judge_answered_is_judged_again(
     assert len(judge.assessed) == 2
     assert judge.assessed[0] != judge.assessed[1]  # the second review is of the package as it is now
     assessment = session.get_one(m.Assessment, evaluation.assessment_id)
-    assert assessment.llm_review_id == judge.recorded[1]
-    stale = session.get_one(m.LlmReview, judge.recorded[0])  # the first one is kept (its tokens were paid)
-    assert stale.review_package_id is not None
+    assert assessment.llm_review_id == judge.recorded[0]
+    assert len(judge.discarded) == 1  # the first one is kept as not applied (its tokens were paid)
 
 
 def test_a_group_that_keeps_changing_gets_the_base(session: Session, monkeypatch: pytest.MonkeyPatch) -> None:
@@ -668,7 +672,7 @@ def test_a_group_that_keeps_changing_gets_the_base(session: Session, monkeypatch
     assert evaluation.result.no_judge_review  # EVA-04: final = base
     assessment = session.get_one(m.Assessment, evaluation.assessment_id)
     assert assessment.llm_review_id is None
-    assert len(judge.recorded) == 2  # both paid reviews are stored
+    assert (judge.recorded, len(judge.discarded)) == ([], 2)  # both paid reviews are stored, as not applied
 
 
 def test_a_changed_group_whose_previous_review_fits_again_reuses_it(
@@ -689,6 +693,7 @@ def test_a_changed_group_whose_previous_review_fits_again_reuses_it(
     evaluation = evaluate_group(session, group, run(session), "news", opts(session, judge))
     assert (len(judge.assessed), evaluation.judge_called, evaluation.judge_reused) == (1, True, True)
     assert evaluation.result.applied_adjustment == -12  # the review of the package as it is again (COR-06)
+    assert (judge.recorded, len(judge.discarded)) == ([], 1)
 
 
 def test_a_group_closed_while_the_judge_answered_keeps_the_review(
@@ -714,4 +719,5 @@ def test_a_group_closed_while_the_judge_answered_keeps_the_review(
     judge = StagedJudgeDouble(session, adjustment=-12, meanwhile=[fix_everything])
     with pytest.raises(GroupNotActiveError):
         evaluate_group(session, group, run_id, "new_finding", opts(session, judge))
-    assert session.get(m.LlmReview, judge.recorded[0]) is not None  # stored: the caller commits it
+    assert judge.recorded == []
+    assert session.get(m.LlmReview, judge.discarded[0]) is not None  # stored, not applied: the caller commits it

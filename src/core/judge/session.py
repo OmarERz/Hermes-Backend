@@ -259,7 +259,7 @@ class JudgeSession:
                 last_turn_tokens = exc.usage.input + exc.usage.output + exc.usage.reasoning
                 format_failures += 1
                 error = str(exc)
-                self._record_format_error(exc, error)
+                self._record_format_error(exc)
                 if format_failures > self._settings.format_retries or error == last_error:
                     return self._fallback(Failure.FORMAT)
                 last_error = error
@@ -295,11 +295,11 @@ class JudgeSession:
     def _finished_status(self) -> ReviewStatus:
         return ReviewStatus.SUGGESTION if self._env.ladder_level >= LADDER_SUGGESTION else ReviewStatus.APPLIED
 
-    def _record_format_error(self, exc: LlmError, error: str) -> None:
+    def _record_format_error(self, exc: LlmError) -> None:
         """F6.1 #70: an answer that broke the tool's format is an `error` entry of `calls` with rule VAL-02, so the
         audit shows every invalid answer (the model's raw output is never stored: only the error, with field paths)."""
         tool = exc.tool_name if isinstance(exc, ToolArgumentsError) else ""
-        self._state.calls.append(CallRecord(len(self._state.calls) + 1, tool, {}, "error", "VAL-02", error))
+        self._state.calls.append(CallRecord(len(self._state.calls) + 1, tool, {}, "error", "VAL-02", str(exc)))
 
     # --- tools -----------------------------------------------------------------------------------------------
     def _dispatch(self, call: ToolCall) -> dict[str, Any]:

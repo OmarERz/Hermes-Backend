@@ -325,4 +325,6 @@ def test_no_transaction_is_open_while_the_judge_answers_and_a_stale_review_is_ju
             select(m.ReviewPackage).where(m.ReviewPackage.content["group"]["cis"].astext.contains("revision 1"))
         ).all()
         assert len(stale) == 1  # the first package and its review are kept (its tokens were paid)
-        assert session.scalars(select(m.LlmReview).where(m.LlmReview.review_package_id == stale[0].id)).all()
+        kept = session.scalars(select(m.LlmReview).where(m.LlmReview.review_package_id == stale[0].id)).one()
+        assert (kept.status, kept.parameters["failure"]) == ("no_judge_review", "stale")  # never looks applied
+        assert session.scalars(select(m.ErrorQueue).where(m.ErrorQueue.review_package_id == stale[0].id)).all() == []

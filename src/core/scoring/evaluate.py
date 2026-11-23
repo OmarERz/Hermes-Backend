@@ -6,10 +6,11 @@ never called by a recalculation (COR-05): a recalculation reuses the last adjust
 formula and the clock change.
 
 With a staged judge (the pipeline's) no transaction is open while the model answers (F12.2 #105, F6.2 #74): the read
-transaction decides that the package needs a review and is committed; the judge reviews it; a new transaction stores
-the review, reads the group again and applies the review only if the package it would build now has the same
-fingerprint. A package that changed meanwhile is judged once more; if it changes again the score is the base
-(EVA-04). Every review is stored, applied or not, since its tokens were paid.
+transaction decides that the package needs a review and is committed; the judge reviews it; a new transaction reads
+the group again and applies the review only if the package it would build now has the same fingerprint. A package
+that changed meanwhile is judged once more; if it changes again the score is the base (EVA-04), not queued: the next
+scan evaluates the group again. Every review is stored (its tokens were paid); one that was not applied is stored
+as `no_judge_review` with failure `stale`.
 """
 
 from __future__ import annotations
@@ -81,6 +82,11 @@ class StagedJudge[T](Protocol):
 
     def record(self, session: Session, package: dict[str, Any], assessed: T) -> JudgeVerdict:
         """Store the package and its review in the session's transaction; the verdict for the score."""
+        ...
+
+    def discard(self, session: Session, package: dict[str, Any], assessed: T) -> None:
+        """Store a review whose package changed while the model answered: kept (its tokens were paid), never
+        applied, so it must not look applied."""
         ...
 
 
@@ -401,11 +407,16 @@ def _judge_outside_transaction(
         rounds += 1
         session.commit()  # the reads (and a stale review of the last round): no transaction during the call
         assessed = judge.assess(package)
-        verdict = judge.record(session, package, assessed)  # a new transaction: stored whatever comes next
-        plan = _plan(session, plan.ctx.id, plan.trigger, options, plan.now)  # raises if the group closed meanwhile
+        try:  # a new transaction: read the group again before storing the review
+            plan = _plan(session, plan.ctx.id, plan.trigger, options, plan.now)
+        except GroupNotActiveError:
+            judge.discard(session, package, assessed)  # the caller commits it
+            raise
         current = build_finding_package(session, plan.ctx, plan.matches, EngineScorer(plan.formula, plan.now))
         if current["fingerprint"] == package["fingerprint"]:
+            verdict = judge.record(session, package, assessed)
             return plan, _Decision(verdict.adjustment, verdict.llm_review_id, True, False)
+        judge.discard(session, package, assessed)
         log.info("group %s changed while the judge answered: its review is kept but not applied", plan.ctx.id)
         unjudged = replace(plan, judge=None) if rounds >= MAX_JUDGE_ROUNDS else plan
         decision = replace(_decide_adjustment(session, unjudged, current), called=True)

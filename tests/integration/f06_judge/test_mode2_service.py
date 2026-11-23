@@ -395,14 +395,12 @@ def test_a_candidate_without_a_stored_package_can_be_reviewed(engine: Engine) ->
     assert (stored.status, stored.queued) == (ReviewStatus.APPLIED, False)
 
 
-def test_an_alert_whose_ci_was_retired_while_the_model_answered_is_not_raised(engine: Engine) -> None:
-    """F12.2 #105: validated against the snapshot, re-checked when stored; the paid review is kept and queued."""
+def staged_review(engine: Engine, content: dict[str, Any], responses: list[dict[str, Any]]) -> Any:
+    """The pipeline's three steps with real commits; CI-1 is retired while the model answers."""
     with Session(engine) as session, session.begin():
-        story_id = make_story(session)
-        content = candidate(story_id)
         package_id = package_row(session, content)
     double = LlmDouble()
-    double.add_case("case", [tool_call_completion("propose_alert", {**ALERT, "ci_id": "CI-1"})])
+    double.add_case("case", responses)
     double.use("case")
 
     def retire() -> None:
@@ -421,15 +419,37 @@ def test_an_alert_whose_ci_was_retired_while_the_model_answered_is_not_raised(en
     svc = DismissalService(double_llm_client(double), env)
     parsed = ReviewPackage.from_content(content)
     with Session(engine) as session:
-        context = svc.context(session, parsed)
+        context = svc.context(session, parsed, package_id)
         session.commit()
         result = svc.evaluate(parsed, context)
         assert result.alert is not None  # the snapshot still had CI-1
         stored = svc.store(session, parsed, ReviewTarget(package_id, "r", NOW), result)
         session.commit()
+    return stored
+
+
+def assert_stale(engine: Engine, stored: Any) -> None:
     assert (stored.status, stored.alert_id, stored.queued) == (ReviewStatus.NO_JUDGE_REVIEW, None, True)
     with Session(engine) as session:
         review = session.get_one(m.LlmReview, stored.review_id)
         assert (review.status, review.parameters["failure"]) == ("no_judge_review", "stale")
         assert session.scalars(select(m.Alert)).all() == []
         assert session.scalars(select(m.ErrorQueue.reason)).all() == ["judge stale"]
+
+
+def test_an_alert_whose_ci_was_retired_while_the_model_answered_is_not_raised(engine: Engine) -> None:
+    """F12.2 #105: validated against the snapshot, re-checked when stored; the paid review is kept and queued."""
+    with Session(engine) as session, session.begin():
+        content = candidate(make_story(session))
+    stored = staged_review(engine, content, [tool_call_completion("propose_alert", {**ALERT, "ci_id": "CI-1"})])
+    assert_stale(engine, stored)
+
+
+def test_a_stale_alert_agreed_by_the_blind_review_is_queued_too(engine: Engine) -> None:
+    with Session(engine) as session, session.begin():
+        content = candidate(make_story(session))
+    content["news"][0]["suspicious"] = True  # SEG-03: a blind second review must agree
+    alert = tool_call_completion("propose_alert", {**ALERT, "ci_id": "CI-1"})
+    stored = staged_review(engine, content, [alert, alert])
+    assert stored.second_review_id is not None
+    assert_stale(engine, stored)
