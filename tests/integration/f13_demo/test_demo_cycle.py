@@ -89,6 +89,7 @@ def test_running_the_cycle_again_adds_an_assessment_but_no_second_ticket_or_data
     run_cycle(factory, NOW.replace(hour=13))
     second = counts(engine)
     assert second["assessment"] == first["assessment"] + 2
+    assert second["notification_event"] == first["notification_event"]
     assert second["ticket"] == first["ticket"] and second["finding"] == first["finding"]
     assert second["correlation"] == first["correlation"]
     assert rows(engine, "SELECT count(*) FROM raw_article")[0][0] == 3

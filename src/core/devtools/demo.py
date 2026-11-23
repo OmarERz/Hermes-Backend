@@ -85,7 +85,7 @@ NEWS: tuple[tuple[str, str, str], ...] = (  # the third names a CMDB product wit
         "Se publicó OpenSSL 3.0.8 para corregir CVE-2026-10001, ya explotada.",
     ),
     (
-        "https://news.example.test/nginx-campaign",
+        "https://news.example.test/redis-campaign",
         "Campaña de escaneo contra servidores Redis expuestos",
         "Un grupo escanea servidores Redis 7.0 expuestos a internet en busca de fallas sin parche.",
     ),
@@ -219,9 +219,9 @@ def _news(session: Session, now: datetime) -> list[uuid.UUID]:
         )
         session.add(source)
         session.flush()
-    scan = session.scalars(select(m.Run).where(m.Run.kind == "scan").limit(1)).first()
-    run = scan or m.Run(kind="news", status="succeeded", progress=100, trigger_reason="manual", started_at=now)
-    if scan is None:
+    run = session.scalars(select(m.Run).where(m.Run.kind == "news").limit(1)).first()
+    if run is None:
+        run = m.Run(kind="news", status="succeeded", progress=100, trigger_reason="manual", started_at=now)
         session.add(run)
     session.flush()
     fetch = m.SourceFetch(source_id=source.id, run_id=run.id, started_at=now, status="ok", items_new=len(NEWS))
@@ -451,7 +451,7 @@ def score_group(session: Session, group: m.FindingGroup, run_id: uuid.UUID, now:
         run_id=run_id,
         formula_version_id=version_id,
         llm_review_id=review.id if review else None,
-        trigger="new_finding",
+        trigger="manual",
         factor_s=s_value,
         factor_p=formula.level("P", p_level),
         factor_t=t_value,
