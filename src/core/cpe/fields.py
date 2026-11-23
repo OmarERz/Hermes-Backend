@@ -1,7 +1,8 @@
 """The fields of a CPE 2.3 name (the one place that splits and unescapes them).
 
-A backslash escapes the next character, so `\\:` stays inside its field and the colon that follows an escaped
-backslash (`\\:`) ends it. NVD's criteria strings and our own `cpe_uri` follow the same rule.
+A backslash escapes the next character: an escaped colon stays inside its field, while a colon that follows an
+escaped backslash (two backslashes, then the colon) ends it.
+NVD's criteria strings and our own `cpe_uri` follow the same rule.
 """
 
 from __future__ import annotations
