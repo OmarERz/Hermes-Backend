@@ -14,6 +14,7 @@ from sqlalchemy.orm import Session
 
 from core.analysts.cve import (
     CveOptions,
+    advisory_domains,
     analyze_cve,
     analyze_pending_cves,
     pending_cves,
@@ -198,7 +199,7 @@ def test_an_advisory_that_cannot_be_downloaded_leaves_the_cve_record_alone() -> 
     assert (
         provider(["https://vendor.example.com/a", "https://sub.vendor.example.com/b", "https://other.test/c"]) is None
     )
-    assert web_advisory_provider(fetcher)(["https://vendor.example.com/a"]) is None  # empty allowlist: no fetch
+    assert web_advisory_provider(fetcher, ())(["https://vendor.example.com/a"]) is None  # empty allowlist: no fetch
 
 
 def active_group(session: Session, cve_id: str) -> None:
@@ -251,3 +252,17 @@ def test_pending_cves_are_those_of_active_groups_without_an_analysis(
     results = analyze_pending_cves(session, double_llm_client(double), CveOptions(now=NOW))
     assert [r.status for r in results] == ["analyzed", "analyzed"]
     assert pending_cves(session) == []
+
+
+def test_the_advisory_allowlist_comes_from_the_environment_and_is_empty_by_default(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.delenv("ADVISORY_DOMAINS", raising=False)
+    assert advisory_domains() == ()
+    monkeypatch.setenv("ADVISORY_DOMAINS", " Vendor.Example.com, .other.example.org ,,")
+    assert advisory_domains() == ("other.example.org", "vendor.example.com")
+    web = FakeWeb()
+    web.serve("https://vendor.example.com/a", b"<html><body></body></html>", "text/html")
+    fetcher = Fetcher(transport=web.transport(), resolver=lambda _h: ["93.184.216.34"])
+    web_advisory_provider(fetcher)(["https://vendor.example.com/a", "https://nope.test/x"])
+    assert [r.headers["host"] for r in web.requests] == ["vendor.example.com"]

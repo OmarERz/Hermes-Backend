@@ -9,6 +9,7 @@ that S as estimated (ANA-14). The analyst does not write mitigations (D-017).
 from __future__ import annotations
 
 import logging
+import os
 from collections.abc import Callable
 from dataclasses import dataclass
 from datetime import UTC, datetime
@@ -44,22 +45,30 @@ SCHEMA_FILE = "cve_analysis_tool.json"
 SCHEMA_VERSION = "1"
 ESTIMATED_CALL_USD = Decimal("0.01")
 MAX_REFERENCES = 30
-# D-014 level 2: advisory pages are downloaded only from domains on this allowlist. The team fills it in; empty
-# means no advisory text is fetched and the analyst works from the CVE record alone. TODO(P-xxx): confirm the list.
-ADVISORY_DOMAINS: tuple[str, ...] = ()
+# D-014 level 2: advisory pages are downloaded only from domains on an allowlist. It comes from the environment
+# variable ADVISORY_DOMAINS (comma-separated host names); empty or unset means no advisory text is fetched and the
+# analyst works from the CVE record alone (safe by default).
+ADVISORY_DOMAINS_ENV = "ADVISORY_DOMAINS"
+
+
+def advisory_domains() -> tuple[str, ...]:
+    raw = os.environ.get(ADVISORY_DOMAINS_ENV, "")
+    return tuple(sorted({d.strip().lower().lstrip(".") for d in raw.split(",") if d.strip()}))
 
 
 class AdvisoryProvider(Protocol):
     def __call__(self, urls: list[str]) -> str | None: ...
 
 
-def web_advisory_provider(fetcher: Fetcher, allowed: tuple[str, ...] = ADVISORY_DOMAINS) -> AdvisoryProvider:
+def web_advisory_provider(fetcher: Fetcher, allowed: tuple[str, ...] | None = None) -> AdvisoryProvider:
     """Download the first `Vendor Advisory` page whose host is an allowed domain (or a subdomain of one)."""
+
+    domains = advisory_domains() if allowed is None else allowed
 
     def provide(urls: list[str]) -> str | None:
         for url in urls:
             host = (urlsplit(url).hostname or "").lower()
-            if not any(host == d or host.endswith("." + d) for d in allowed):
+            if not any(host == d or host.endswith("." + d) for d in domains):
                 continue
             try:
                 page = fetcher.get(url, ARTICLE_CONTENT_TYPES)
