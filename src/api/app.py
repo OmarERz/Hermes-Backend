@@ -80,7 +80,8 @@ def create_app(
     app.state.itop_url = str(settings.itop_url) if settings.itop_url is not None else None  # for links to iTop
     install_error_handlers(app)
     app.add_middleware(BodySizeLimitMiddleware)
-    app.add_middleware(SecurityHeadersMiddleware)  # also on the 413 of the size limit
+    # Also on the 413 of the size limit.
+    app.add_middleware(SecurityHeadersMiddleware, include_subdomains=settings.hsts_include_subdomains)
     app.add_middleware(RequestContextMiddleware)  # outermost: every log line of a request carries its context
     if token_verifier is None or role_manager is None:
         firebase = FirebaseTokenVerifier(settings.firebase_project_id, settings.firebase_credentials_file)

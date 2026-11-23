@@ -11,8 +11,8 @@ from api.app import create_app
 pytestmark = pytest.mark.unit
 
 
-def client(docs: bool = False) -> TestClient:
-    settings = SETTINGS.model_copy(update={"api_docs_enabled": docs})
+def client(docs: bool = False, subdomains: bool = False) -> TestClient:
+    settings = SETTINGS.model_copy(update={"api_docs_enabled": docs, "hsts_include_subdomains": subdomains})
     return TestClient(create_app(settings, token_verifier=FakeVerifier(), role_manager=object()))
 
 
@@ -28,7 +28,14 @@ def test_security_headers_on_success_and_errors(path: str, status: int) -> None:
     assert headers["cache-control"] == "no-store"
     assert headers["content-security-policy"] == "default-src 'none'; frame-ancestors 'none'"
     assert "camera=()" in headers["permissions-policy"]
-    assert headers["strict-transport-security"] == "max-age=31536000; includeSubDomains"
+    assert headers["strict-transport-security"] == "max-age=31536000"
+
+
+def test_hsts_covers_subdomains_only_when_configured() -> None:
+    """includeSubDomains forces HTTPS on every subdomain of the host for a year, so it is opt-in (23 nov)."""
+    assert client().get("/api/health").headers["strict-transport-security"] == "max-age=31536000"
+    with_subdomains = client(subdomains=True).get("/api/health").headers["strict-transport-security"]
+    assert with_subdomains == "max-age=31536000; includeSubDomains"
 
 
 def test_the_development_docs_keep_a_csp_that_lets_swagger_load() -> None:

@@ -61,6 +61,7 @@ x-backend: &backend
     FIREBASE_AUTH_EMULATOR_HOST: auth-emulator:9099
     FIREBASE_CREDENTIALS_FILE: ${FIREBASE_CREDENTIALS_FILE:-}
     API_DOCS_ENABLED: ${API_DOCS_ENABLED:-false}
+    HSTS_INCLUDE_SUBDOMAINS: ${HSTS_INCLUDE_SUBDOMAINS:-false}
     # Uvicorn trusts X-Forwarded-For only from these addresses: list the reverse proxy so the logs show the real client
     FORWARDED_ALLOW_IPS: ${FORWARDED_ALLOW_IPS:-127.0.0.1}
     CORS_ALLOWED_ORIGINS: ${CORS_ALLOWED_ORIGINS:-}
