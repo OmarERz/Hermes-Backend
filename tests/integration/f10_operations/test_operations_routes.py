@@ -5,7 +5,7 @@ from __future__ import annotations
 from datetime import timedelta
 
 import pytest
-from conftest import T0, FakeProbes
+from f10ops import T0, FakeProbes
 from fastapi.testclient import TestClient
 from sqlalchemy import Engine, text
 
