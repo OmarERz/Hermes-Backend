@@ -60,3 +60,10 @@ def test_a_formula_key_with_other_digits_is_an_unknown_parameter_not_a_crash(bad
         assert any(problem.issue == "unknown_parameter" for problem in error.problems)
     else:
         raise AssertionError("the key must be refused")
+
+
+@given(st.integers(min_value=4001, max_value=6000))
+def test_absurdly_long_digit_strings_are_refused_instead_of_raising(length: int) -> None:
+    assert ascii_int("9" * length) is None
+    assert retry_after_seconds("9" * length) is None
+    assert ascii_int("9" * 4000) == int("9" * 4000)

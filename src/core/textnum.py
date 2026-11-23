@@ -10,11 +10,13 @@ from __future__ import annotations
 from typing import Final
 
 ASCII_DIGITS: Final = frozenset("0123456789")
+MAX_RETRY_AFTER_CHARS: Final = 20
+MAX_DIGITS: Final = 4000  # `int()` refuses more than 4300 digits; nothing we read is anywhere near this long
 
 
 def ascii_int(text: str | None) -> int | None:
     """The integer written with ASCII digits only (no sign, no spaces); None for anything else. Never raises."""
-    if not text or not set(text) <= ASCII_DIGITS:
+    if not text or len(text) > MAX_DIGITS or not set(text) <= ASCII_DIGITS:
         return None
     return int(text)
 
@@ -26,6 +28,8 @@ def retry_after_seconds(raw: str | None, maximum: float | None = None) -> float 
     falls back to its own backoff, and a hostile server can never make it sleep on a non-number.
     """
     text = (raw or "").strip()
+    if len(text) > MAX_RETRY_AFTER_CHARS:
+        return None  # no real delay needs that many digits; a longer one would overflow to `inf`
     head, _, tail = text.partition(".")
     if not set(head) <= ASCII_DIGITS or not set(tail) <= ASCII_DIGITS or not head:
         return None
