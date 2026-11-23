@@ -82,7 +82,8 @@ def create_app(
     app.add_middleware(BodySizeLimitMiddleware)
     # Also on the 413 of the size limit.
     app.add_middleware(SecurityHeadersMiddleware, include_subdomains=settings.hsts_include_subdomains)
-    app.add_middleware(RequestContextMiddleware)  # outermost: every log line of a request carries its context
+    # Outermost: every log line of a request carries its context.
+    app.add_middleware(RequestContextMiddleware, hsts_include_subdomains=settings.hsts_include_subdomains)
     if token_verifier is None or role_manager is None:
         firebase = FirebaseTokenVerifier(settings.firebase_project_id, settings.firebase_credentials_file)
         token_verifier = token_verifier or firebase

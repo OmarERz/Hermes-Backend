@@ -154,6 +154,7 @@ limit_req_zone $binary_remote_addr zone=hermes_api:10m rate=10r/s;
 server {
     listen 443 ssl;
     server_name hermes.ejemplo.local;
+    server_tokens off;
     ssl_certificate     /etc/nginx/tls/hermes.crt;
     ssl_certificate_key /etc/nginx/tls/hermes.key;
 

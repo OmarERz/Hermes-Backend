@@ -28,5 +28,5 @@ def test_every_service_has_a_process_limit_and_rotated_logs(name: str) -> None:
     assert logging["options"]["max-size"] and int(logging["options"]["max-file"]) >= 1, name
 
 
-def test_the_new_services_are_covered_too() -> None:
+def test_the_expected_services_exist_in_compose() -> None:
     assert {"db", "auth-emulator", "api", "workers", "embeddings", "demo"} <= set(services())
