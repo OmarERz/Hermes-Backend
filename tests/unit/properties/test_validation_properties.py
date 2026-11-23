@@ -164,3 +164,23 @@ def test_the_syntax_check_and_the_calculator_accept_the_same_31_vectors(vector: 
     cut = data.draw(st.integers(min_value=0, max_value=len(vector)))
     mutated = vector[:cut] + data.draw(st.sampled_from(["", "/", "X", ":", "/Z:N", "/AV:N"])) + vector[cut:]
     assert (check_cvss_vector(mutated, "v") == []) == (parse_cvss31(mutated) is not None) or mutated == ""
+
+
+other_digits = st.text(
+    alphabet="\u0660\u0661\u0662\u0663\u0966\u0967\u0968\u0969\uff10\uff11\uff12\uff13", min_size=4, max_size=7
+)
+
+
+@given(other_digits, other_digits, st.sampled_from(["year", "number", "both"]))
+def test_digits_of_other_scripts_never_make_a_cve_identifier(year: str, number: str, where: str) -> None:
+    ascii_year, ascii_number = "2026", "1234"
+    parts = {
+        "year": (year[:4].ljust(4, "\u0660"), ascii_number),
+        "number": (ascii_year, number),
+        "both": (year[:4].ljust(4, "\u0660"), number),
+    }[where]
+    assert check_cve("CVE-" + "-".join(parts), "cve", lambda _cve: True)
+
+
+def test_arabic_indic_digits_are_not_a_cve_identifier() -> None:
+    assert check_cve("CVE-\u0662\u0660\u0662\u0666-\u0661\u0662\u0663\u0664", "cve", lambda _cve: True)
