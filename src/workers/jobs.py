@@ -23,6 +23,7 @@ from core.metrics.nightly import NightlyMetrics
 from core.notifications.dispatcher import NotificationDispatcher, configured_consumer_name, consumer_for
 from core.tickets.sync import TicketStateSync
 from notifications_api import NotificationConsumer
+from workers.pipeline_jobs import pipeline_jobs
 
 log = logging.getLogger("workers.jobs")
 
@@ -112,13 +113,18 @@ def run_jobs_in_threads(stop: threading.Event, jobs: Sequence[PeriodicJob], *, t
         thread.join()
 
 
+def _pipeline_job(name: str, interval: float, run: Callable[[], object]) -> PeriodicJob:
+    """The pipeline cycles share one lane: they take turns (and their own lock) without delaying notifications."""
+    return PeriodicJob(name, interval, run, lane="pipeline")
+
+
 def build_jobs(
     settings: Settings,
     session_factory: sessionmaker[Session],
     consumers: Mapping[str, NotificationConsumer] | None = None,
 ) -> list[PeriodicJob]:
-    """The notification dispatcher and the nightly metrics always (each on its own lane); the iTop jobs only when
-    iTop is configured.
+    """The notification dispatcher, the nightly metrics and the pipeline cycles always (each on its own lane); the
+    iTop jobs only when iTop is configured.
 
     `consumers` registers consumers by the name `notifications.consumer` selects (the Slack module plugs in here in
     F11); `log` is always available.
@@ -128,6 +134,7 @@ def build_jobs(
     jobs = [
         PeriodicJob("notification_dispatch", DISPATCH_SECONDS, dispatch, lane="notifications"),
         PeriodicJob("nightly_metrics", NIGHTLY_SECONDS, NightlyJob(session_factory), lane="nightly"),
+        *pipeline_jobs(settings, session_factory, _pipeline_job),
     ]
     if settings.itop_url is None or settings.itop_token is None:
         log.info("iTop is not configured: the ticket jobs are off")
