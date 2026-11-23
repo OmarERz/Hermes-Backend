@@ -112,6 +112,9 @@ jobs:
       - name: Build the database image (pinned pgvector without gosu, docker/db)
         if: ${{ !cancelled() }}
         run: docker build -t hermes-db:scan docker/db
+      - name: Build the embeddings image (CPU-only sentence-transformers, docker/embeddings)
+        if: ${{ !cancelled() }}
+        run: docker build -t hermes-embeddings:scan docker/embeddings
       - name: Trivy image scan (backend)
         if: ${{ !cancelled() }}
         uses: aquasecurity/trivy-action@ed142fd0673e97e23eac54620cfb913e5ce36c25 # v0.36.0
@@ -143,12 +146,21 @@ jobs:
           severity: HIGH,CRITICAL
           exit-code: "1"
           ignore-unfixed: true
+      - name: Trivy image scan (embeddings)
+        if: ${{ !cancelled() }}
+        uses: aquasecurity/trivy-action@ed142fd0673e97e23eac54620cfb913e5ce36c25 # v0.36.0
+        with:
+          scan-type: image
+          image-ref: hermes-embeddings:scan
+          severity: HIGH,CRITICAL
+          exit-code: "1"
+          ignore-unfixed: true
       # The steps above fail only on fixable findings; this one keeps the unfixed ones reported in the log
       # (accepted risk, docs/seguridad/asvs-resumen.md) and never fails the job.
       - name: Trivy report of unfixed findings (informational)
         if: ${{ !cancelled() }}
         run: |
-          for image in hermes-backend:scan hermes-auth-emulator:scan hermes-db:scan; do
+          for image in hermes-backend:scan hermes-auth-emulator:scan hermes-db:scan hermes-embeddings:scan; do
             echo "::group::Unfixed HIGH/CRITICAL in $image"
             trivy image --severity HIGH,CRITICAL --exit-code 0 --no-progress "$image"
             echo "::endgroup::"
