@@ -1,4 +1,5 @@
-"""Runs, STIX export, calibration, metrics, notification events, connections, setup and audit (docs/13 §8 to §9)."""
+"""Runs, STIX export, calibration, metrics and notification events (docs/13 §8). Connections, setup and audit live
+in `admin`."""
 
 from __future__ import annotations
 
@@ -6,7 +7,7 @@ from collections.abc import Iterator
 from datetime import UTC, datetime
 from typing import Annotated, Literal
 
-from fastapi import APIRouter, Path, Query
+from fastapi import APIRouter, Path
 from fastapi.responses import StreamingResponse
 from sqlalchemy import select
 
@@ -20,17 +21,12 @@ from api.routes._db import SessionDep
 from api.routes._events import Events
 from api.routes._state import MetricsSource, RunStore
 from api.routes.models import (
-    AuditEntry,
     CalibrationProposal,
-    ConnectionStatus,
-    ConnectionTestRequest,
     Metric,
     MetricsDashboard,
     NotificationEventRow,
     Run,
     ScanRequest,
-    SetupStep,
-    SetupStepUpdate,
     StixBundle,
     StixExportRequest,
 )
@@ -260,34 +256,3 @@ def notification_events(
 def retry_event(id: str, events: Events) -> NotificationEventRow:  # noqa: A002
     """Put an event in error back in the queue with a fresh attempt budget."""
     return events.retry(id)
-
-
-@router.get("/api/connections/status", dependencies=[guard("GET", "/api/connections/status")])
-def connections_status() -> list[ConnectionStatus]:
-    """Never includes a key, not even a partial one (SEG-23)."""
-    return samples.CONNECTIONS
-
-
-@router.post("/api/connections/test", dependencies=[guard("POST", "/api/connections/test")])
-def connections_test(request: ConnectionTestRequest) -> list[ConnectionStatus]:
-    return [c for c in samples.CONNECTIONS if request.names is None or c.name in request.names]
-
-
-@router.get("/api/setup/status", dependencies=[guard("GET", "/api/setup/status")])
-def setup_status() -> list[SetupStep]:
-    return samples.SETUP_STEPS
-
-
-@router.put("/api/setup/steps/{n}", dependencies=[guard("PUT", "/api/setup/steps/{n}")])
-def setup_step(n: int, update: SetupStepUpdate) -> SetupStep:
-    step = next((s for s in samples.SETUP_STEPS if s.n == n), None)
-    if step is None:
-        raise ApiError(404, "not_found", "El paso del asistente no existe.")
-    return step.model_copy(update=update.model_dump())
-
-
-@router.get("/api/audit", dependencies=[guard("GET", "/api/audit")], responses=PAGINATED_RESPONSES)
-def audit(
-    params: PageQuery, signer: Signer, actor: str | None = Query(default=None, max_length=100)
-) -> Page[AuditEntry]:
-    return paginate([a for a in samples.AUDIT if actor is None or a.actor == actor], params, signer)
