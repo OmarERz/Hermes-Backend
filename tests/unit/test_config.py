@@ -182,6 +182,7 @@ EXAMPLE_EXTRAS = {
     "DB_PORT",
     "AUTH_EMULATOR_PORT",
     "COMPOSE_SECRETS_DIR",
+    "EMBEDDINGS_PORT",  # compose.host.yaml and make worker-host
     "MIGRATION_DATABASE_URL",  # core.devtools.admin (make seed)
     "FORWARDED_ALLOW_IPS",  # read by uvicorn (trusted proxies for X-Forwarded-For)
 }
