@@ -12,9 +12,11 @@ from typing import Any
 import httpx
 import pytest
 from f05data import T0, make_team, make_ticket
+from pydantic import SecretStr
 from sqlalchemy import func, select
 from sqlalchemy.orm import Session, sessionmaker
 
+from core.config import Settings
 from core.db import models as m
 from core.itop.outbox import (
     ItopOutboxWorker,
@@ -26,6 +28,7 @@ from core.itop.outbox import (
     record_write,
     stimulus_payload,
     update_payload,
+    writer_from_settings,
 )
 from doubles.itop import ItopDouble
 
@@ -504,3 +507,35 @@ def test_an_oversized_description_is_cut_but_the_ticket_is_created_and_found_aga
         f"Texto recortado: no cabe completo en iTop; el detalle está en Hermes.<br>Ref. Hermes: {ticket.id}"
     )
     assert reload(factory, ticket.id).itop_ticket_id == created["id"]
+
+
+def test_every_write_carries_the_comment_itop_requires_as_its_userinfo(factory: sessionmaker[Session]) -> None:
+    """iTop 3.2.2 refuses core/create, core/update and core/apply_stimulus without `comment` (checked live, F12.3)
+    and keeps it as the change's userinfo, which TicketStateSync compares with ITOP_SYSTEM_USER (D-007)."""
+    double, clock = ItopDouble(require_comment=True), Clock()
+    ticket = new_ticket(factory)
+    queue(factory, ticket.id, create_payload(ticket_fields()), f"create:{ticket.id}")
+    queue(factory, ticket.id, update_payload({"urgency": "1"}), "u-1", action="raise_urgency")
+    queue(factory, ticket.id, comment_payload("Sigue presente"), "c-1", action="comment")
+    writer = build_writer("http://localhost", str(double.token), http=double.client(), track_info="hermes-system")
+
+    assert ItopOutboxWorker(factory, writer, clock=clock).drain() == 3
+
+    assert double.write_comments == ["hermes-system"] * 3
+    with factory() as session:
+        assert set(session.scalars(select(m.ItopOutbox.status))) == {"done"}
+
+
+def test_the_writer_from_settings_signs_its_writes_with_the_system_user() -> None:
+    settings = Settings(
+        _env_file=None,
+        cursor_signing_key=SecretStr("k" * 40),
+        database_url=SecretStr("postgresql://app:pw@db/hermes"),
+        firebase_project_id="demo-hermes",
+        itop_url="https://itop.example.test",
+        itop_token=SecretStr("t"),
+        itop_system_user="  hermes-rest  ",
+    )
+    assert writer_from_settings(settings).track_info == "hermes-rest"
+    unset = settings.model_copy(update={"itop_system_user": None})
+    assert writer_from_settings(unset).track_info == "Hermes"
