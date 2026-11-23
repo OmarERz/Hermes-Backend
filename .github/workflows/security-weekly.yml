@@ -74,14 +74,10 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
-      - name: KICS scan of compose.yaml (fails on HIGH and MEDIUM)
-        uses: Checkmarx/kics-github-action@4a16c2130b02104dc2624c133d5224080e7cc49b # v2.2.1
-        with:
-          path: compose.yaml
-          platform_type: dockerCompose
-          fail_on: high,medium
-          enable_annotations: "false"
-          output_path: kics-results
+      - name: KICS scan of compose.yaml (fails on CRITICAL, HIGH and MEDIUM)
+        # The same pinned image and flags as `make kics`, which `make verify` and the CI static job also run (F12.3);
+        # kept here as the scheduled re-check of the default branch.
+        run: make kics
 
   trivy:
     name: trivy
@@ -91,6 +87,13 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
+      # The embeddings image is about 2.8 GB and Trivy exports each image to /tmp before scanning it: on 23 Nov the job
+      # failed with "no space left on device". Remove preinstalled toolchains this job never uses (about 25 GB).
+      - name: Free disk space for the image scans
+        run: |
+          df -h /
+          sudo rm -rf /usr/share/dotnet /usr/local/lib/android /opt/ghc /opt/hostedtoolcache/CodeQL /usr/local/share/boost
+          df -h /
       - name: Trivy config scan (Dockerfiles)
         uses: aquasecurity/trivy-action@ed142fd0673e97e23eac54620cfb913e5ce36c25 # v0.36.0
         with:
@@ -177,23 +180,13 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
-      - name: Check ZAP prerequisites
-        id: gate
-        run: |
-          # ZAP needs the running API and a bearer token from the Firebase Auth emulator. F0.7 is expected
-          # to provide the token command as the Makefile target emulator-token; until then ZAP is skipped.
-          if grep -q '^emulator-token:' Makefile; then
-            echo "enabled=true" >> "$GITHUB_OUTPUT"
-          else
-            echo "SKIPPED: OWASP ZAP, no Makefile target emulator-token yet (F0.7 provides the test token)"
-          fi
+      # ZAP always runs: its prerequisites (the stack and `make emulator-token`) exist since F0.7, so a missing one
+      # is a failure, never a silent skip (F12.3).
       - uses: astral-sh/setup-uv@1db35dd8eee11c5894872e0b383ae6c406cf738d # v10.4.0
-        if: steps.gate.outputs.enabled == 'true'
         with:
           enable-cache: true
           python-version-file: .python-version
       - name: Start the stack with throwaway passwords
-        if: steps.gate.outputs.enabled == 'true'
         run: |
           for var in POSTGRES_PASSWORD MIGRATOR_DB_PASSWORD APP_DB_PASSWORD RETENTION_DB_PASSWORD CURSOR_SIGNING_KEY; do
             value=$(openssl rand -hex 24)
@@ -203,15 +196,13 @@ jobs:
           # ZAP reads the schema from /api/openapi.json, which is served only with the docs enabled.
           echo "API_DOCS_ENABLED=true" >> "$GITHUB_ENV"
       - name: Wait for the stack
-        if: steps.gate.outputs.enabled == 'true'
         # compose.yaml mounts credentials as Docker secret files (D-042): write them from the masked env first.
         run: make compose-secrets && docker compose up --build --wait -d
       - name: ZAP API scan
-        if: steps.gate.outputs.enabled == 'true'
         run: |
           TEST_TOKEN=$(make --no-print-directory emulator-token ROLE=admin)
           echo "::add-mask::$TEST_TOKEN"
           API_URL=http://localhost:8000 TEST_TOKEN="$TEST_TOKEN" make zap
       - name: Stop the stack
-        if: always() && steps.gate.outputs.enabled == 'true'
+        if: always()
         run: docker compose down -v

@@ -137,7 +137,17 @@ Hasta entonces el único consumidor disponible es `log`.
 La API no limita la frecuencia de peticiones por sí misma: en producción pon un proxy inverso (nginx o Caddy) delante,
 con TLS, un límite de peticiones por IP y un tamaño máximo de petición (la API rechaza cuerpos de más de 1 MiB con
 413, pero conviene cortarlos antes). Publica solo el proxy y deja el puerto 8000 de la API en `127.0.0.1`, como ya lo
-hace `compose.yaml`. Ejemplo mínimo con nginx (ajusta el dominio, los certificados y los límites a tu uso):
+hace `compose.yaml`.
+
+La API ya envía `Strict-Transport-Security` (un año) y no envía el encabezado `server`; en nginx agrega
+`server_tokens off;` para que el proxy tampoco anuncie su versión y **no** agregues otro `Strict-Transport-Security`
+(saldría duplicado). `includeSubDomains` está apagado por defecto: actívalo con `HSTS_INCLUDE_SUBDOMAINS=true` solo si
+la API tiene su propio nombre de host, porque obliga al navegador a usar HTTPS durante un año en todos los subdominios
+del host que la sirve. Los límites de memoria y CPU
+de cada servicio no vienen en `compose.yaml` porque dependen del equipo y de la carga: agrégalos (`mem_limit`,
+`cpus`) según tu instalación.
+
+Ejemplo mínimo con nginx (ajusta el dominio, los certificados y los límites a tu uso):
 
 ```nginx
 limit_req_zone $binary_remote_addr zone=hermes_api:10m rate=10r/s;
@@ -145,6 +155,7 @@ limit_req_zone $binary_remote_addr zone=hermes_api:10m rate=10r/s;
 server {
     listen 443 ssl;
     server_name hermes.ejemplo.local;
+    server_tokens off;
     ssl_certificate     /etc/nginx/tls/hermes.crt;
     ssl_certificate_key /etc/nginx/tls/hermes.key;
 

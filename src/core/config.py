@@ -110,6 +110,10 @@ class Settings(BaseSettings):
     # Swagger UI, ReDoc and /openapi.json: off unless explicitly enabled for development (API-01, docs/14 §10.4)
     api_docs_enabled: bool = False
 
+    # HSTS (ASVS V3.4.1): one year always; `includeSubDomains` only when the API has its own host name, because it
+    # makes browsers require HTTPS on every subdomain of that host for a year (README §7). Off by default.
+    hsts_include_subdomains: bool = False
+
     # Browser origins allowed to call the API cross-origin (the React front on another origin), comma-separated
     # exact origins such as "https://hermes-front.example.com". Empty (default) = same origin only, e.g. front and
     # API behind one reverse proxy. A wildcard is refused: the API carries bearer tokens.

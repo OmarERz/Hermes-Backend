@@ -25,13 +25,19 @@ _COMMON: tuple[tuple[bytes, bytes], ...] = (
     (b"cache-control", b"no-store"),
     (b"permissions-policy", b"camera=(), microphone=(), geolocation=()"),
 )
+# ASVS 5.0 V3.4.1: one year. Browsers only honour it over HTTPS, i.e. behind the TLS proxy of the deployment (README
+# §7); over plain HTTP in development it is ignored. `includeSubDomains` is opt-in (HSTS_INCLUDE_SUBDOMAINS).
+HSTS: bytes = b"max-age=31536000"
+HSTS_WITH_SUBDOMAINS: bytes = b"max-age=31536000; includeSubDomains"
 
 
 class SecurityHeadersMiddleware:
     """Pure ASGI middleware (keeps streaming responses such as SSE streaming)."""
 
-    def __init__(self, app: ASGIApp) -> None:
+    def __init__(self, app: ASGIApp, *, include_subdomains: bool = False) -> None:
         self.app = app
+        hsts = HSTS_WITH_SUBDOMAINS if include_subdomains else HSTS
+        self.headers: tuple[tuple[bytes, bytes], ...] = (*_COMMON, (b"strict-transport-security", hsts))
 
     async def __call__(self, scope: Scope, receive: Receive, send: Send) -> None:
         if scope["type"] != "http":
@@ -42,7 +48,7 @@ class SecurityHeadersMiddleware:
         async def send_with_headers(message: Message) -> None:
             if message["type"] == "http.response.start":
                 present = {name.lower() for name, _value in message.get("headers", [])}
-                extra = (*_COMMON, (b"content-security-policy", csp))
+                extra = (*self.headers, (b"content-security-policy", csp))
                 message["headers"] = [*message.get("headers", []), *(h for h in extra if h[0] not in present)]
             await send(message)
 

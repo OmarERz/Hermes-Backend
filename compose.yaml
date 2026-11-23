@@ -31,7 +31,20 @@ secrets:
   itop_webhook_token:
     file: ${COMPOSE_SECRETS_DIR:-./.compose-secrets}/itop_webhook_token
 
+# Limits for every service (F12.3, provisional values pending the user's review): a bounded number of processes and
+# threads (a runaway or a fork bomb cannot exhaust the host's process table) and rotated logs (50 MB per container at
+# most, so logs cannot fill the disk). Memory and CPU limits are left out on purpose: they depend on the host and the
+# load, so the operator sets them (README §7).
+x-limits: &limits
+  pids_limit: 512
+  logging:
+    driver: json-file
+    options:
+      max-size: "10m"
+      max-file: "5"
+
 x-hardening: &hardening
+  <<: *limits
   read_only: true
   tmpfs:
     - /tmp
@@ -48,6 +61,7 @@ x-backend: &backend
     FIREBASE_AUTH_EMULATOR_HOST: auth-emulator:9099
     FIREBASE_CREDENTIALS_FILE: ${FIREBASE_CREDENTIALS_FILE:-}
     API_DOCS_ENABLED: ${API_DOCS_ENABLED:-false}
+    HSTS_INCLUDE_SUBDOMAINS: ${HSTS_INCLUDE_SUBDOMAINS:-false}
     # Uvicorn trusts X-Forwarded-For only from these addresses: list the reverse proxy so the logs show the real client
     FORWARDED_ALLOW_IPS: ${FORWARDED_ALLOW_IPS:-127.0.0.1}
     CORS_ALLOWED_ORIGINS: ${CORS_ALLOWED_ORIGINS:-}
@@ -88,6 +102,7 @@ x-backend: &backend
 services:
   db:
     # The pinned pgvector image without gosu (docker/db/Dockerfile, F12.1).
+    <<: *limits
     build: docker/db
     image: hermes-db:local
     environment:
@@ -112,6 +127,7 @@ services:
     restart: unless-stopped
 
   auth-emulator:
+    <<: *limits
     build: docker/auth-emulator
     # Read-only image: the emulator writes its debug log to the working directory, so it runs from the tmpfs.
     working_dir: /tmp
@@ -197,6 +213,10 @@ services:
     depends_on:
       bootstrap:
         condition: service_completed_successfully
+    healthcheck:
+      # One-shot job, like provision and migrate: healthy while it runs (KICS "Healthcheck Not Set", F12.3).
+      test: ["CMD", "python", "-c", "pass"]
+      interval: 10s
     restart: "no"
 
   api:
