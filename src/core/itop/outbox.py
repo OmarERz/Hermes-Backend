@@ -41,6 +41,7 @@ from core.db import models as m
 from core.itop import oql
 from core.itop.client import READ_OPERATIONS, ItopError, ItopObject, ItopReader, ItopUnavailableError
 from core.itop.oql import FIRST_PRINTABLE
+from core.itop.rich_text import encode_html_fields
 
 log = logging.getLogger("core.itop.outbox")
 
@@ -50,6 +51,10 @@ LOG_FIELDS: Final = frozenset({"public_log", "private_log"})
 STIMULI: Final = frozenset({"ev_reopen"})
 REOPENABLE: Final = frozenset({"resolved", "closed"})  # ev_reopen still needed while the ticket is in these
 MAX_BACKOFF_MINUTES: Final = 60
+# iTop's REST API refuses every core/create, core/update and core/apply_stimulus without `comment` ("Missing parameter
+# 'comment'", code 100, checked live on 3.2.2) and records it as the change's `userinfo` in the ticket history.
+# TicketStateSync tells our changes from a person's by that `userinfo` (D-007), so it is `ITOP_SYSTEM_USER`.
+DEFAULT_TRACK_INFO: Final = "Hermes"
 
 Kind = Literal["create", "update", "stimulus", "comment"]
 # itop_outbox.operation only knows create/update/comment: a stimulus is an update of the ticket's state.
@@ -161,6 +166,7 @@ class _ItopWriter(ItopReader):
     """
 
     max_attempts: int = 1
+    track_info: str = DEFAULT_TRACK_INFO
 
     def call(self, operation: dict[str, Any]) -> dict[str, Any]:
         if operation.get("operation") not in WRITE_OPERATIONS | READ_OPERATIONS:
@@ -174,7 +180,14 @@ class _ItopWriter(ItopReader):
                 client.close()
 
     def write(self, operation: dict[str, Any]) -> tuple[str, str | None]:
-        """Send a write and return the (id, ref) of the object iTop answered with."""
+        """Send a write and return the (id, ref) of the object iTop answered with.
+
+        The ticket's description and comments are plain text here; iTop reads them as HTML, so they are encoded on
+        the way out (`core.itop.rich_text`). The stored payload stays plain text.
+        """
+        if operation.get("class") == TICKET_CLASS and isinstance(operation.get("fields"), dict):
+            operation = {**operation, "fields": encode_html_fields(operation["fields"])}
+        operation = {"comment": self.track_info, **operation}
         body = self.call(operation)
         objects = body.get("objects") or {}
         if not isinstance(objects, dict) or len(objects) != 1:
@@ -196,7 +209,10 @@ def writer_from_settings(settings: Settings, *, http: httpx.Client | None = None
     """Fails closed when iTop is not configured (prototype C5)."""
     if settings.itop_url is None or settings.itop_token is None:
         raise ValueError("ITOP_URL and ITOP_TOKEN must be configured")
-    return build_writer(str(settings.itop_url), settings.itop_token.get_secret_value(), http=http)
+    track_info = (settings.itop_system_user or "").strip() or DEFAULT_TRACK_INFO
+    return build_writer(
+        str(settings.itop_url), settings.itop_token.get_secret_value(), http=http, track_info=track_info
+    )
 
 
 # --- worker -----------------------------------------------------------------------------------------------------
