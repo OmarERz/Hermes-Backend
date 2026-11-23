@@ -21,10 +21,6 @@ METHODS = ("get", "post", "put", "patch", "delete")
 HTTP = re.compile(r"^meta \{[^}]*^\s*type: http\s*$", re.MULTILINE | re.DOTALL)
 REQUEST = re.compile(r"^(get|post|put|patch|delete) \{\s*\n\s*url: \{\{baseUrl\}\}(\S+)", re.MULTILINE)
 TAG = re.compile(r"^\s*operationId: ([a-z_]+)\s*$", re.MULTILINE)
-# Operations a client cannot call successfully yet, with the reason; each still needs a request (its error path).
-KNOWN_GAPS = {
-    "get_finding_history": "no API response carries a finding id yet (reported in F13.6)",
-}
 # An explicit success: `res.status: eq 2xx` in `assert`, or `expect(res.status).to.equal(2xx)` in `tests`.
 SUCCESS = re.compile(r"^\s*res\.status: eq 2\d\d\s*$|expect\(res\.status\)\.to\.equal\(2\d\d\)", re.MULTILINE)
 
@@ -83,11 +79,9 @@ def test_every_operation_has_a_request_that_expects_success() -> None:
     covered = {r.operation for r in REQUESTS}
     succeeding = {r.operation for r in REQUESTS if r.expects_success}
     missing = sorted(set(OPERATIONS) - covered)
-    unhappy = sorted(set(OPERATIONS) - succeeding - set(missing) - set(KNOWN_GAPS))
+    unhappy = sorted(set(OPERATIONS) - succeeding - set(missing))
     assert not missing, f"operations without a Bruno request: {missing}"
     assert not unhappy, f"operations whose Bruno requests never expect a 2xx: {unhappy}"
-    stale = sorted(gap for gap in KNOWN_GAPS if gap in succeeding or gap not in OPERATIONS)
-    assert not stale, f"known gaps that are closed or gone, remove them: {stale}"
 
 
 def test_protected_routes_are_checked_without_a_token_and_with_a_lower_role() -> None:
