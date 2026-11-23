@@ -18,6 +18,7 @@ from api.routes.models import (
     ConnectionTestRequest,
     FeedbackRequest,
     MappingInput,
+    PeerCompany,
     PeerCompanyInput,
     ProfileUpdate,
     SimulationRequest,
@@ -54,7 +55,7 @@ REFUSED: list[tuple[type[BaseModel], dict[str, Any]]] = [
     (PeerCompanyInput, {**PEER, "name": "n" * (MAX_NAME + 1)}),
     (PeerCompanyInput, {**PEER, "name": ""}),
     (PeerCompanyInput, {**PEER, "aliases": ["a"] * (MAX_LIST_ITEMS + 1)}),
-    (PeerCompanyInput, {**PEER, "aliases": [""]}),
+    (PeerCompanyInput, {**PEER, "aliases": ["a" * (MAX_NAME + 1)]}),
     (PeerCompanyInput, {**PEER, "domain": "d" * 254}),
     (PeerCompanyInput, {**PEER, "sector": "s" * (MAX_CODE + 1)}),
     (ProfileUpdate, {**PROFILE, "sector": "s" * (MAX_CODE + 1)}),
@@ -79,6 +80,16 @@ def test_bodies_at_the_bound_are_accepted(model: type[BaseModel], body: dict[str
 def test_bodies_past_the_bound_are_refused(model: type[BaseModel], body: dict[str, Any]) -> None:
     with pytest.raises(ValidationError):
         model.model_validate(body)
+
+
+def test_empty_aliases_stay_accepted_for_the_service_to_drop() -> None:
+    assert PeerCompanyInput.model_validate({**PEER, "aliases": ["", "Par"]}).aliases == ["", "Par"]
+
+
+def test_a_stored_peer_with_values_longer_than_the_new_bounds_still_lists() -> None:
+    """Rows saved before F12.3 keep loading: the response model does not carry the input bounds."""
+    long_row = {**PEER, "id": "p-1", "name": "n" * 500, "aliases": ["a"] * 80, "domain": "d" * 400, "sector": "s" * 150}
+    assert PeerCompany.model_validate(long_row).domain == "d" * 400
 
 
 def test_the_bounds_are_published_in_the_openapi_schema() -> None:

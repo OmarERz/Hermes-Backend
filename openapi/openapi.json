@@ -1908,11 +1908,8 @@
         "properties": {
           "aliases": {
             "items": {
-              "maxLength": 200,
-              "minLength": 1,
               "type": "string"
             },
-            "maxItems": 50,
             "title": "Aliases",
             "type": "array"
           },
@@ -1925,7 +1922,6 @@
           "domain": {
             "anyOf": [
               {
-                "maxLength": 253,
                 "type": "string"
               },
               {
@@ -1939,13 +1935,11 @@
             "type": "string"
           },
           "name": {
-            "maxLength": 200,
             "minLength": 1,
             "title": "Name",
             "type": "string"
           },
           "sector": {
-            "maxLength": 100,
             "title": "Sector",
             "type": "string"
           }
@@ -1965,7 +1959,6 @@
           "aliases": {
             "items": {
               "maxLength": 200,
-              "minLength": 1,
               "type": "string"
             },
             "maxItems": 50,

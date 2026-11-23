@@ -115,13 +115,21 @@ class ProfileUpdate(_Model):
 
 class PeerCompanyInput(_Model):
     name: Name
-    aliases: list[Name] = Field(default_factory=list, max_length=MAX_LIST_ITEMS)
+    # Empty aliases stay allowed: the service drops them (profile.py normalisation), as before F12.3.
+    aliases: list[Annotated[str, Field(max_length=MAX_NAME)]] = Field(default_factory=list, max_length=MAX_LIST_ITEMS)
     domain: str | None = Field(default=None, max_length=253)  # the longest DNS name
     sector: Code
     country: str = Field(min_length=2, max_length=2)
 
 
-class PeerCompany(PeerCompanyInput):
+# A stored peer company. The F12.3 bounds apply to what comes in, not to rows saved before them, so the list never
+# fails on an older, longer value (API-06).
+class PeerCompany(_Model):
+    name: str = Field(min_length=1)
+    aliases: list[str] = Field(default_factory=list)
+    domain: str | None = None
+    sector: str
+    country: str = Field(min_length=2, max_length=2)
     id: str
 
 
