@@ -5,9 +5,12 @@ from __future__ import annotations
 from typing import Any
 
 import pytest
+from hypothesis import given, settings
+from hypothesis import strategies as st
 from pydantic import BaseModel, ValidationError
 
 from api.routes.models import (
+    CPE_NAME_PATTERN,
     MAX_CODE,
     MAX_CONFIG_CHANGES,
     MAX_CONFIG_VALUE,
@@ -26,6 +29,9 @@ from api.routes.models import (
     StixExportRequest,
 )
 from core.configuration.errors import ValidationFailedError, check_text
+from core.cpe.candidates import parse_cpe_name
+from core.cpe.mapping import MappingInput as MappingData
+from core.cpe.mapping import validate
 
 pytestmark = pytest.mark.unit
 
@@ -43,7 +49,7 @@ ACCEPTED: list[tuple[type[BaseModel], dict[str, Any]]] = [
     (PeerCompanyInput, {**PEER, "name": "n" * MAX_NAME, "aliases": ["a" * MAX_NAME] * MAX_LIST_ITEMS}),
     (ProfileUpdate, {**PROFILE, "subsectors": ["s" * MAX_CODE] * MAX_LIST_ITEMS}),
     (SourceCreate, {"name": "n" * MAX_NAME, "url": "https://" + "u" * (MAX_URL - 8)}),
-    (MappingInput, {"cpe": "cpe:2.3:" + "a" * 504}),
+    (MappingInput, {"cpe": "cpe:2.3:a:" + "v" * 200 + ":" + "p" * 200 + ":" + "1" * 100}),  # 512 characters
     (FeedbackRequest, {"assessment_id": "a" * MAX_CODE, "verdict": "relevant"}),
     (StixExportRequest, {"scope": "run", "run_id": "r" * MAX_CODE}),
 ]
@@ -63,7 +69,7 @@ REFUSED: list[tuple[type[BaseModel], dict[str, Any]]] = [
     (ProfileUpdate, {**PROFILE, "countries": ["MX"] * 301}),
     (SourceCreate, {"name": "n" * (MAX_NAME + 1), "url": "https://feed.example"}),
     (SourceCreate, {"name": "feed", "url": "https://" + "u" * (MAX_URL - 7)}),
-    (MappingInput, {"cpe": "cpe:2.3:" + "a" * 505}),
+    (MappingInput, {"cpe": "cpe:2.3:a:" + "v" * 200 + ":" + "p" * 200 + ":" + "1" * 101}),
     (FeedbackRequest, {"assessment_id": "a" * (MAX_CODE + 1), "verdict": "relevant"}),
     (StixExportRequest, {"scope": "run", "run_id": "r" * (MAX_CODE + 1)}),
     (StixExportRequest, {"scope": "date_range", "date_from": "d" * (MAX_CODE + 1)}),
@@ -111,3 +117,13 @@ def test_bidirectional_and_control_characters_are_refused(text: str) -> None:
 
 def test_ordinary_unicode_names_pass() -> None:
     check_text("body.name", "Banco Ñandú · Grupo «Par» 中文 עברית", None)
+
+
+@settings(max_examples=300)
+@given(st.from_regex(CPE_NAME_PATTERN, fullmatch=True).filter(lambda name: len(name) <= 512))
+def test_every_schema_valid_cpe_name_is_one_the_mapping_accepts(name: str) -> None:
+    """F12.3: the schema pattern is the mapping's own rule, so a schema-valid name is never refused later."""
+    MappingInput.model_validate({"cpe": name})
+    pair = parse_cpe_name(name)
+    assert pair is not None
+    validate(MappingData(nvd_vendor=pair[0], nvd_product=pair[1]))

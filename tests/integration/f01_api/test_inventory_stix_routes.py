@@ -161,7 +161,7 @@ def test_mapping_errors(client: TestClient, engine: Engine) -> None:
     product = seed_inventory(engine)
     as_role(client, Role.ANALYST)
     good = {"cpe": "cpe:2.3:a:f5:nginx:*:*:*:*:*:*:*:*"}
-    assert client.put("/api/mappings/not-a-uuid", json=good).status_code == 404
+    assert client.put("/api/mappings/not-a-uuid", json=good).status_code == 422  # F12.3: path ids are UUIDs
     assert client.put(f"/api/mappings/{uuid.uuid4()}", json=good).status_code == 404
     assert client.put(f"/api/mappings/{product}", json={"cpe": "nope"}).status_code == 422  # the model's own pattern
     wildcard = client.put(f"/api/mappings/{product}", json={"cpe": "cpe:2.3:a:*:*:*:*:*:*:*:*:*:*"})

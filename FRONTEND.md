@@ -111,6 +111,10 @@ Todo error responde con:
   del proxy) · `auth_unavailable` (503) · 500 con mensaje genérico.
 - El cuerpo de una petición tiene un límite de **1 MiB**: la API responde 413 en la envoltura de error si se
   excede, y el proxy inverso de producción aplica el mismo tope.
+- Los ids de la ruta (`/api/vulnerabilities/{group_id}`, `/api/recommendations/{assessment_id}`, `/api/sources/{id}`…)
+  son UUID: uno mal formado responde **422** (`validation_error`, con `details[].field` = `path.<nombre>`) antes de
+  buscar nada; un UUID bien formado que no existe sigue respondiendo 404. `{ci_id}` y el id de una corrida aceptan
+  hasta 100 caracteres imprimibles. El OpenAPI publica el patrón de cada uno.
 
 ## 5. Reglas del contrato que afectan al front
 

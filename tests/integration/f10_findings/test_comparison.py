@@ -30,9 +30,9 @@ def test_history_of_a_finding_is_its_ci_score_oldest_first(get: Get, scenario: S
     assert [p["final"] for p in retired] == [99]
 
 
-@pytest.mark.parametrize("finding", ["x", str(uuid.UUID(int=5))])
-def test_history_of_an_unknown_finding_is_404(client: TestClient, finding: str) -> None:
-    assert client.get(f"/api/findings/{finding}/history").status_code == 404
+@pytest.mark.parametrize(("finding", "status"), [("x", 422), (str(uuid.UUID(int=5)), 404)])  # F12.3: 422 if not a UUID
+def test_history_of_an_unknown_finding_is_404(client: TestClient, finding: str, status: int) -> None:
+    assert client.get(f"/api/findings/{finding}/history").status_code == status
 
 
 def test_breakdown_bars_add_up_from_the_raw_value_to_the_final(get: Get, scenario: Scenario) -> None:
@@ -64,7 +64,6 @@ def test_breakdown_of_a_chosen_ci_and_the_kev_floor(get: Get, client: TestClient
     assert a1["raw"] + sum(a1["waterfall"].values()) == 80
     for url in (
         f"/api/assessments/{scenario.assessments['A2']}/breakdown?ci_id=CI-404",
-        "/api/assessments/nope/breakdown",
         f"/api/assessments/{uuid.UUID(int=9)}/breakdown",
         f"/api/assessments/{scenario.assessments['A2']}/breakdown?ci_id=CI%00",
     ):

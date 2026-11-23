@@ -182,11 +182,9 @@ def test_asset_detail_carries_the_score_of_that_ci(get: Get, scenario: Scenario)
 @pytest.mark.parametrize(
     "url",
     [
-        "/api/vulnerabilities/nope",
         f"/api/vulnerabilities/{uuid.UUID(int=1)}",
         "/api/assets/CI-404",
         "/api/assets/CI-4",  # decommissioned
-        "/api/assets/CI%00",
     ],
 )
 def test_unknown_or_retired_resources_answer_404(client: TestClient, url: str) -> None:

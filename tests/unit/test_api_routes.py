@@ -150,10 +150,14 @@ def test_pagination_cursor_flow_and_invalid_cursor(client: TestClient) -> None:
 
 def test_not_found_uses_the_envelope(client: TestClient) -> None:
     as_role(Role.READER)
+    response = client.get("/api/no-such-route")
+    assert response.status_code == 404
+    assert response.json()["error"]["code"] == "not_found"
+    # F12.3: a path id that is not a UUID is refused before any lookup: 422 with the field, never a 404 from the DB.
     for url in ("/api/recommendations/nope", "/api/recommendations/nope/feedback", "/api/findings/x/history"):
-        response = client.get(url)
-        assert response.status_code == 404
-        assert response.json()["error"]["code"] == "not_found"
+        malformed = client.get(url)
+        assert malformed.status_code == 422
+        assert malformed.json()["error"]["details"][0]["field"] in {"path.assessment_id", "path.id"}
 
 
 def test_scan_run_is_listed_and_streams_its_progress(client: TestClient) -> None:
@@ -250,7 +254,7 @@ def test_metrics_come_from_the_dashboard_service(client: TestClient) -> None:
 class FakeEvents:
     def __init__(self) -> None:
         self.row = NotificationEventRow(
-            id="e1",
+            id="0196a6f0-0000-7000-8000-0000000000e1",
             type="new_ticket",
             priority="immediate",
             status="error",
@@ -269,6 +273,11 @@ class FakeEvents:
 def test_notification_events_come_from_the_event_queue(client: TestClient) -> None:
     as_role(Role.ADMIN)
     APP.dependency_overrides[get_event_queue] = FakeEvents
-    assert [e["id"] for e in client.get("/api/notifications/events").json()["items"]] == ["e1"]
+    assert [e["id"] for e in client.get("/api/notifications/events").json()["items"]] == [
+        "0196a6f0-0000-7000-8000-0000000000e1"
+    ]
     assert client.get("/api/notifications/events", params={"status": "pending"}).json()["items"] == []
-    assert client.post("/api/notifications/events/e1/retry").json()["status"] == "pending"
+    assert (
+        client.post("/api/notifications/events/0196a6f0-0000-7000-8000-0000000000e1/retry").json()["status"]
+        == "pending"
+    )

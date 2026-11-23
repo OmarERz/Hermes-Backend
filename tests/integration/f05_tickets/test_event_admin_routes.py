@@ -73,7 +73,7 @@ def test_failed_events_are_listed_and_can_be_retried(factory: sessionmaker[Sessi
         retried = api.post(f"/api/notifications/events/{older}/retry")
         assert (retried.status_code, retried.json()["status"], retried.json()["attempts"]) == (202, "pending", 0)
         assert api.post(f"/api/notifications/events/{delivered}/retry").status_code == 409
-        assert api.post("/api/notifications/events/not-a-uuid/retry").status_code == 404
+        assert api.post("/api/notifications/events/not-a-uuid/retry").status_code == 422  # F12.3: UUID path ids
         assert api.post(f"/api/notifications/events/{uuid.uuid4()}/retry").status_code == 404
         assert [
             e["id"] for e in api.get("/api/notifications/events", params={"status": "pending"}).json()["items"]
