@@ -14,7 +14,7 @@ from api.auth.role_admin import FirebaseRoleManager, RoleManager
 from api.errors import ERROR_RESPONSES, ErrorResponse, install_error_handlers
 from api.itop_webhook import build_itop_webhook_router
 from api.pagination import CursorSigner
-from api.routes import routers, samples
+from api.routes import routers
 from core.config import Settings
 from core.cpe.candidates import CpeDictionaryClient
 from core.db.session import make_session_factory
@@ -46,7 +46,6 @@ def create_app(
 
     app.state.cursor_signer = CursorSigner(settings.cursor_signing_key.get_secret_value())
     app.state.itop_url = str(settings.itop_url) if settings.itop_url is not None else None  # for links to iTop
-    app.state.runs = list(samples.RUNS)
     install_error_handlers(app)
     if token_verifier is None or role_manager is None:
         firebase = FirebaseTokenVerifier(settings.firebase_project_id, settings.firebase_credentials_file)

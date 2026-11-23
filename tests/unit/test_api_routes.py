@@ -11,10 +11,12 @@ from pydantic import SecretStr
 
 from api.app import create_app
 from api.auth import CurrentUser, Role, get_current_user
+from api.errors import ApiError
 from api.routes._auth import ROUTE_ROLES
 from api.routes._events import get_event_queue
+from api.routes._runs import get_run_source
 from api.routes._state import get_dashboard_source
-from api.routes.models import NotificationEventRow
+from api.routes.models import NotificationEventRow, Run
 from core.config import Settings
 from core.metrics.dashboard import Dashboard, DashboardMetric
 
@@ -31,8 +33,35 @@ SETTINGS = Settings(  # type: ignore[call-arg]
 APP = create_app(SETTINGS)
 
 
+class SampleRuns:
+    """In-memory runs for the route tests (the SQL source is tested in tests/integration/f13_pipeline)."""
+
+    def __init__(self) -> None:
+        from api.routes import samples  # noqa: PLC0415 - sample data of the route tests
+
+        self.runs = list(samples.RUNS)
+
+    def list(self) -> list[Run]:
+        return list(self.runs)
+
+    def queue_scan(self, firebase_uid: str | None) -> Run:
+        run = Run(
+            id=f"run-{len(self.runs) + 1}", kind="scan", status="queued", started_at="t", finished_at=None, progress=0
+        )
+        self.runs.insert(0, run)
+        return run
+
+    def progress(self, run_id: str) -> Iterator[Run]:
+        run = next((r for r in self.runs if r.id == run_id), None)
+        if run is None:
+            raise ApiError(404, "not_found", "La corrida no existe.")
+        return iter([run, run.model_copy(update={"status": "succeeded", "progress": 100})])
+
+
 @pytest.fixture
 def client() -> Iterator[TestClient]:
+    runs = SampleRuns()
+    APP.dependency_overrides[get_run_source] = lambda: runs
     with TestClient(APP, raise_server_exceptions=False) as test_client:
         yield test_client
     APP.dependency_overrides.clear()

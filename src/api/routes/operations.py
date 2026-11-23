@@ -2,20 +2,23 @@
 
 from __future__ import annotations
 
+import json
 from collections.abc import Iterator
 from datetime import UTC, datetime
-from typing import Literal
+from typing import Annotated, Literal
 
-from fastapi import APIRouter, Query
+from fastapi import APIRouter, Depends, Query
 from fastapi.responses import StreamingResponse
 
+from api.auth import CurrentUser, get_current_user
 from api.errors import ApiError, ErrorDetail
 from api.pagination import PAGINATED_RESPONSES, Page, PageQuery, Signer, paginate
 from api.routes import samples
 from api.routes._auth import guard
 from api.routes._db import SessionDep
 from api.routes._events import Events
-from api.routes._state import MetricsSource, RunStore
+from api.routes._runs import Runs
+from api.routes._state import MetricsSource
 from api.routes.models import (
     AuditEntry,
     CalibrationProposal,
@@ -34,6 +37,8 @@ from api.routes.models import (
 from core.stix.export import ExportOptions, ExportScope, StixExportError, export_bundle
 
 router = APIRouter(tags=["operations"])
+CurrentUserDep = Annotated[CurrentUser, Depends(get_current_user)]
+PROGRESS_ES = {"queued": "En cola", "running": "En curso", "succeeded": "Terminado", "failed": "Falló"}
 
 # Schema of one parsed event: `event` is the event name and `data` a JSON text {run_id, progress, message}.
 SSE_EVENT_SCHEMA = {
@@ -47,18 +52,16 @@ SSE_EVENT_SCHEMA = {
 
 
 @router.post("/api/scans", status_code=202, dependencies=[guard("POST", "/api/scans")])
-def launch_scan(_request: ScanRequest, runs: RunStore) -> Run:
-    """Queues a simulated scan; progress comes from the run events (FRO-19). The run shows up in GET /api/runs."""
-    run = Run(
-        id=f"run-{len(runs) + 1}", kind="scan", status="queued", started_at=samples.NOW, finished_at=None, progress=0
-    )
-    runs.insert(0, run)
-    return run
+def launch_scan(_request: ScanRequest, runs: Runs, user: CurrentUserDep) -> Run:
+    """Queues a simulated scan; the worker runs it on this run row and its progress streams from the run events
+    (FRO-19). The run shows up in GET /api/runs."""
+    return runs.queue_scan(user.uid)
 
 
 @router.get("/api/runs", dependencies=[guard("GET", "/api/runs")], responses=PAGINATED_RESPONSES)
-def list_runs(params: PageQuery, signer: Signer, runs: RunStore) -> Page[Run]:
-    return paginate(runs, params, signer)
+def list_runs(params: PageQuery, signer: Signer, runs: Runs) -> Page[Run]:
+    """Scans, news runs and recalculations, newest first (ARQ-04)."""
+    return paginate(runs.list(), params, signer)
 
 
 @router.get(
@@ -69,18 +72,17 @@ def list_runs(params: PageQuery, signer: Signer, runs: RunStore) -> Page[Run]:
         200: {"content": {"text/event-stream": {"schema": SSE_EVENT_SCHEMA}}, "description": "Server-sent events"}
     },
 )
-def run_events(id: str, runs: RunStore) -> StreamingResponse:  # noqa: A002 - path parameter name of API-06
-    run = next((r for r in runs if r.id == id), None)
-    if run is None:
-        raise ApiError(404, "not_found", "La corrida no existe.")
+def run_events(id: str, runs: Runs) -> StreamingResponse:  # noqa: A002 - path parameter name of API-06
+    """Progress of a run until it ends (ARQ-05): one event each time its status or progress changes."""
+    snapshots = runs.progress(id)
 
     def stream() -> Iterator[str]:
-        for progress, message in (
-            (10, "Leyendo activos de iTop"),
-            (60, "Correlacionando con noticias"),
-            (100, "Terminado"),
-        ):
-            yield f'event: progress\ndata: {{"run_id": "{run.id}", "progress": {progress}, "message": "{message}"}}\n\n'
+        for run in snapshots:
+            data = json.dumps(
+                {"run_id": run.id, "progress": run.progress, "status": run.status, "message": PROGRESS_ES[run.status]},
+                ensure_ascii=False,
+            )
+            yield f"event: progress\ndata: {data}\n\n"
 
     return StreamingResponse(stream(), media_type="text/event-stream")
 

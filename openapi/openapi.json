@@ -8127,6 +8127,7 @@
     },
     "/api/runs": {
       "get": {
+        "description": "Scans, news runs and recalculations, newest first (ARQ-04).",
         "operationId": "list_runs_api_runs_get",
         "parameters": [
           {
@@ -8279,6 +8280,7 @@
     },
     "/api/runs/{id}/events": {
       "get": {
+        "description": "Progress of a run until it ends (ARQ-05): one event each time its status or progress changes.",
         "operationId": "run_events_api_runs__id__events_get",
         "parameters": [
           {
@@ -8422,7 +8424,7 @@
     },
     "/api/scans": {
       "post": {
-        "description": "Queues a simulated scan; progress comes from the run events (FRO-19). The run shows up in GET /api/runs.",
+        "description": "Queues a simulated scan; the worker runs it on this run row and its progress streams from the run events\n(FRO-19). The run shows up in GET /api/runs.",
         "operationId": "launch_scan_api_scans_post",
         "requestBody": {
           "content": {
