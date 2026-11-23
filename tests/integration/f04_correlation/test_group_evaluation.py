@@ -527,3 +527,68 @@ def test_a_ci_that_appeared_after_the_last_assessment_is_not_simulated(session: 
     session.flush()
     formula = load_active_formula(session)[1]
     assert simulate(session, formula, now=NOW).findings == 1
+
+
+def test_a_changed_context_without_a_judge_does_not_reuse_the_old_adjustment(session: Session) -> None:
+    group = demo_group(session)
+    judge = JudgeDouble(session, adjustment=20)
+    evaluate_group(session, group, run(session), "new_finding", opts(session, judge))
+    correlate_story(session, add_story(session, cves={CVE: "mass"}).id, NOW)  # a new linked story: new fingerprint
+    again = evaluate_group(session, group, run(session), "news", opts(session))
+    assert again.result.no_judge_review
+    assert again.result.applied_adjustment == 0
+    assert judge.calls == 1
+
+
+def test_two_installations_on_one_ci_make_one_score(session: Session) -> None:
+    group = add_group(session, "CVE-2026-40001")
+    first = session.scalars(select(m.InstalledSoftware).order_by(m.InstalledSoftware.itop_instance_id)).first()
+    scan = session.scalars(select(m.Run).where(m.Run.kind == "scan")).first()
+    assert first is not None
+    assert scan is not None
+    twin = m.InstalledSoftware(
+        id=new_id(), itop_instance_id="SI-900", asset_id=first.asset_id, software_product_id=first.software_product_id,
+        version="3.0.1", synced_at=NOW,
+    )  # fmt: skip
+    session.add(twin)
+    session.flush()
+    finding = m.Finding(
+        id=new_id(), finding_group_id=group.id, installed_software_id=twin.id, match_source="nvd_cpe", created_at=NOW
+    )
+    session.add(finding)
+    session.flush()
+    session.add(
+        m.FindingStatusChange(
+            id=new_id(), finding_id=finding.id, run_id=scan.id, status="new", observed_version="3.0.1", changed_at=NOW
+        )
+    )
+    session.flush()
+    evaluation = evaluate_group(session, group.id, run(session), "new_finding", opts(session))
+    assert len(evaluation.result.cis) == 1
+    (ctx,) = load_active_groups(session, only={group.id})
+    assert len(ctx.cis) == 2
+    package = build_finding_package(session, ctx, [], EngineScorer(load_active_formula(session)[1], NOW))
+    assert len(package["group"]["cis"]) == 1  # the fingerprint sees one entry per CI
+
+
+def test_a_recalculation_keeps_the_adjustment_even_when_the_context_changed(session: Session) -> None:
+    group = demo_group(session)
+    judge = JudgeDouble(session, adjustment=-20)
+    evaluate_group(session, group, run(session), "new_finding", opts(session, judge))
+    asset = session.scalars(select(m.Asset).order_by(m.Asset.itop_ci_id)).first()
+    assert asset is not None
+    asset.description = "changed after the review"  # the fingerprint covers iTop attributes
+    session.flush()
+    nightly = evaluate_group(session, group, run(session), "nightly", opts(session))
+    assert nightly.result.applied_adjustment == -20
+    assert not nightly.result.no_judge_review
+    version_id, formula = load_active_formula(session)
+    after_formula = evaluate_group(
+        session,
+        group,
+        run(session),
+        "formula_change",
+        EvaluationOptions(formula=(version_id, formula), now=NOW + timedelta(hours=5)),
+    )
+    assert after_formula.result.applied_adjustment == -20
+    assert judge.calls == 1

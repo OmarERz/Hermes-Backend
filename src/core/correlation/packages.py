@@ -221,20 +221,39 @@ def _tickets(session: Session, group_id: uuid.UUID) -> list[dict[str, Any]]:
     ]
 
 
-def _cis_block(session: Session, group: GroupCtx, scored: ScoredGroup) -> list[dict[str, Any]]:
-    cis: list[dict[str, Any]] = []
-    for index, ci in enumerate(group.cis, start=1):
-        asset = session.get(m.Asset, ci.asset_id)
-        if asset is None:
+STATUS_PRECEDENCE = ("reopened", "new", "persistent", "no_data")  # one status per CI, whatever the install order
+
+
+def _ci_status(session: Session, group: GroupCtx, asset_id: uuid.UUID) -> str:
+    """The status of a CI from every affected installation it has, by a fixed precedence (so the fingerprint does
+    not depend on which installation is read first)."""
+    statuses: set[str] = set()
+    for ci in group.cis:
+        if ci.asset_id != asset_id:
             continue
-        custodian = session.get(m.Team, asset.custodian_team_id) if asset.custodian_team_id else None
-        status = session.execute(
+        latest = session.execute(
             select(m.FindingStatusChange.status)
             .join(m.Finding, m.Finding.id == m.FindingStatusChange.finding_id)
             .where(m.Finding.finding_group_id == group.id, m.Finding.installed_software_id == ci.installed_software_id)
             .order_by(m.FindingStatusChange.changed_at.desc())
             .limit(1)
         ).scalar_one_or_none()
+        if latest is not None:
+            statuses.add(latest)
+    return next((s for s in STATUS_PRECEDENCE if s in statuses), "new")
+
+
+def _cis_block(session: Session, group: GroupCtx, scored: ScoredGroup) -> list[dict[str, Any]]:
+    cis: list[dict[str, Any]] = []
+    seen: set[uuid.UUID] = set()
+    for ci in group.cis:
+        index = len(cis) + 1
+        asset = session.get(m.Asset, ci.asset_id)
+        if asset is None or asset.id in seen:  # one entry per CI, even with two affected installations
+            continue
+        seen.add(asset.id)
+        custodian = session.get(m.Team, asset.custodian_team_id) if asset.custodian_team_id else None
+        status = _ci_status(session, group, asset.id)
         cis.append(
             {
                 "element_id": f"CI{index}",

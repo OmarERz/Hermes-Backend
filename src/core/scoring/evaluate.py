@@ -43,6 +43,7 @@ from core.scoring.formula_repo import load_active_formula
 
 log = logging.getLogger("scoring")
 
+RECALCULATION_TRIGGERS = frozenset({"nightly", "formula_change"})
 JUDGE_TRIGGERS = frozenset({"new_finding", "news", "level_change", "manual"})  # a recalculation never calls the judge
 FOUR_PLACES = Decimal("0.0001")
 APPLIED_REVIEW_STATUSES = ("applied", "partial_review")  # reviews whose proposal reached the score; others did not
@@ -139,7 +140,11 @@ def compute_group(session: Session, group: GroupCtx, basis: Basis) -> GroupResul
     dead = judge_adjustment is not None and abs(judge_adjustment) <= formula.dead_zone
     applied = 0 if judge_adjustment is None or dead else judge_adjustment
     results: list[CiResult] = []
+    seen: set[uuid.UUID] = set()
     for ci in group.cis:
+        if ci.asset_id in seen:  # two affected installations on one CI: still one score per CI (EVA-05)
+            continue
+        seen.add(ci.asset_id)
         asset = session.get_one(m.Asset, ci.asset_id)
         a, d = inputs.asset_factors(formula, asset)
         base = base_score(formula, Factors(factors.s, factors.p, t, a, d))
@@ -327,11 +332,14 @@ def _decide_adjustment(session: Session, plan: _Plan) -> tuple[int | None, uuid.
     previous = plan.previous
     reusable = _proposal(session, previous)
     reusable_review = previous.llm_review_id if previous is not None and reusable is not None else None
-    if plan.judge is None or plan.trigger not in JUDGE_TRIGGERS:
+    if plan.trigger in RECALCULATION_TRIGGERS:
+        # A formula change or the nightly job keeps the last adjustment whatever the fingerprint says (D-033, COR-05).
         return reusable, reusable_review, False, reusable is not None
     package = build_finding_package(session, plan.ctx, plan.matches, EngineScorer(plan.formula, plan.now))
     if previous is not None and reusable is not None and _fingerprint_of(session, previous) == package["fingerprint"]:
-        return reusable, reusable_review, False, True
+        return reusable, reusable_review, False, True  # same context: the judge's review still stands (COR-06)
+    if plan.judge is None or plan.trigger not in JUDGE_TRIGGERS:
+        return None, None, False, False  # changed context and no judge allowed: base only, flagged no_judge_review
     verdict = plan.judge(package)
     return verdict.adjustment, verdict.llm_review_id, True, False
 
