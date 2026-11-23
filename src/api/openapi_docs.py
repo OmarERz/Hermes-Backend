@@ -494,7 +494,7 @@ FIELDS: Final[dict[str, str]] = {
     "active": "Si está activo.",
     "actor": "Actor de amenazas mencionado, o quien hizo la acción (`sistema` si fue automática).",
     "aliases": "Otros nombres con los que aparece la empresa en las noticias.",
-    "assessment_id": "Id (UUID) de la evaluación.",
+    "assessment_id": "Id de la evaluación.",
     "asset": "Activo que impulsa la recomendación.",
     "assets": "Activos afectados.",
     "attempts": "Intentos de entrega hechos.",

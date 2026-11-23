@@ -456,7 +456,7 @@
         "additionalProperties": false,
         "properties": {
           "assessment_id": {
-            "description": "Id (UUID) de la evaluación.",
+            "description": "Id de la evaluación.",
             "title": "Assessment Id",
             "type": "string"
           },
@@ -1427,7 +1427,7 @@
         },
         "properties": {
           "assessment_id": {
-            "description": "Id (UUID) de la evaluación.",
+            "description": "Id de la evaluación.",
             "maxLength": 100,
             "title": "Assessment Id",
             "type": "string"
@@ -2382,7 +2382,7 @@
         ],
         "properties": {
           "assessment_id": {
-            "description": "Id (UUID) de la evaluación.",
+            "description": "Id de la evaluación.",
             "title": "Assessment Id",
             "type": "string"
           },

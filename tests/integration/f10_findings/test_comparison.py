@@ -31,7 +31,7 @@ def test_history_of_a_finding_is_its_ci_score_oldest_first(get: Get, scenario: S
 
 
 @pytest.mark.parametrize(("finding", "status"), [("x", 422), (str(uuid.UUID(int=5)), 404)])  # F12.3: 422 if not a UUID
-def test_history_of_an_unknown_finding_is_404(client: TestClient, finding: str, status: int) -> None:
+def test_history_of_a_malformed_or_unknown_finding_is_422_or_404(client: TestClient, finding: str, status: int) -> None:
     assert client.get(f"/api/findings/{finding}/history").status_code == status
 
 

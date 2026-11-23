@@ -2,8 +2,8 @@
 
 Ids of rows (assessments, groups, findings, peer companies, sources, products, proposals, notification events, runs)
 are UUIDs: anything else answers 422 with the field in `details`, never a database lookup, and the OpenAPI shows the
-pattern. An iTop CI id gets a maximum length and the characters `check_text` allows in bodies. The descriptions of
-the published parameters are the Spanish ones of `api.openapi_docs.PARAMS`.
+pattern. An iTop CI id gets a maximum length and the characters `check_text` allows in bodies, minus the C1
+controls. The descriptions of the published parameters are the Spanish ones of `api.openapi_docs.PARAMS`.
 """
 
 from __future__ import annotations
@@ -15,7 +15,7 @@ from fastapi import Path
 UUID_PATTERN: Final = r"^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$"
 UUID_EXAMPLE: Final = "0196a6f0-0000-7000-8000-000000000001"
 MAX_PATH_TEXT: Final = 100
-# One path segment without C0/C1 controls, DEL, bidirectional controls or a slash (as `check_text` does for bodies).
+# One path segment without C0/C1 controls, DEL, bidirectional controls or a slash (`check_text`'s set plus C1).
 TEXT_PATTERN: Final = r"^[^\x00-\x1f\x7f-\x9f/\u202a-\u202e\u2066-\u2069]+$"
 
 

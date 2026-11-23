@@ -6,7 +6,7 @@ import html
 import re
 
 import pytest
-from hypothesis import assume, given
+from hypothesis import given
 from hypothesis import strategies as st
 
 from core.itop.rich_text import (
@@ -98,11 +98,11 @@ def test_a_single_line_that_cannot_fit_is_refused() -> None:
 
 @given(st.text())
 def test_no_tag_or_wiki_reference_survives_and_the_text_round_trips(text: str) -> None:
-    assume(WORD_JOINER not in text)  # the separator itself (a text holding it would not round-trip exactly)
     encoded = plain_text_to_html(text)
     assert "<" not in encoded.replace("<br>", "")
     assert '"' not in encoded and "'" not in encoded and "[[" not in encoded
-    assert decode(encoded) == text.replace("\r\n", "\n").replace("\r", "\n")
+    if WORD_JOINER not in text:  # a text that already holds the separator does not round-trip exactly
+        assert decode(encoded) == text.replace("\r\n", "\n").replace("\r", "\n")
 
 
 def test_the_wiki_break_is_a_word_joiner_not_markup() -> None:
