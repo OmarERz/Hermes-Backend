@@ -13,7 +13,7 @@ from api.auth.admin_routes import build_admin_router
 from api.auth.dependencies import CurrentUser
 from api.auth.directory import SqlUserDirectory
 from api.auth.role_admin import FirebaseRoleManager, RoleManager
-from api.errors import ERROR_RESPONSES, ErrorResponse, install_error_handlers
+from api.errors import ERROR_RESPONSES, ErrorResponse, UnhandledErrorMiddleware, install_error_handlers
 from api.itop_webhook import build_itop_webhook_router
 from api.pagination import CursorSigner
 from api.routes import routers, samples
@@ -48,6 +48,8 @@ def create_app(
         responses=ERROR_RESPONSES,
     )
 
+    # Innermost: unhandled errors become the 500 envelope here, so CORS (added after, i.e. outside) still wraps it.
+    app.add_middleware(UnhandledErrorMiddleware)
     if settings.cors_origins:
         # Only the configured exact origins; bearer tokens travel in the Authorization header (no cookies).
         app.add_middleware(

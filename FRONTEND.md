@@ -97,14 +97,17 @@ Todo error responde con:
   `user_inactive` (403) · `not_found`, `user_not_found` (404) · `conflict`, `version_conflict`, `own_role`,
   `structural_source`, `not_in_error`, `stale_proposal`, `already_decided` (409) · `validation_error` (422) · `too_many_requests` (429, puede venir
   del proxy) · `auth_unavailable` (503) · 500 con mensaje genérico.
-- El cuerpo de una petición tiene un límite de **1 MiB** (413 si se excede).
+- El cuerpo de una petición tiene un límite de **1 MiB**: la API responde 413 en la envoltura de error si se
+  excede, y el proxy inverso de producción aplica el mismo tope.
 
 ## 5. Reglas del contrato que afectan al front
 
-- **Paginación por cursor** en todas las listas: `?limit=` (por defecto 50, máximo 200) y `?cursor=`. La
-  respuesta trae `items` y `next_cursor` (`null` en la última página). El cursor es **opaco y firmado**: no lo
-  construyas ni lo modifiques; un cursor de otra lista o alterado da 400 `invalid_cursor` (vuelve a la primera
-  página).
+- **Paginación por cursor** solo en las rutas cuyo esquema de respuesta es una página (`items` +
+  `next_cursor`) y que aceptan `?limit=` (por defecto 50, máximo 200) y `?cursor=`: revisa el OpenAPI de cada
+  ruta. Algunas devuelven un arreglo directo sin paginar (por ejemplo `GET /api/config/schema` y
+  `GET /api/connections/status`). `next_cursor` es `null` en la última página. El cursor es **opaco y firmado**:
+  pásalo tal cual solo a la misma ruta y con los mismos filtros; no lo construyas ni lo modifiques. Uno alterado
+  da 400 `invalid_cursor` (vuelve a la primera página).
 - **Concurrencia optimista (versión esperada):** las escrituras de configuración llevan la versión que el front
   leyó (`expected_version`); si alguien cambió algo entretanto, responde **409 `version_conflict`**. Muestra el
   cambio y ofrece recargar. Aplica hoy a `PUT /api/config`, `POST /api/config/versions/{v}/restore` y
@@ -120,7 +123,10 @@ Todo error responde con:
 - **Fuentes estructurales** (🔒): no se pueden apagar (409 `structural_source`). Un feed nuevo entra como N4 e
   inactivo.
 - **Simulación antes de guardar** la fórmula o la sensibilidad: llama a `POST /api/formula/simulate` y muestra el
-  impacto; guardar recalcula sin llamar al juez.
+  impacto; guardar recalcula sin llamar al juez. ⚠️ **Estado actual:** la simulación todavía devuelve un resultado
+  de **ejemplo** (el cálculo real existe en el backend y se está conectando a esta ruta) y guardar aún no dispara
+  el recálculo automático. Muestra el resultado marcado como "vista previa no disponible" hasta que el OpenAPI
+  o el changelog del backend indiquen lo contrario.
 - **Feedback:** un feedback activo por usuario y evaluación (editable); `wrong_priority` exige el nivel
   propuesto. El usuario sale del token, nunca del cuerpo.
 - **Niveles por nombre:** la comparación muestra el nivel CVSS (Crítica/Alta/Media/Baja) contra la urgencia
@@ -136,7 +142,9 @@ Todo error responde con:
 ## 6. Tiempo real (SSE)
 
 `GET /api/runs/{id}/events` es un *Server-Sent Events* (`text/event-stream`) con eventos `progress` mientras la
-corrida avanza. `EventSource` del navegador no permite cabecera `Authorization`: usa un cliente SSE que acepte
+corrida avanza. ⚠️ **Estado actual:** `POST /api/scans`, `GET /api/runs` y este stream todavía responden con datos
+de **demostración** (tres eventos fijos); el progreso real desde la tabla de corridas llega con la orquestación
+del backend, ya en revisión. Construye la pantalla contra el contrato, que no cambia. `EventSource` del navegador no permite cabecera `Authorization`: usa un cliente SSE que acepte
 cabeceras (por ejemplo `@microsoft/fetch-event-source`) y manda el Bearer. Si la conexión se corta, reconecta y
 consulta `GET /api/runs` para el estado final.
 

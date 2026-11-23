@@ -49,3 +49,18 @@ def test_other_origins_are_not_allowed() -> None:
 def test_wildcards_and_non_origins_are_refused(bad: str) -> None:
     with pytest.raises(ValidationError, match="CORS_ALLOWED_ORIGINS"):
         Settings(**{**SETTINGS.model_dump(), "cors_allowed_origins": bad})
+
+
+def test_unhandled_errors_keep_cors_and_the_envelope() -> None:
+    settings = SETTINGS.model_copy(update={"cors_allowed_origins": FRONT})
+    app = create_app(settings, token_verifier=FakeVerifier(), user_directory=InMemoryUserDirectory())
+
+    @app.get("/api/_t/boom")
+    def boom() -> None:
+        raise RuntimeError("database down")
+
+    response = TestClient(app, raise_server_exceptions=False).get("/api/_t/boom", headers={"Origin": FRONT})
+    assert response.status_code == 500
+    assert response.headers["access-control-allow-origin"] == FRONT
+    assert response.json()["error"]["code"] == "internal_error"
+    assert "database down" not in response.text
