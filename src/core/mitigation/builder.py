@@ -20,6 +20,7 @@ from sqlalchemy.orm import Session
 
 from core.db import models as m
 from core.mitigation.text import clean_text, safe_url
+from core.scan.versions import in_range, parse_version
 
 MAX_IOCS: Final = 20
 MAX_WORKAROUNDS: Final = 10
@@ -77,17 +78,28 @@ def version_key(version: str) -> tuple[tuple[int, int, str], ...]:
 
 
 def _inside(version: str, rng: tuple[str | None, bool | None, str | None, bool | None]) -> bool:
+    """Is `version` inside the affected range? The scan's comparator decides (pre-releases, trailing zeros); a
+    version it cannot read falls back to the simple order rather than losing the advice (pending F4.4 #42)."""
     start, start_inclusive, end, end_inclusive = rng
+    verdict = in_range(version, start, start_inclusive, end, end_inclusive)
+    if verdict is not None:
+        return verdict
     key = version_key(version)
     if start is not None and (key < version_key(start) or (key == version_key(start) and not start_inclusive)):
         return False
     return not (end is not None and (key > version_key(end) or (key == version_key(end) and not end_inclusive)))
 
 
+def _order(version: str) -> tuple[int, object]:
+    """Readable versions first, in the scan's order (`1.0rc1` before `1.0`); the rest in the simple order."""
+    parsed = parse_version(version)
+    return (0, parsed) if parsed is not None else (1, version_key(version))
+
+
 def compose(data: MitigationData) -> Mitigation:
     """A fixed version is only advised when no affected range contains it ("1.5 or higher" must not mean 2.1)."""
     candidates = {clean_text(v, 60) for v in data.fixed_versions if clean_text(v, 60)}
-    versions = sorted((v for v in candidates if not any(_inside(v, r) for r in data.affected_ranges)), key=version_key)
+    versions = sorted((v for v in candidates if not any(_inside(v, r) for r in data.affected_ranges)), key=_order)
     if versions:
         correction = tuple(f"Actualizar a {v} o superior." for v in versions)
     else:

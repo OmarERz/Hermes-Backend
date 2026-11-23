@@ -176,3 +176,22 @@ AGES = [
 @pytest.mark.parametrize(("delta", "expected"), AGES)
 def test_age(delta: timedelta, expected: str) -> None:
     assert age_text(NOW - delta, NOW) == expected
+
+
+def test_a_release_candidate_inside_the_affected_range_is_not_advised() -> None:
+    """`1.0rc1` comes before `1.0`: with the range `< 1.0` it is still affected (pending F4.4 #42)."""
+    result = compose(
+        MitigationData(
+            "CVE-2026-1",
+            fixed_versions=["1.0rc1", "1.0", "2.0.0"],
+            affected_ranges=[(None, None, "1.0", False)],
+        )
+    )
+    assert result.correction == ("Actualizar a 1.0 o superior.", "Actualizar a 2.0.0 o superior.")
+
+
+def test_an_unreadable_version_falls_back_to_the_simple_order() -> None:
+    result = compose(
+        MitigationData("CVE-2026-1", fixed_versions=["build-7", "1.2"], affected_ranges=[(None, None, "1.0", False)])
+    )
+    assert result.correction == ("Actualizar a 1.2 o superior.", "Actualizar a build-7 o superior.")
