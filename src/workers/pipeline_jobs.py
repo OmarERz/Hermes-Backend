@@ -102,6 +102,8 @@ def build_pipeline(settings: Settings, session_factory: sessionmaker[Session]) -
         dismissal_package=engine_dismissal_package,
         judge_caller=_llm(settings, "judge"),
         tickets=tickets,
+        # TODO(F3.3): analyze_cves=lambda s: analyze_pending_cves(s, analyst, CveOptions(...web_advisory_provider(
+        # Fetcher()) from ADVISORY_DOMAINS)) once PR #39 is in develop; until then the scan cycle notes it.
     )
     return Pipeline(session_factory, steps)
 

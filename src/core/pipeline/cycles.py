@@ -4,7 +4,8 @@
   → `correlate_stories` → each group the news crossed is evaluated (trigger `news`), with the judge → tickets.
   Dismissal candidates go to the judge's mode 2.
 * Scan (scheduled or requested): the simulated scan → `correlate_new_groups` on the groups it created or reopened
-  → every group it changed is evaluated (trigger `new_finding`) → tickets; then an extra news cycle (`after_scan`).
+  → the CVE analyst on pending CVEs (F3.3, injected) → every group it changed is evaluated (trigger
+  `new_finding`) → tickets; then an extra news cycle (`after_scan`).
 * Nightly: recalculation of every open group **without the judge** (COR-05).
 
 The cycles never overlap: each takes the pipeline lock and is skipped when another cycle holds it (the scan also
@@ -75,6 +76,7 @@ class Steps:
     judge_caller: ToolCaller | None = None
     tickets: TicketApplier | None = None
     refresh: Callable[[Session], object] | None = None  # vulnerability catalogue before scanning (NVD, KEV, EPSS)
+    analyze_cves: Callable[[Session], object] | None = None  # F3.3 CVE analyst on the CVEs of active groups
     correlate_news: Callable[[Session, list[uuid.UUID], datetime], list[StoryOutcome]] = correlate_stories
     correlate_groups: Callable[[Session, set[uuid.UUID], datetime], list[StoryOutcome]] = correlate_new_groups
 
@@ -129,6 +131,7 @@ class Pipeline:
             now = self.clock()
             with self.session_factory() as session:
                 self.steps.correlate_groups(session, correlated, now)
+            self._analyze_cves(report)
             report.groups = len(changed)
             self._evaluate(report, changed, output.run_id, "new_finding")
             self._news(CycleReport("news"), "after_scan")  # ING-02: an extra news run after each scan
@@ -210,6 +213,19 @@ class Pipeline:
             except Exception:
                 report.failures += 1
                 log.exception("evaluating group %s failed; the next cycle retries it", group_id)
+
+    def _analyze_cves(self, report: CycleReport) -> None:
+        """F-04 step 8: the CVE analyst on pending CVEs (vector when CVSS is missing, conditions), before scoring."""
+        if self.steps.analyze_cves is None:
+            report.notes.append("CVE analyst is not wired yet (F3.3)")
+            return
+        try:
+            with self.session_factory() as session:
+                self.steps.analyze_cves(session)
+                session.commit()
+        except Exception:
+            report.failures += 1
+            log.exception("the CVE analyst failed; groups are scored with what the CVE records hold")
 
     def _dismissals(self, report: CycleReport, story_ids: Sequence[uuid.UUID]) -> None:
         packager, caller = self.steps.dismissal_package, self.steps.judge_caller

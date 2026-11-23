@@ -208,3 +208,25 @@ def test_the_refresh_cycle_and_a_missing_news_step(factory: sessionmaker[Session
     assert Pipeline(factory, Steps(news=None)).refresh_cycle().notes == ["vulnerability refresh is not configured"]
     report = Pipeline(factory, Steps(news=None)).news_cycle()
     assert (report.ran, report.notes) == (False, ["news ingestion is not available (embeddings extra not installed)"])
+
+
+def test_the_scan_cycle_runs_the_cve_analyst_before_scoring(factory: sessionmaker[Session]) -> None:
+    order: list[str] = []
+    run_id = uuid.uuid4()
+    steps = Steps(
+        news=lambda _s, _r: NewsCycleOutput(None, []),
+        scan=lambda _q, _r: ScanCycleOutput(run_id),
+        analyze_cves=lambda _s: order.append("cves"),
+    )
+    steps.correlate_groups = lambda _s, _g, _n: order.append("correlate") or []
+    report = Pipeline(factory, steps).scan_cycle()
+    assert order == ["correlate", "cves"]
+    assert "CVE analyst is not wired yet (F3.3)" not in report.notes
+
+    def broken(_session: Session) -> None:
+        raise RuntimeError("analyst down")
+
+    steps.analyze_cves = broken
+    assert Pipeline(factory, steps).scan_cycle().failures == 1
+    steps.analyze_cves = None
+    assert "CVE analyst is not wired yet (F3.3)" in Pipeline(factory, steps).scan_cycle().notes
