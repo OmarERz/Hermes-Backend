@@ -36,7 +36,9 @@ solo escuchan en `127.0.0.1`.
    las imágenes y levanta el servicio. En cada arranque ocurre, en orden: el aprovisionamiento de la base
    (`provision`), las migraciones (`migrate`) y la carga de los **valores de fábrica** (`bootstrap`: fórmula,
    catálogos, parámetros y fuentes por defecto). `bootstrap` solo carga lo que falta, así que repetir `make up`
-   no cambia nada. Después arrancan la API (`http://127.0.0.1:8000`) y los trabajos periódicos (`workers`).
+   no cambia nada. Después arrancan el servicio de *embeddings* (`embeddings`, modelo local en CPU para deduplicar
+   noticias, sin puerto publicado), la API (`http://127.0.0.1:8000`) y los trabajos periódicos (`workers`).
+   La primera construcción descarga el modelo dentro de la imagen; después no vuelve a usar la red.
 
 ### 2. Llaves y conexiones
 
@@ -50,6 +52,7 @@ devuelve y los registros las enmascaran.
 | `DEEPSEEK_API_KEY`, `LLM_BASE_URL_JUDGE`, `LLM_BASE_URL_ANALYSTS` | Juez y analistas de IA; **la demo nunca las usa** |
 | `ABUSECH_AUTH_KEY`, `RANSOMWARELIVE_API_KEY` | Fuentes de indicadores y víctimas |
 | `FIREBASE_PROJECT_ID`, `FIREBASE_CREDENTIALS_FILE` | Inicio de sesión; con `demo-hermes` solo sirve el emulador de Firebase incluido |
+| `EMBEDDINGS_URL` | Servicio de *embeddings* del ciclo de noticias; por defecto `http://embeddings:8080` dentro de Compose. Vacío apaga el ciclo de noticias |
 
 El primer administrador se asigna con el rol (*custom claim*) de Firebase; con el emulador local,
 `make emulator-token ROLE=admin` imprime un token de prueba. Después, un admin cambia roles con
@@ -86,6 +89,8 @@ Para ver los eventos: `docker compose exec api python -m core.devtools.admin eve
 - `curl -s http://127.0.0.1:8000/api/health` responde `{"status":"ok"}` sin autenticación.
 - `docker compose ps` muestra el estado; `provision`, `migrate` y `bootstrap` terminan en `exited (0)` por diseño.
 - `docker compose logs -f api workers` sigue los registros (JSON, una línea por evento, con las llaves enmascaradas).
+- Si el servicio de *embeddings* cae, el ciclo de noticias lo anota («news deduplication skipped») y deja los
+  artículos guardados sin agrupar; el siguiente ciclo los agrupa cuando el servicio vuelve.
 - Las métricas, las fuentes caídas y la escalera del juez están en `GET /api/metrics` y `GET /api/sources`.
 
 ### 5. Respaldo y restauración

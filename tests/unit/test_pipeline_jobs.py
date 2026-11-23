@@ -23,11 +23,10 @@ SETTINGS = Settings(
 )
 
 
-def test_without_the_embeddings_extra_the_news_cycle_is_off(monkeypatch: pytest.MonkeyPatch) -> None:
-    monkeypatch.setattr("workers.pipeline_jobs.importlib.util.find_spec", lambda _name: None)
+def test_the_news_cycle_needs_the_embeddings_service() -> None:
     assert build_pipeline(SETTINGS, MagicMock()).steps.news is None
-    monkeypatch.setattr("workers.pipeline_jobs.importlib.util.find_spec", lambda _name: object())
-    assert build_pipeline(SETTINGS, MagicMock()).steps.news is not None
+    with_service = SETTINGS.model_copy(update={"embeddings_url": "http://embeddings:8080"})
+    assert build_pipeline(with_service, MagicMock()).steps.news is not None
 
 
 def test_without_keys_there_is_no_judge_nor_tickets_but_scoring_runs() -> None:

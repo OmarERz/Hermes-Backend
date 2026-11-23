@@ -49,6 +49,7 @@ _OPTIONAL_FIELDS = (
     "abusech_auth_key",
     "ransomwarelive_api_key",
     "firebase_credentials_file",
+    "embeddings_url",
 )
 
 
@@ -91,6 +92,9 @@ class Settings(BaseSettings):
 
     # Scheduled simulated scan every N hours (docs/03 §2); 0 = only on demand (POST /api/scans)
     scan_interval_hours: int = Field(default=0, ge=0, le=24 * 30)
+
+    # Embeddings service on the internal network (docker/embeddings, ING-07); unset = the news cycle is off
+    embeddings_url: HttpUrl | None = None
 
     # Vulnerability and threat sources
     nvd_api_key: SecretStr | None = None

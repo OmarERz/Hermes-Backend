@@ -30,6 +30,7 @@ from sqlalchemy.orm import Session, sessionmaker
 
 from core.correlation.engine import StoryOutcome, correlate_new_groups, correlate_stories
 from core.db import models as m
+from core.ingestion.embeddings import EmbeddingError
 from core.judge.session import ToolCaller
 from core.pipeline.judging import JudgeFn, dismiss_story, judge_for
 from core.pipeline.locks import cycle_lock
@@ -173,12 +174,19 @@ class Pipeline:
     def _news(self, report: CycleReport, trigger_reason: str) -> None:
         if self.steps.news is None:
             report.ran = False
-            report.notes.append("news ingestion is not available (embeddings extra not installed)")
+            report.notes.append("news ingestion is not available (EMBEDDINGS_URL is not configured)")
             self._log(report)
             return
-        with self.session_factory() as session:
-            output = self.steps.news(session, trigger_reason)
-            session.commit()
+        try:
+            with self.session_factory() as session:
+                output = self.steps.news(session, trigger_reason)
+                session.commit()
+        except EmbeddingError as error:
+            # Fail closed: the articles are already stored by the ingestion and wait ungrouped for the next cycle.
+            report.failures += 1
+            report.notes.append(f"news deduplication skipped: {error}")
+            self._log(report)
+            return
         report.run_id = output.run_id
         report.stories = len(output.analyzed)
         if not output.analyzed:

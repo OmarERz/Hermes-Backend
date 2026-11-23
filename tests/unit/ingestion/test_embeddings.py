@@ -1,29 +1,35 @@
-"""Embedding adapter without downloading a model: a fake loader stands in for sentence-transformers."""
+"""Embeddings: the e5 input, the shape checks and the HTTP client of the embeddings service (respx, no network)."""
 
 from __future__ import annotations
 
-import importlib
-from typing import Any
+import json
 
+import httpx
 import pytest
+import respx
 
 from core.ingestion.embeddings import (
     EMBEDDING_DIMENSIONS,
     MAX_EMBED_CHARS,
     EmbeddingError,
-    SentenceTransformerEmbedder,
+    HttpEmbedder,
+    HttpEmbedderConfig,
     check_vectors,
     embedding_input,
 )
 
+pytestmark = pytest.mark.unit
+URL = "http://embeddings:8080"
 
-class FakeModel:
-    def __init__(self, width: int = EMBEDDING_DIMENSIONS, value: float = 0.5) -> None:
-        self.width, self.value, self.calls = width, value, 0
 
-    def encode(self, texts: list[str], **_kwargs: Any) -> list[list[float]]:
-        self.calls += 1
-        return [[self.value] * self.width for _ in texts]
+def vectors(n: int, value: float = 0.5, width: int = EMBEDDING_DIMENSIONS) -> dict[str, object]:
+    return {"model": "m", "dimensions": width, "vectors": [[value] * width for _ in range(n)]}
+
+
+def embedder(max_attempts: int = 3, batch_size: int = 32) -> tuple[HttpEmbedder, list[float]]:
+    slept: list[float] = []
+    config = HttpEmbedderConfig(max_attempts=max_attempts, batch_size=batch_size, sleep=slept.append)
+    return HttpEmbedder(URL + "/", config), slept
 
 
 def test_input_is_an_e5_passage_with_title_and_start_of_text() -> None:
@@ -33,38 +39,85 @@ def test_input_is_an_e5_passage_with_title_and_start_of_text() -> None:
     assert len(embedding_input("T", "x" * 10_000)) == MAX_EMBED_CHARS
 
 
-def test_model_loads_lazily_once_and_vectors_have_the_schema_width() -> None:
-    model = FakeModel()
-    loaded: list[str] = []
-
-    def loader(name: str) -> FakeModel:
-        loaded.append(name)
-        return model
-
-    embed = SentenceTransformerEmbedder(loader=loader)
-    assert loaded == []
-    assert embed([]) == []
-    vectors = embed(["a", "b"])
-    embed(["c"])
-    assert loaded == ["intfloat/multilingual-e5-small"]
-    assert model.calls == 2
-    assert len(vectors) == 2
-    assert len(vectors[0]) == EMBEDDING_DIMENSIONS
-
-
 def test_wrong_width_and_non_finite_vectors_are_rejected() -> None:
     with pytest.raises(EmbeddingError, match="wrong shape"):
-        SentenceTransformerEmbedder(loader=lambda _n: FakeModel(width=10))(["a"])
-    with pytest.raises(EmbeddingError, match="non-finite"):
-        SentenceTransformerEmbedder(loader=lambda _n: FakeModel(value=float("nan")))(["a"])
-    with pytest.raises(EmbeddingError, match="wrong shape"):
         check_vectors([[0.0] * EMBEDDING_DIMENSIONS], 2)
+    with pytest.raises(EmbeddingError, match="wrong shape"):
+        check_vectors([[0.0] * 10], 1)
+    with pytest.raises(EmbeddingError, match="non-finite"):
+        check_vectors([[float("nan")] * EMBEDDING_DIMENSIONS], 1)
 
 
-def test_missing_extra_gives_a_clear_error(monkeypatch: pytest.MonkeyPatch) -> None:
-    def fail(_name: str) -> Any:
-        raise ImportError
+@respx.mock
+def test_texts_are_posted_in_batches_and_the_vectors_come_back_in_order() -> None:
+    sent: list[list[str]] = []
 
-    monkeypatch.setattr(importlib, "import_module", fail)
-    with pytest.raises(EmbeddingError, match="embeddings"):
-        SentenceTransformerEmbedder()(["a"])
+    def answer(request: httpx.Request) -> httpx.Response:
+        texts = json.loads(request.content)["texts"]
+        sent.append(texts)
+        return httpx.Response(200, json=vectors(len(texts), value=float(len(sent))))
+
+    respx.post(f"{URL}/embed").mock(side_effect=answer)
+    embed, slept = embedder(batch_size=2)
+    result = embed(["a", "b", "c"])
+    assert sent == [["a", "b"], ["c"]]
+    assert [row[0] for row in result] == [1.0, 1.0, 2.0]
+    assert embed([]) == []
+    assert slept == []
+
+
+@respx.mock
+def test_transport_errors_and_5xx_are_retried_with_backoff() -> None:
+    route = respx.post(f"{URL}/embed").mock(
+        side_effect=[httpx.ConnectError("down"), httpx.Response(503), httpx.Response(200, json=vectors(1))]
+    )
+    embed, slept = embedder()
+    assert len(embed(["a"])) == 1
+    assert route.call_count == 3
+    assert slept == [1.0, 2.0]
+
+
+@respx.mock
+def test_the_service_down_fails_closed_after_the_last_attempt() -> None:
+    respx.post(f"{URL}/embed").mock(side_effect=httpx.ReadTimeout("slow"))
+    embed, slept = embedder(max_attempts=2)
+    with pytest.raises(EmbeddingError, match=r"unavailable: no answer \(ReadTimeout\)"):
+        embed(["a"])
+    assert slept == [1.0]
+
+
+@respx.mock
+def test_a_client_error_is_not_retried() -> None:
+    route = respx.post(f"{URL}/embed").mock(return_value=httpx.Response(422, json={"detail": "x"}))
+    embed, slept = embedder()
+    with pytest.raises(EmbeddingError, match="HTTP 422"):
+        embed(["a"])
+    assert (route.call_count, slept) == (1, [])
+
+
+@pytest.mark.parametrize(
+    ("response", "message"),
+    [
+        (httpx.Response(200, text="not json"), "did not answer JSON"),
+        (httpx.Response(200, json=[1, 2]), "unexpected shape"),
+        (httpx.Response(200, json={"vectors": "x"}), "unexpected shape"),
+        (httpx.Response(200, json={"vectors": [["a"]]}), "non-numeric"),
+        (httpx.Response(200, json=vectors(1, width=10)), "wrong shape"),
+        (httpx.Response(200, json=vectors(2)), "wrong shape"),
+    ],
+)
+@respx.mock
+def test_bad_answers_are_rejected(response: httpx.Response, message: str) -> None:
+    respx.post(f"{URL}/embed").mock(return_value=response)
+    embed, _ = embedder()
+    with pytest.raises(EmbeddingError, match=message):
+        embed(["a"])
+
+
+def test_an_injected_client_is_reused_and_not_closed() -> None:
+    transport = httpx.MockTransport(lambda request: httpx.Response(200, json=vectors(1)))
+    with httpx.Client(transport=transport) as client:
+        embed = HttpEmbedder(URL, http=client)
+        assert len(embed(["a"])) == 1
+        assert len(embed(["b"])) == 1
+        assert not client.is_closed

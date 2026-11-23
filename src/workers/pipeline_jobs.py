@@ -3,7 +3,6 @@ nightly recalculation. Built from the configuration; what is not configured is l
 
 from __future__ import annotations
 
-import importlib.util
 import logging
 from collections.abc import Callable
 from dataclasses import dataclass
@@ -12,7 +11,7 @@ from typing import TYPE_CHECKING
 from sqlalchemy.orm import Session, sessionmaker
 
 from core.config import Settings
-from core.ingestion.embeddings import SentenceTransformerEmbedder
+from core.ingestion.embeddings import HttpEmbedder
 from core.ingestion.fetcher import Fetcher
 from core.itop.client import reader_from_settings
 from core.llm import LlmClient
@@ -68,12 +67,12 @@ class QueuedScans:
         return True
 
 
-def _embeddings() -> bool:
-    """News deduplication needs the local embeddings model (ING-07, optional `embeddings` extra)."""
-    if importlib.util.find_spec("sentence_transformers") is None:
-        log.error("sentence-transformers is not installed (extra `embeddings`): the news cycle is off")
-        return False
-    return True
+def _embedder(settings: Settings) -> HttpEmbedder | None:
+    """News deduplication needs the embeddings service (ING-07, `docker/embeddings`); without it the cycle is off."""
+    if settings.embeddings_url is None:
+        log.error("EMBEDDINGS_URL is not configured: the news cycle is off")
+        return None
+    return HttpEmbedder(str(settings.embeddings_url))
 
 
 def _llm(settings: Settings, role: str) -> LlmClient | None:
@@ -96,7 +95,7 @@ def build_pipeline(settings: Settings, session_factory: sessionmaker[Session]) -
     tickets = _tickets(settings)
     analyst = _llm(settings, "analysts")
     steps = Steps(
-        news=news_step(Fetcher(), SentenceTransformerEmbedder(), analyst) if _embeddings() else None,
+        news=news_step(Fetcher(), embedder, analyst) if (embedder := _embedder(settings)) is not None else None,
         analyze_cves=cve_step(analyst, Fetcher()) if analyst is not None else None,
         refresh=refresh_vulndata(session_factory, nvd_client(settings.nvd_api_key), JsonSource()),
         scan=scan_step(session_factory, reader),
