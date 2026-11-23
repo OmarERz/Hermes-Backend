@@ -92,12 +92,11 @@ def sweep_dead_runs(client: docker.DockerClient, alive: Callable[[str], bool] = 
     removed: list[str] = []
     owned = {"label": [f"{LABEL}=1", f"{LABEL}.host={HOST}"]}
     for container in client.api.containers(all=True, filters=owned):
-        if not alive((container.get("Labels") or {}).get(f"{LABEL}.pid", "")):
-            _remove_container(client, container)
+        if not alive((container.get("Labels") or {}).get(f"{LABEL}.pid", "")) and _remove_container(client, container):
             removed.append(_name(container))
     for image in client.api.images(filters=owned):
         if not alive((image.get("Labels") or {}).get(f"{LABEL}.pid", "")):
-            for tag in image.get("RepoTags") or []:
+            for tag in _tags(image):
                 untag(client, tag)
                 removed.append(tag)
     removed += _sweep_dead_stacks(client, alive)
@@ -109,9 +108,18 @@ def _name(container: dict[str, Any]) -> str:
     return str(names[0]).lstrip("/")
 
 
-def _remove_container(client: docker.DockerClient, container: dict[str, Any]) -> None:
-    with contextlib.suppress(NotFound, APIError):
+def _tags(image: dict[str, Any]) -> list[str]:
+    """Real tags only: older daemons list an untagged image as `<none>:<none>`."""
+    return [tag for tag in image.get("RepoTags") or [] if tag != "<none>:<none>"]
+
+
+def _remove_container(client: docker.DockerClient, container: dict[str, Any]) -> bool:
+    """True if this call removed it; gone already, or in the way of another removal, is False."""
+    try:
         client.api.remove_container(container["Id"], force=True)
+    except (NotFound, APIError):
+        return False
+    return True
 
 
 def _sweep_dead_stacks(client: docker.DockerClient, alive: Callable[[str], bool]) -> list[str]:
@@ -133,7 +141,7 @@ def _sweep_dead_stacks(client: docker.DockerClient, alive: Callable[[str], bool]
             with contextlib.suppress(NotFound, APIError):
                 client.api.remove_volume(volume["Name"], force=True)
         for image in client.api.images(name=f"{project}-*"):
-            for tag in image.get("RepoTags") or []:
+            for tag in _tags(image):
                 untag(client, tag)
         removed.append(project)
     return removed

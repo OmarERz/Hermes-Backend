@@ -18,15 +18,15 @@ pytestmark = pytest.mark.contract
 ROOT = Path(__file__).resolve().parents[2]
 OPENAPI = json.loads((ROOT / "openapi" / "openapi.json").read_text(encoding="utf-8"))
 METHODS = ("get", "post", "put", "patch", "delete")
+HTTP = re.compile(r"^meta \{[^}]*^\s*type: http\s*$", re.MULTILINE | re.DOTALL)
 REQUEST = re.compile(r"^(get|post|put|patch|delete) \{\s*\n\s*url: \{\{baseUrl\}\}(\S+)", re.MULTILINE)
 TAG = re.compile(r"^\s*operationId: ([a-z_]+)\s*$", re.MULTILINE)
 # Operations a client cannot call successfully yet, with the reason; each still needs a request (its error path).
 KNOWN_GAPS = {
     "get_finding_history": "no API response carries a finding id yet (reported in F13.6)",
 }
-SUCCESS = re.compile(
-    r"res\.status: (?:eq|in) \[?\s*2\d\d|\.status\)\.to\.(?:equal|be\.oneOf)\(\[?\s*2\d\d|status: 2\d\d"
-)
+# An explicit success: `res.status: eq 2xx` in `assert`, or `expect(res.status).to.equal(2xx)` in `tests`.
+SUCCESS = re.compile(r"^\s*res\.status: eq 2\d\d\s*$|expect\(res\.status\)\.to\.equal\(2\d\d\)", re.MULTILINE)
 
 
 @dataclass(frozen=True)
@@ -52,9 +52,10 @@ def requests() -> list[Request]:
     found = []
     for file in sorted((ROOT / "bruno").rglob("*.bru")):
         text = file.read_text(encoding="utf-8")
-        call = REQUEST.search(text)
-        if call is None:
+        if not HTTP.search(text):
             continue  # collection, folder and environment files
+        call = REQUEST.search(text)
+        assert call is not None, f"{file}: an HTTP request must call {{{{baseUrl}}}}/api/... with a known method"
         tag = TAG.search(text)
         url = re.sub(r"\{\{[^}]+\}\}", "x", call.group(2))
         found.append(Request(file, call.group(1), url, tag.group(1) if tag else "", bool(SUCCESS.search(text))))

@@ -28,7 +28,8 @@ script:pre-request {
   bru.setVar("configVersion", current.version);
   bru.setVar("nextConfigVersion", current.version + 1);
   // A real formula change (an unchanged value creates no version): alternate the KEV floor between 90 and 91.
-  bru.setVar("kevFloor", String(current.values["formula.kev_exposed_floor"]) === "90" ? "91" : "90");
+  bru.setVar("kevFloorBefore", String(current.values["formula.kev_exposed_floor"]));
+  bru.setVar("kevFloor", bru.getVar("kevFloorBefore") === "90" ? "91" : "90");
 }
 
 body:json {
