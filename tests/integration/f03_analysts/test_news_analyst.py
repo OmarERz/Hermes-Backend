@@ -154,6 +154,18 @@ def test_an_unknown_cve_is_rejected(session: Session) -> None:
     assert "VAL-03.cve_exists" in session.scalars(select(m.ErrorQueue.reason)).one()
 
 
+def test_a_real_cve_the_article_never_names_is_reported_by_the_quote_rule(session: Session) -> None:
+    add_cves(session, "CVE-2026-1111", "CVE-2026-2222", "CVE-2026-9999")
+    story = add_story(session)
+    invented = news_output(story.id)
+    invented["cves"][0] = {"cve": "CVE-2026-9999", "exploitation_level": "active", "quote": "through CVE-2026-1111"}
+    double = double_with(invented, news_output(story.id))
+    assert analyze(session, double, story).status == "analyzed"
+    retry = double.requests[1].body["messages"][-1]["content"]
+    assert "VAL-03.cve_in_quote" in retry
+    assert "VAL-03.cve_exists" not in retry  # it exists: the failing rule is the quote's
+
+
 def test_a_provider_failure_queues_the_story(session: Session) -> None:
     story = add_story(session)
     double = LlmDouble()

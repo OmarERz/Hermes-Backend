@@ -10,7 +10,7 @@ from typing import Any
 
 import pytest
 from correlation_support import NOW, add_group, add_story, demo_group
-from sqlalchemy import func, select
+from sqlalchemy import delete, func, select
 from sqlalchemy.orm import Session
 
 from core.correlation.engine import StoryFacts, correlate_story, load_active_groups, load_story_facts
@@ -75,6 +75,34 @@ class JudgeDouble:
         self.calls += 1
         review = self.review_for(store_package(self.session, package, NOW).id)
         return JudgeVerdict(self.adjustment, review.id if self.adjustment is not None else None)
+
+
+class StagedJudgeDouble(JudgeDouble):
+    """The pipeline's shape (F12.2 #105): `assess` is the model (no database), `record` stores the package and the
+    review. `meanwhile` runs one change per call while the "model" answers."""
+
+    def __init__(self, session: Session, adjustment: int | None = 12, meanwhile: list[Any] | None = None) -> None:
+        super().__init__(session, adjustment)
+        self.assessed: list[str] = []
+        self.recorded: list[uuid.UUID | None] = []
+        self.discarded: list[uuid.UUID] = []
+        self.meanwhile = list(meanwhile or [])
+
+    def assess(self, package: dict[str, Any]) -> int | None:
+        self.assessed.append(package["fingerprint"])
+        if self.meanwhile:
+            self.meanwhile.pop(0)()
+        return self.adjustment
+
+    def record(self, session: Session, package: dict[str, Any], assessed: int | None) -> JudgeVerdict:
+        assert session is self.session
+        verdict = self(package)
+        self.recorded.append(verdict.llm_review_id)
+        return verdict
+
+    def discard(self, session: Session, package: dict[str, Any], assessed: int | None) -> None:
+        assert session is self.session
+        self.discarded.append(self.review_for(store_package(session, package, NOW).id).id)
 
 
 class TicketsDouble:
@@ -593,3 +621,103 @@ def test_a_recalculation_keeps_the_adjustment_even_when_the_context_changed(sess
     )
     assert after_formula.result.applied_adjustment == -20
     assert judge.calls == 1
+
+
+def staged_session(session: Session, monkeypatch: pytest.MonkeyPatch) -> list[str]:
+    """The staged path commits its read step; here a commit only flushes (the module rolls every test back) and
+    is counted. Real commits and the open-transaction probe: tests/integration/f13_pipeline."""
+    commits: list[str] = []
+
+    def commit() -> None:
+        commits.append("commit")
+        session.flush()
+
+    monkeypatch.setattr(session, "commit", commit)
+    return commits
+
+
+def new_story_for(session: Session) -> Any:
+    return lambda: correlate_story(session, add_story(session, cves={CVE: "mass"}).id, NOW)
+
+
+def test_a_staged_judge_answers_between_two_transactions(session: Session, monkeypatch: pytest.MonkeyPatch) -> None:
+    commits = staged_session(session, monkeypatch)
+    judge = StagedJudgeDouble(session, adjustment=-12)
+    evaluation = evaluate_group(session, demo_group(session), run(session), "new_finding", opts(session, judge))
+    assert commits == ["commit"]  # the read transaction ends before the model call
+    assert (len(judge.assessed), judge.calls, evaluation.judge_called, evaluation.judge_reused) == (1, 1, True, False)
+    assessment = session.get_one(m.Assessment, evaluation.assessment_id)
+    assert (assessment.judge_adjustment, assessment.llm_review_id) == (-12, judge.recorded[0])
+
+
+def test_a_group_that_changed_while_the_judge_answered_is_judged_again(
+    session: Session, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    staged_session(session, monkeypatch)
+    judge = StagedJudgeDouble(session, adjustment=-12, meanwhile=[new_story_for(session)])
+    evaluation = evaluate_group(session, demo_group(session), run(session), "news", opts(session, judge))
+    assert len(judge.assessed) == 2
+    assert judge.assessed[0] != judge.assessed[1]  # the second review is of the package as it is now
+    assessment = session.get_one(m.Assessment, evaluation.assessment_id)
+    assert assessment.llm_review_id == judge.recorded[0]
+    assert len(judge.discarded) == 1  # the first one is kept as not applied (its tokens were paid)
+
+
+def test_a_group_that_keeps_changing_gets_the_base(session: Session, monkeypatch: pytest.MonkeyPatch) -> None:
+    staged_session(session, monkeypatch)
+    judge = StagedJudgeDouble(session, adjustment=-12, meanwhile=[new_story_for(session), new_story_for(session)])
+    evaluation = evaluate_group(session, demo_group(session), run(session), "news", opts(session, judge))
+    assert len(judge.assessed) == 2  # MAX_JUDGE_ROUNDS
+    assert (evaluation.judge_called, evaluation.judge_reused) == (True, False)
+    assert evaluation.result.no_judge_review  # EVA-04: final = base
+    assessment = session.get_one(m.Assessment, evaluation.assessment_id)
+    assert assessment.llm_review_id is None
+    assert (judge.recorded, len(judge.discarded)) == ([], 2)  # both paid reviews are stored, as not applied
+
+
+def test_a_changed_group_whose_previous_review_fits_again_reuses_it(
+    session: Session, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    staged_session(session, monkeypatch)
+    group = demo_group(session)
+    first = StagedJudgeDouble(session, adjustment=-12)
+    evaluate_group(session, group, run(session), "new_finding", opts(session, first))
+    story = add_story(session, cves={CVE: "mass"})
+
+    def unlink() -> None:  # the story that changed the package is unlinked again meanwhile
+        session.execute(delete(m.Correlation).where(m.Correlation.story_id == story.id))
+        session.flush()
+
+    correlate_story(session, story.id, NOW)
+    judge = StagedJudgeDouble(session, adjustment=20, meanwhile=[unlink])
+    evaluation = evaluate_group(session, group, run(session), "news", opts(session, judge))
+    assert (len(judge.assessed), evaluation.judge_called, evaluation.judge_reused) == (1, True, True)
+    assert evaluation.result.applied_adjustment == -12  # the review of the package as it is again (COR-06)
+    assert (judge.recorded, len(judge.discarded)) == ([], 1)
+
+
+def test_a_group_closed_while_the_judge_answered_keeps_the_review(
+    session: Session, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    staged_session(session, monkeypatch)
+    group = demo_group(session)
+    run_id = run(session)
+
+    def fix_everything() -> None:
+        for finding in session.scalars(select(m.Finding).where(m.Finding.finding_group_id == group)):
+            session.add(
+                m.FindingStatusChange(
+                    finding_id=finding.id,
+                    run_id=run_id,
+                    status="fixed",
+                    observed_version="3.0.9",
+                    changed_at=NOW + timedelta(hours=1),
+                )
+            )
+        session.flush()
+
+    judge = StagedJudgeDouble(session, adjustment=-12, meanwhile=[fix_everything])
+    with pytest.raises(GroupNotActiveError):
+        evaluate_group(session, group, run_id, "new_finding", opts(session, judge))
+    assert judge.recorded == []
+    assert session.get(m.LlmReview, judge.discarded[0]) is not None  # stored, not applied: the caller commits it

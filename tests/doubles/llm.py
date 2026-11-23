@@ -9,7 +9,7 @@ in `unexpected_calls`, so a test can assert that the code made no extra calls.
 from __future__ import annotations
 
 import json
-from collections.abc import Mapping, Sequence
+from collections.abc import Callable, Mapping, Sequence
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, Final
@@ -73,6 +73,9 @@ class LlmDouble:
     active: str | None = None
     requests: list[RecordedRequest] = field(default_factory=list)
     unexpected_calls: int = 0
+    # Runs before each request is answered (e.g. to assert that no database transaction is open during the call,
+    # or to change the database "while the model thinks").
+    on_request: Callable[[], None] | None = None
     _cursor: dict[str, int] = field(default_factory=dict)
 
     def __post_init__(self) -> None:
@@ -113,6 +116,8 @@ class LlmDouble:
         if not request.url.path.endswith(CHAT_PATH_SUFFIX):
             return httpx.Response(404, json={"error": {"message": "not found"}})
         self.requests.append(RecordedRequest(self.active, json.loads(request.content)))
+        if self.on_request is not None:
+            self.on_request()
         if self.active is None:
             self.unexpected_calls += 1
             return httpx.Response(500, json={"error": {"message": "no case selected in the LLM double"}})

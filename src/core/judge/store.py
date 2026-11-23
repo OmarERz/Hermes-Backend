@@ -4,15 +4,16 @@ Append-only (A-2): a review is assembled in memory and written once, complete, w
 review fell back to the base (L11) gets one `error_queue` entry (PRE-01), retried in the next runs and given up
 (shown as pending in the front) after `QUEUE_RETRIES`; a later successful review resolves it. A review skipped on
 purpose (degradation ladder) is not queued. Package CIs are iTop CI IDs (`asset.itop_ci_id`); an asset UUID is
-accepted too.
+accepted too. A review is always stored, even when a CI it cites left the inventory while the model answered: its
+tokens were paid and count for the daily budget (F6.1 #69).
 """
 
 from __future__ import annotations
 
 import logging
 import uuid
-from collections.abc import Callable, Iterable, Mapping
-from dataclasses import dataclass
+from collections.abc import Callable, Iterable, Mapping, Sequence
+from dataclasses import dataclass, replace
 from datetime import date, datetime
 from decimal import Decimal
 from typing import Any
@@ -36,6 +37,7 @@ from core.db.models import (
 )
 from core.judge.budget import FALLBACK_PRICE, TURN_ESTIMATE, LedgerDailyBudget, ModelPrice
 from core.judge.catalog import MORE_CRITICAL_ASSET, JudgeSettings, SensitivityProfile, load_reason_catalog
+from core.judge.mitigation import MitigationResult, MitigationStatus
 from core.judge.mode2 import AlertDecision, relation_identity
 from core.judge.session import Failure, JudgeEnvironment, ReviewOutcome, ReviewStatus
 from core.validation.budget import BudgetConfig, spent_on
@@ -45,7 +47,11 @@ logger = logging.getLogger(__name__)
 AGENT = "judge"
 # LIMIT reaches the queue only from mode 2, where hitting the limits means no decision; a mode 1 review that hit
 # them still answered (partial_review with its accepted reasons) and its callers pass no failure.
-QUEUED_FAILURES = frozenset({Failure.TRANSPORT, Failure.REQUEST, Failure.FORMAT, Failure.BUDGET, Failure.LIMIT})
+# STALE: a mode 2 alert whose inventory facts changed while the model answered is not raised and waits for a retry.
+# A stale mode 1 review is different (its package is outdated): `JudgeService.store` never queues it.
+QUEUED_FAILURES = frozenset(
+    {Failure.TRANSPORT, Failure.REQUEST, Failure.FORMAT, Failure.BUDGET, Failure.LIMIT, Failure.STALE}
+)
 QUEUE_RETRIES = 2  # PRE-01: retried in the next 2 runs, then pending in the front
 MODE2_MIN_CONFIDENCE = "mode2.min_confidence"
 _SETTING_KEYS = (
@@ -59,8 +65,7 @@ _SETTING_KEYS = (
 )
 
 
-class JudgeStoreError(RuntimeError):
-    """The review cannot be stored consistently (e.g. a cited CI is not in the inventory)."""
+MISSING_CI_RULE = "JUE-MIT-04"  # a mitigation step cites a CI that is not (any more) in the inventory
 
 
 @dataclass(frozen=True)
@@ -125,9 +130,17 @@ def save_review(
     status: ReviewStatus | None = None,
     second_review_of: uuid.UUID | None = None,
 ) -> uuid.UUID:
-    """Insert the review with its reasons and accepted mitigation; returns the `llm_review.id`."""
+    """Insert the review with its reasons and accepted mitigation; returns the `llm_review.id`.
+
+    The cited CIs are resolved before anything is inserted (F6.1 #69), so a CI missing from the inventory never rolls
+    the review back: an accepted `more_critical_asset` without its CI keeps no `judge_reason` row (it stays in
+    `calls`), and a mitigation step that cites one discards the whole draft (JUE-MIT-05) with rule JUE-MIT-04."""
     cited = {r.ci_id for r in outcome.reasons if r.ci_id} | {s.ci_id for s in outcome.mitigation.steps if s.ci_id}
     assets = resolve_assets(session, (ci for ci in cited if ci is not None))
+    missing = sorted({step.ci_id for step in outcome.mitigation.steps if step.ci_id and step.ci_id not in assets})
+    if missing:
+        logger.warning("mitigation steps cite CIs not in the inventory (%s): the draft is discarded", missing)
+        outcome = replace(outcome, mitigation=MitigationResult(MitigationStatus.DISCARDED, rule=MISSING_CI_RULE))
     review = LlmReview(id=new_id(), **_review_columns(outcome, target, status))
     review.second_review_of_id = second_review_of
     session.add(review)
@@ -218,10 +231,15 @@ def _reason_rows(review_id: uuid.UUID, outcome: ReviewOutcome, assets: Mapping[s
         if record.code == MORE_CRITICAL_ASSET:
             asset_id = assets.get(record.ci_id or "")
             if asset_id is None:
-                if record.status == "accepted":
-                    raise JudgeStoreError("an accepted more_critical_asset cites a CI that is not in the inventory")
-                # judge_reason requires the asset for this reason: the rejected call stays in llm_review.calls
-                logger.info("rejected more_critical_asset without an inventory CI kept only in calls")
+                # judge_reason requires the asset for this reason: the call stays in llm_review.calls. An accepted
+                # one only happens when the CI left the inventory while the model answered; it adjusts no score,
+                # since asset scores exist only for inventory CIs.
+                logger.log(
+                    logging.WARNING if record.status == "accepted" else logging.INFO,
+                    "%s more_critical_asset for CI %r, not in the inventory: kept only in calls",
+                    record.status,
+                    record.ci_id,
+                )
                 continue
         rows.append(
             JudgeReason(
@@ -244,10 +262,8 @@ def _mitigation_rows(
     review_id: uuid.UUID, outcome: ReviewOutcome, assets: Mapping[str, uuid.UUID]
 ) -> list[MitigationDraftStep]:
     rows: list[MitigationDraftStep] = []
-    for step in outcome.mitigation.steps:
+    for step in outcome.mitigation.steps:  # save_review already discarded a draft that cites a missing CI
         asset_id = assets.get(step.ci_id) if step.ci_id else None
-        if step.ci_id and asset_id is None:
-            raise JudgeStoreError("a mitigation step cites a CI that is not in the inventory")
         rows.append(
             MitigationDraftStep(
                 llm_review_id=review_id,
@@ -290,6 +306,52 @@ class DbInventory:
             .order_by(SoftwareProduct.itop_name)
         ).all()
         return [(software_id, name) for software_id, name in rows]
+
+
+class SnapshotInventory:
+    """The mode 2 `Inventory` read once, before the model is called (F12.2 #105), so no query runs while it answers.
+    It answers as `DbInventory` did when it was loaded: by iTop CI ID or asset UUID, never a decommissioned asset,
+    and what each asset currently runs, by product name."""
+
+    def __init__(
+        self,
+        assets: Sequence[tuple[uuid.UUID, str | None, datetime | None]],
+        installed: Sequence[tuple[uuid.UUID, uuid.UUID, str]],
+    ) -> None:
+        self._by_itop = {itop: asset_id for asset_id, itop, _retired in assets if itop is not None}
+        self._ids = {asset_id for asset_id, _itop, _retired in assets}
+        self._retired = {asset_id for asset_id, _itop, retired in assets if retired is not None}
+        self._products: dict[uuid.UUID, list[tuple[uuid.UUID, str]]] = {}
+        for asset_id, software_id, name in installed:
+            self._products.setdefault(asset_id, []).append((software_id, name))
+
+    @classmethod
+    def load(cls, session: Session) -> SnapshotInventory:
+        assets = [
+            (asset_id, itop, retired)
+            for asset_id, itop, retired in session.execute(select(Asset.id, Asset.itop_ci_id, Asset.decommissioned_at))
+        ]
+        installed = [
+            (asset_id, software_id, name)
+            for asset_id, software_id, name in session.execute(
+                select(InstalledSoftware.asset_id, InstalledSoftware.id, SoftwareProduct.itop_name)
+                .join(SoftwareProduct, SoftwareProduct.id == InstalledSoftware.software_product_id)
+                .where(InstalledSoftware.removed_at.is_(None))
+                .order_by(InstalledSoftware.asset_id, SoftwareProduct.itop_name)
+            )
+        ]
+        return cls(assets, installed)
+
+    def find_asset(self, ci_id: str) -> uuid.UUID | None:
+        if not ci_id:
+            return None
+        asset_id = self._by_itop.get(ci_id)
+        if asset_id is None and (candidate := _uuid(ci_id)) in self._ids:
+            asset_id = candidate
+        return asset_id if asset_id is not None and asset_id not in self._retired else None
+
+    def products(self, asset_id: uuid.UUID) -> list[tuple[uuid.UUID, str]]:
+        return list(self._products.get(asset_id, ()))
 
 
 def refuted_relationships(session: Session) -> Callable[[str, str, str], bool]:
@@ -375,14 +437,20 @@ def parse_model_price(prices: Any, model: str) -> ModelPrice | None:
 
 
 def load_daily_budget(session: Session, price: ModelPrice, today: date) -> LedgerDailyBudget:
-    """The judge's daily budget from `daily_budget_usd` and `critical_reserve` (docs/11) over `llm_usage_daily`."""
+    """The judge's daily budget from `daily_budget_usd` and `critical_reserve` (docs/11) over `llm_usage_daily`.
+
+    The day's spending is read once, here: the judge consults the budget between the turns of a review, when no
+    transaction is open (F12.2 #105), so it never queries the database then. What the review in progress spent is
+    added by the session (`pending_usd`), and the reviews stored since by the same caller through `OffsetDailyBudget`;
+    the pipeline loads a new budget for every group it evaluates."""
     values = _settings(session, _BUDGET_KEYS)
     defaults = BudgetConfig()
     config = BudgetConfig(
         daily_usd=Decimal(str(values.get("daily_budget_usd", defaults.daily_usd))),
         critical_reserve=Decimal(str(values.get("critical_reserve", defaults.critical_reserve))),
     )
-    return LedgerDailyBudget(lambda: spent_on(session, today), config, price.cost(TURN_ESTIMATE))
+    spent = spent_on(session, today)
+    return LedgerDailyBudget(lambda: spent, config, price.cost(TURN_ESTIMATE))
 
 
 def judge_environment(session: Session, today: date, ladder_level: int = 0) -> JudgeEnvironment:

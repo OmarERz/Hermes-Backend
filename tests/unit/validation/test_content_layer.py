@@ -6,10 +6,12 @@ import pytest
 from validation_samples import ARTICLE, CVE_TEXT, cve, news
 
 from core.validation.content import (
+    _mentions_cve,
     check_cve_analysis,
     check_cvss_vector,
     check_news_analysis,
     check_quote,
+    cve_candidates,
     normalize_text,
     quote_in_text,
 )
@@ -191,3 +193,34 @@ def test_the_quote_must_name_the_whole_cve_it_supports() -> None:
     dashed = "Acme Firewall appliances are attacked through CVE" + chr(0x2011) + "2026" + chr(0x2013) + "1111 today."
     output["cves"][0]["quote"] = "attacked through CVE" + chr(0x2011) + "2026" + chr(0x2013) + "1111"
     assert check_news_analysis(output, dashed, "story-1", known.__contains__) == []
+
+
+def test_cve_candidates_cover_every_identifier_a_verbatim_quote_could_name() -> None:
+    text = (
+        "Fixed cve" + chr(0x2011) + "2026" + chr(0x2013) + "1111 and CVE-2026-123456789; see CVE-2026-12 and CVE-2025-"
+    )
+    found = cve_candidates(text)
+    assert found == {
+        "CVE-2026-1111",
+        "CVE-2026-1234",
+        "CVE-2026-12345",
+        "CVE-2026-123456",
+        "CVE-2026-1234567",
+    }
+    assert cve_candidates("no identifiers here") == frozenset()
+    # a quote may stop inside a longer number: what it names is still a candidate, so its existence is known
+    quote = "CVE-2026-12345"
+    assert _mentions_cve(quote, "CVE-2026-12345")
+    assert "CVE-2026-12345" in found
+
+
+def test_an_identifier_outside_the_candidates_never_passes_the_quote_rules() -> None:
+    output = news()
+    output["cves"] = [
+        {"cve": "CVE-2026-3333", "exploitation_level": "active", "quote": "attacked through CVE-2026-1111"}
+    ]
+    output["products"] = output["actors"] = output["victims"] = []
+    assert "CVE-2026-3333" not in cve_candidates(ARTICLE)
+    assert rules(check_news_analysis(output, ARTICLE, "story-1", lambda _cve: True)) == {
+        ("VAL-03.cve_in_quote", "cves[0].quote")
+    }

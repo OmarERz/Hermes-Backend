@@ -10,7 +10,6 @@ from __future__ import annotations
 import logging
 import uuid
 from collections.abc import Callable
-from dataclasses import astuple
 from datetime import UTC, datetime, timedelta
 from typing import Any, Protocol
 
@@ -28,13 +27,12 @@ from core.inventory.sync import sync_from_itop_unlocked_read
 from core.itop.client import ItopReader
 from core.llm import LlmClient
 from core.pipeline.cycles import NewsCycleOutput, ScanCycleOutput, TicketApplier
-from core.pipeline.judging import JudgeFn
+from core.pipeline.judging import PipelineJudge
 from core.scan.engine import ScanOptions, run_scan
 from core.scoring.evaluate import (
     EngineScorer,
     EvaluationOptions,
     GroupNotActiveError,
-    JudgeVerdict,
     evaluate_group,
     recalculate_open_groups,
 )
@@ -79,16 +77,16 @@ def scan_step(
 
 
 def engine_evaluate(
-    session: Session, group_id: uuid.UUID, run_id: uuid.UUID, trigger: str, judge: JudgeFn | None
+    session: Session, group_id: uuid.UUID, run_id: uuid.UUID, trigger: str, judge: PipelineJudge | None
 ) -> uuid.UUID | None:
     """F4.3 `evaluate_group` with the pipeline's judge; the assessment to apply tickets with, if any.
 
     A group with no current finding left (every CI fixed), or whose score did not change, is not assessed again: its
-    latest assessment is returned so the ticket lifecycle still applies CI changes and fixes (TIC-05).
+    latest assessment is returned so the ticket lifecycle still applies CI changes and fixes (TIC-05). A group that
+    closed while the judge answered keeps the stored review; the caller commits it.
     """
-    verdicts = (lambda package: JudgeVerdict(*astuple(judge(package)))) if judge is not None else None
-    try:
-        evaluation = evaluate_group(session, group_id, run_id, trigger, EvaluationOptions(judge=verdicts))
+    try:  # a judge call commits the read transaction first and stores its review in a new one (F12.2 #105)
+        evaluation = evaluate_group(session, group_id, run_id, trigger, EvaluationOptions(judge=judge))
     except GroupNotActiveError:
         return _latest_assessment(session, group_id)
     # Unchanged scores still go through the ticket rules (new CIs, fixes) with the assessment that stands.
