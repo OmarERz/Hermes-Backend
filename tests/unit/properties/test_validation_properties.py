@@ -11,6 +11,7 @@ from core.scoring.cvss import parse_cvss31
 from core.validation.content import (
     CVE_FORMAT,
     _mentions_cve,
+    _plain,
     check_cve,
     check_cvss_vector,
     check_quote,
@@ -207,7 +208,7 @@ def test_every_cve_a_verbatim_quote_can_name_is_a_candidate(pieces: list[str], d
     start = data.draw(st.integers(0, len(text)))
     quote = text[start : data.draw(st.integers(start, len(text)))]
     found = cve_candidates(text)
-    plain = normalize_text(quote).translate({ord(c): "-" for c in "\u2010\u2011\u2012\u2013\u2014\u2212"}).upper()
+    plain = _plain(quote)  # what `_mentions_cve` reads
     for size in range(4, 8):
         for index in range(len(plain)):
             cve = plain[index : index + 9 + size]

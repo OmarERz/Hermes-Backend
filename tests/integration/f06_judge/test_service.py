@@ -216,7 +216,11 @@ def test_a_stale_double_review_is_stored_as_not_applied(engine: Engine) -> None:
             "stale",
             "absent",
         )
-        assert (second.status, second.mitigation_status) == ("no_judge_review", "absent")
+        assert (second.status, second.parameters["failure"], second.mitigation_status) == (
+            "no_judge_review",
+            "stale",
+            "absent",
+        )
         steps = session.scalars(select(m.MitigationDraftStep)).all()
         assert steps == []  # JUE-MIT-09: no draft from a review that never reached a score
         assert session.scalars(select(m.ErrorQueue.status)).all() == ["resolved"]
@@ -234,3 +238,19 @@ def test_a_stale_review_that_failed_keeps_its_real_cause(engine: Engine) -> None
         review = session.get_one(m.LlmReview, stored.review_id)
         assert (review.status, review.parameters["failure"]) == ("no_judge_review", "transport")  # L13
         assert session.scalars(select(m.ErrorQueue)).all() == []  # the outdated package is not queued
+
+
+def test_a_stale_review_whose_blind_review_failed_keeps_that_cause(engine: Engine) -> None:
+    drafted = tool_call_completion("finalize_review", {"summary": "Resumen.", "mitigation_steps": [STEP]})
+    judge = service([tool_call_completion("propose_reason", MASS, call_id="a"), drafted])  # nothing for the second
+    content = finding_package()
+    result = judge.evaluate(ReviewPackage.from_content(content))
+    assert (result.adjustment, result.failure) == (None, Failure.TRANSPORT)
+    with Session(engine) as session, session.begin():
+        stored = judge.store(session, ReviewTarget(package_row(session, content), "r", NOW), result, stale=True)
+    assert stored.second_review_id is not None
+    with Session(engine) as session:
+        for review_id in (stored.review_id, stored.second_review_id):
+            review = session.get_one(m.LlmReview, review_id)
+            assert (review.status, review.parameters["failure"]) == ("no_judge_review", "transport")
+        assert session.scalars(select(m.ErrorQueue)).all() == []

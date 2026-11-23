@@ -240,7 +240,7 @@ def _finish(session: Session, prepared: _Prepared, result: RunResult, now: datet
     changed = _recheck(session, prepared)
     if changed is not None:
         record_review(session, prepared.info, result if result.failure else replace(result, failure=STALE), now)
-        log.info("news analyst: story changed while the model answered (%s); answer not applied", changed)
+        log.info("news analyst: story %s changed while the model answered (%s); answer not applied", story_id, changed)
         return NewsResult(story_id, changed, reason=STALE)
     review = record_review(session, prepared.info, result, now)
     if result.failure is not None or result.outcome is None or result.outcome.output is None:

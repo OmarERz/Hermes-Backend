@@ -118,13 +118,15 @@ class JudgeService:
         `stale`: the package changed while the model answered, so the review is never applied (F12.2 #105). Both
         reviews are stored as `no_judge_review` without a mitigation draft, so their accepted reasons do not count as
         used (MET-07). The failure says `stale` when the judge answered and keeps the real cause when it did not
-        (L13). Nothing is queued for that outdated package; an answer still resolves an earlier failure of it."""
+        (L13); a blind review without a failure of its own gets the same one. Nothing is queued for that outdated
+        package; an answer still resolves an earlier failure of it."""
         first, second = result.first, result.second
         answered = stale and result.adjustment is not None  # a stale review the judge did answer
         if stale:
             failure = Failure.STALE if answered else result.failure
             first = replace(first, failure=failure, mitigation=MitigationResult.absent())
-            second = replace(second, mitigation=MitigationResult.absent()) if second is not None else None
+            if second is not None:  # the blind row explains itself too (L13)
+                second = replace(second, failure=second.failure or failure, mitigation=MitigationResult.absent())
             result = JudgeResult(ReviewStatus.NO_JUDGE_REVIEW, None, {}, first, second)
         elif result.status is ReviewStatus.NO_JUDGE_REVIEW and first.adjustment is not None:
             # the blind review failed: final = base, so no drafted mitigation is kept (JUE-MIT-09); record the cause
@@ -191,10 +193,9 @@ class DismissalService:
         for a retry); the reviews are stored either way (their tokens were paid)."""
         _check_candidate(session, package, target.review_package_id)
         stale = result.alert is not None and not still_holds(result.alert, self._context(session, DbInventory(session)))
-        if stale:
-            result = Mode2Result(
-                ReviewStatus.NO_JUDGE_REVIEW, replace(result.first, failure=Failure.STALE), result.second
-            )
+        if stale:  # neither review raised anything: both rows say why (L13)
+            second = replace(result.second, failure=Failure.STALE) if result.second is not None else None
+            result = Mode2Result(ReviewStatus.NO_JUDGE_REVIEW, replace(result.first, failure=Failure.STALE), second)
         first = result.first
         if result.status is not first.status:  # the blind review disagreed or failed: nothing is raised
             failure = result.second.failure if result.second is not None else None
@@ -202,7 +203,8 @@ class DismissalService:
         review_id = save_review(session, first, target, status=result.status)
         second_id = None
         if result.second is not None:
-            second_id = save_review(session, result.second, target, second_review_of=review_id)
+            unapplied = ReviewStatus.NO_JUDGE_REVIEW if stale else None
+            second_id = save_review(session, result.second, target, status=unapplied, second_review_of=review_id)
         alert_id = save_alert(session, result.alert, review_id, target.now) if result.alert is not None else None
         undecided = result.status in (ReviewStatus.NO_JUDGE_REVIEW, ReviewStatus.PARTIAL_REVIEW)
         failure = Failure.STALE if stale else ((result.second or result.first).failure if undecided else None)

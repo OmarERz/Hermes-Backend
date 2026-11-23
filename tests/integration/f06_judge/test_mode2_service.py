@@ -453,3 +453,6 @@ def test_a_stale_alert_agreed_by_the_blind_review_is_queued_too(engine: Engine) 
     stored = staged_review(engine, content, [alert, alert])
     assert stored.second_review_id is not None
     assert_stale(engine, stored)
+    with Session(engine) as session:
+        blind = session.get_one(m.LlmReview, stored.second_review_id)
+        assert (blind.status, blind.parameters["failure"]) == ("no_judge_review", "stale")  # it raised nothing either

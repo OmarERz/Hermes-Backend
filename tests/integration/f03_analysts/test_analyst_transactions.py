@@ -3,13 +3,14 @@ step re-checks what the answer depends on. Real commits, on this module's own da
 
 from __future__ import annotations
 
+import threading
 from collections.abc import Iterator
 from decimal import Decimal
 from typing import Any
 
 import pytest
 from analyst_support import ARTICLE_TEXT, NOW, add_cves, add_story, news_output
-from sqlalchemy import Engine, select, update
+from sqlalchemy import Engine, func, select, update
 from sqlalchemy.orm import Session
 
 from core.analysts.cve import CveOptions, analyze_cve
@@ -175,13 +176,15 @@ def test_no_transaction_is_open_during_the_advisory_download_or_the_cve_call(eng
         seen.append(("download", open_transactions(engine)))
         return None
 
-    double = cve_double(cve_output(cve_id))
+    invented = cve_output(cve_id)
+    invented["conditions"][0]["quote"] = "a sentence the description never says"
+    double = cve_double(invented, cve_output(cve_id))  # the first answer is validated, then retried
     double.on_request = lambda: seen.append(("model", open_transactions(engine)))
     with Session(engine) as session:
         result = analyze_cve(session, double_llm_client(double), cve_id, CveOptions(now=NOW, advisory=advisory))
         assert not session.in_transaction()
     assert result.status == "analyzed"
-    assert seen == [("download", []), ("model", [])]
+    assert seen == [("download", []), ("model", []), ("model", [])]
 
 
 @pytest.mark.parametrize(
@@ -230,3 +233,26 @@ def test_a_cve_another_worker_analyzed_meanwhile_is_not_stored_twice(engine: Eng
     assert (result.status, result.reason) == ("exists", "stale")
     with Session(engine) as session:
         assert len(session.scalars(select(m.CveAnalysis).where(m.CveAnalysis.cve_id == cve_id)).all()) == 1
+
+
+def test_the_write_step_waits_for_a_concurrent_write_of_the_same_story(engine: Engine) -> None:
+    """Two workers that both reach the write step: the story's lock makes the second one see the first's analysis
+    instead of breaking on the unique key (cycles never overlap today; this keeps it safe if they ever do)."""
+    story = committed_story(engine)
+    holder = Session(engine)
+    holder.execute(select(func.pg_advisory_xact_lock(func.hashtextextended(f"news-analyst:{story.id}", 0))))
+    outcome: list[Any] = []
+
+    def worker() -> None:
+        with Session(engine) as session:
+            double = news_double(news_output(story.id))
+            outcome.append(analyze_story(session, double_llm_client(double), story.id, NewsOptions(now=NOW)))
+
+    thread = threading.Thread(target=worker)
+    thread.start()
+    thread.join(timeout=2)
+    assert thread.is_alive()  # the model answered; the write step waits for the lock
+    holder.rollback()
+    holder.close()
+    thread.join(timeout=10)
+    assert [r.status for r in outcome] == ["analyzed"]

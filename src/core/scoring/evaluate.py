@@ -10,7 +10,7 @@ transaction decides that the package needs a review and is committed; the judge 
 the group again and applies the review only if the package it would build now has the same fingerprint. A package
 that changed meanwhile is judged once more; if it changes again the score is the base (EVA-04), not queued: the next
 scan evaluates the group again. Every review is stored (its tokens were paid); one that was not applied is stored
-as `no_judge_review` with failure `stale`.
+as `no_judge_review`, with failure `stale` when the judge answered and its real cause when it did not.
 """
 
 from __future__ import annotations
