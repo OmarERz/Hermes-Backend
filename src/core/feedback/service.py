@@ -8,7 +8,7 @@
   The others are only stored. Feedback never changes a score by itself.
 * With the optional `ticket_itop_id` (the ticket the user clicked on) those effects only touch that ticket and its
   own CIs; without it they apply to every ticket of the assessment (the original behaviour). An id that is not a
-  ticket of the rated group is rejected (`unknown_ticket`).
+  ticket of the rated group, or one without any finding the assessment scored, is rejected (`unknown_ticket`).
 * The comment is untrusted input: stored as data, never sent to iTop and never interpreted (SEG-02/03).
 """
 
@@ -173,6 +173,10 @@ class SqlFeedbackService:
             tickets = [rated.clicked]
             linked = set(session.scalars(_TICKET_FINDINGS, {"ticket_id": rated.clicked.id}).all())
             assessed = [row for row in assessed if row.finding_id in linked]
+            if not assessed:
+                # Checked under the group lock the ticket lifecycle takes: a ticket whose rated CIs moved away (or a
+                # newer ticket of the group) is not what the user rated; the whole feedback is refused (F13.1 #71).
+                raise FeedbackRejectedError("unknown_ticket")
         else:
             ticket_ids = session.scalars(_RATED_TICKETS, {"finding_ids": [row.finding_id for row in assessed]}).all()
             tickets = [session.get_one(m.Ticket, ticket_id) for ticket_id in ticket_ids]

@@ -144,6 +144,16 @@ def current_level(session: Session) -> tuple[int, datetime | None]:
     return (int(row.level), row.changed_at) if row else (Level.NORMAL, None)
 
 
+def _last_manual_change(session: Session) -> datetime | None:
+    """When a person last changed the level (a reactivation), or None if no one ever did."""
+    return session.scalar(
+        select(m.JudgeLadderChange.changed_at)
+        .where(m.JudgeLadderChange.changed_by.is_not(None))
+        .order_by(m.JudgeLadderChange.changed_at.desc(), m.JudgeLadderChange.id.desc())
+        .limit(1)
+    )
+
+
 def _last_change_was_manual(session: Session) -> bool:
     changed_by = session.scalar(
         select(m.JudgeLadderChange.changed_by)
@@ -153,6 +163,7 @@ def _last_change_was_manual(session: Session) -> bool:
     return changed_by is not None
 
 
+METRIC_LAG: Final = timedelta(days=1)  # the nightly job evaluates yesterday's metrics (`workers.jobs.NightlyJob`)
 _SIGNAL_VALUES: Final = text(
     """SELECT metric_date, metric_code, value FROM daily_metric
     WHERE dimension = '' AND metric_code = ANY(:codes) AND metric_date > :since AND metric_date <= :today"""
@@ -180,11 +191,17 @@ def _record(session: Session, transition: Transition, now: datetime, changed_by:
 def evaluate(session: Session, today: date, now: datetime, *, regression_failed: bool = False) -> Transition | None:
     """Apply the automatic rule after `today`'s metrics; records and returns the change, if any."""
     level, changed_at = current_level(session)
-    since = changed_at.date() if changed_at is not None else None
+    since: date | None = None
+    if changed_at is not None:
+        # An automatic change is recorded by the nightly job the day after the metrics that caused it; counting the
+        # quiet days from the metric day keeps 1 -> 0 on time (pending F8.1 #59).
+        since = changed_at.date() if _last_change_was_manual(session) else changed_at.date() - METRIC_LAG
     days = daily_signals(session, today)
-    if since is not None and _last_change_was_manual(session):
-        # A person reviewed everything up to the reactivation: older signal days must not undo it.
-        days = [(day, signals) for day, signals in days if day >= since]
+    reviewed = _last_manual_change(session)
+    if reviewed is not None:
+        # A person reviewed everything up to the last reactivation: older signal days never count again, even after
+        # a later automatic change (pending F8.1 #58).
+        days = [(day, signals) for day, signals in days if day >= reviewed.date()]
     transition = next_level(level, days, today, since, regression_failed)
     if transition is not None and transition.level != level:
         _record(session, transition, now, None)

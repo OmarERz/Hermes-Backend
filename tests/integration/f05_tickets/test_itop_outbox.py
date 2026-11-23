@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import re
 import threading
 import uuid
 from dataclasses import dataclass
@@ -331,6 +332,8 @@ def test_updates_wait_for_the_create_and_run_in_order(factory: sessionmaker[Sess
     created = next(iter(double.data["UserRequest"].values()))
     assert created["public_log"].startswith("Sigue presente\n\n[hermes:")
     assert created["private_log"].startswith("Nota privada\n\n[hermes:")
+    # The marker carries the whole row id (32 hex digits), not only its timestamp part (pending F5.1 #43).
+    assert re.search(r"\[hermes:[0-9a-f]{32}\]", created["public_log"])
     assert created["urgency"] == "1"
     assert reload(factory, ticket.id).current_urgency == 1
 
@@ -426,11 +429,10 @@ def test_two_tickets_do_not_block_each_other(factory: sessionmaker[Session]) -> 
         {"kind": "delete"},
         {"kind": "comment", "log": "public_log"},
         {"kind": "update"},
+        [],  # not even an object: still a permanent failure, never a stuck row
     ],
 )
-def test_a_corrupted_payload_fails_without_calling_itop(
-    factory: sessionmaker[Session], payload: dict[str, Any]
-) -> None:
+def test_a_corrupted_payload_fails_without_calling_itop(factory: sessionmaker[Session], payload: Any) -> None:
     double = ItopDouble()
     double.add("UserRequest", 90, title="t", status="new", ref="R-000090")
     ticket = new_ticket(factory, itop_id="90")
@@ -442,3 +444,79 @@ def test_a_corrupted_payload_fails_without_calling_itop(
 
     assert outbox_row(factory, row_id).status == "failed"
     assert double.writes == []
+
+
+def test_a_comment_written_with_the_older_short_marker_is_not_sent_twice(factory: sessionmaker[Session]) -> None:
+    """A row retried after the upgrade still finds the 16-digit marker of its first attempt (PRE-02, F5.1 #43)."""
+    double, clock = ItopDouble(), Clock()
+    ticket = new_ticket(factory, itop_id="61")
+    legacy = {"kind": "comment", "log": "public_log", "text": "Hola"}  # queued before F12.2: no `marker` key
+    row_id = queue(factory, ticket.id, legacy, "c-old", action="comment")
+    # The first attempt (before the upgrade) wrote the comment with the short marker and lost the answer.
+    earlier = f"Hola\n\n[hermes:{row_id.hex[:16]}]"
+    double.add("UserRequest", 61, title="t", status="new", ref="R-000061", public_log=earlier)
+    with factory() as session, session.begin():
+        session.get_one(m.ItopOutbox, row_id).attempts = 1
+
+    worker(factory, double, clock).drain()
+
+    assert double.writes == []
+    row = outbox_row(factory, row_id)
+    assert (row.status, row.attempts, row.last_error) == ("done", 2, "already in iTop (retry)")
+
+
+def test_a_newer_row_never_takes_the_short_marker_of_another_row(factory: sessionmaker[Session]) -> None:
+    """A row queued after F12.2 only recognises its whole id, even if an older row's short marker matches its prefix
+    (F5.1 #43, ARQ-01)."""
+    double, clock = ItopDouble(), Clock()
+    ticket = new_ticket(factory, itop_id="62")
+    row_id = queue(factory, ticket.id, comment_payload("Hola"), "c-new", action="comment")
+    other = f"Otro\n\n[hermes:{row_id.hex[:16]}]"  # same prefix, written by another, older row
+    double.add("UserRequest", 62, title="t", status="new", ref="R-000062", public_log=other)
+    with factory() as session, session.begin():
+        session.get_one(m.ItopOutbox, row_id).attempts = 1
+
+    worker(factory, double, clock).drain()
+
+    assert [c.operation for c in double.writes] == ["core/update"]
+    assert outbox_row(factory, row_id).status == "done"
+
+
+def test_an_older_row_first_sent_after_the_change_is_stamped_and_ignores_short_markers(
+    factory: sessionmaker[Session],
+) -> None:
+    """Queued before F12.2 (no `marker` key) but first sent now: it writes the whole id, so a retry never takes another
+    row's short marker (F5.1 #43)."""
+    double, clock = ItopDouble(), Clock()
+    ticket = new_ticket(factory, itop_id="63")
+    legacy = {"kind": "comment", "log": "public_log", "text": "Hola"}
+    row_id = queue(factory, ticket.id, legacy, "c-legacy", action="comment")
+    other = f"Otro\n\n[hermes:{row_id.hex[:16]}]"  # another row's short marker with the same prefix
+    double.add("UserRequest", 63, title="t", status="new", ref="R-000063", public_log=other)
+    run = worker(factory, double, clock, http=losing_responses(double, "core/update"))
+
+    run.drain()  # first attempt: written with the whole id, answer lost
+    clock.advance(minutes=1)
+    run.drain()  # retry: finds its own whole-id marker
+
+    row = outbox_row(factory, row_id)
+    assert row.payload["marker"] == "full"
+    assert (row.status, row.last_error) == ("done", "already in iTop (retry)")
+    assert re.search(r"\[hermes:[0-9a-f]{32}\]", double.data["UserRequest"]["63"]["public_log"])
+
+
+def test_a_legacy_row_does_not_take_another_comment_with_its_short_marker(factory: sessionmaker[Session]) -> None:
+    """A row first tried before F12.2 only counts as written when its own text precedes the short marker (ARQ-01)."""
+    double, clock = ItopDouble(), Clock()
+    ticket = new_ticket(factory, itop_id="64")
+    legacy = {"kind": "comment", "log": "public_log", "text": "Hola"}
+    row_id = queue(factory, ticket.id, legacy, "c-legacy-2", action="comment")
+    other = f"Otro comentario\n\n[hermes:{row_id.hex[:16]}]"  # another row's entry with the same short marker
+    double.add("UserRequest", 64, title="t", status="new", ref="R-000064", public_log=other)
+    with factory() as session, session.begin():
+        session.get_one(m.ItopOutbox, row_id).attempts = 1  # its first attempt failed before writing
+
+    worker(factory, double, clock).drain()
+
+    assert [c.operation for c in double.writes] == ["core/update"]
+    assert outbox_row(factory, row_id).status == "done"

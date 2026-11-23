@@ -5,7 +5,8 @@ returns or logs a key or the raw body of an error (some APIs echo the request he
 latency and a generic message in Spanish. Calls read nothing of value and have short timeouts, no retries.
 
 Endpoints:
-  iTop             `list_operations` on the REST API (read-only), one attempt.
+  iTop             `list_operations` on the REST API (read-only), one attempt; ITOP_ORG_ID and ITOP_CALLER_ID are
+                   also required (without them no ticket can be created).
   DeepSeek         `GET {base}/models` (OpenAI-compatible; spends no tokens).
   NVD              `GET /rest/json/cves/2.0?cveId=CVE-2021-44228` with the `apiKey` header.
   abuse.ch         `GET https://urlhaus-api.abuse.ch/v1/urls/recent/limit/1/` with `Auth-Key` (documented).
@@ -151,7 +152,12 @@ class Probes:
         except (ItopUnavailableError, ValueError) as error:
             log.warning("connection check to iTop failed: %s", type(error).__name__)
             return ProbeResult(ok=False, latency_ms=None, message=MSG_OFFLINE)
-        return ProbeResult(ok=True, latency_ms=round((self.clock() - started) * 1000), message=MSG_OK)
+        latency = round((self.clock() - started) * 1000)
+        # iTop answers, but without the organization and the caller no ticket can be created (pending F13.0 #77).
+        for variable, value in (("ITOP_ORG_ID", s.itop_org_id), ("ITOP_CALLER_ID", s.itop_caller_id)):
+            if not value:
+                return ProbeResult(ok=False, latency_ms=latency, message=MSG_MISSING, missing_variable=variable)
+        return ProbeResult(ok=True, latency_ms=latency, message=MSG_OK)
 
     def deepseek(self) -> ProbeResult:
         s = self.settings

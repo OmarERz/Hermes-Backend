@@ -216,7 +216,7 @@ def test_fixing_one_of_three_cis_comments_and_emits_partially_fixed(session: Ses
     actions = writes(session, ticket)
     assert (
         "partial_fix",
-        {"kind": "comment", "log": "public_log", "text": "Corregido en web-01; 1 de 3 corregidos."},
+        {"kind": "comment", "log": "public_log", "text": "Corregido en web-01; 1 de 3 corregidos.", "marker": "full"},
     ) in actions
     partial = events(session, ticket)[-1]
     assert partial.event_type == "partially_fixed"

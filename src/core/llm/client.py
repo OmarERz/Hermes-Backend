@@ -33,6 +33,10 @@ logger = logging.getLogger(__name__)
 Role = Literal["judge", "analysts"]
 HTTP_TOO_MANY_REQUESTS = 429
 MAX_RETRY_AFTER_SECONDS = 60.0
+# Explicit output cap per call (OWASP LLM10, F12.3): DeepSeek's default without thinking is 8K tokens, verified against
+# https://api-docs.deepseek.com/api/create-chat-completion/ (`max_tokens`, 1 to 393 216). A provider whose default is
+# larger (thinking mode, another OpenAI-compatible API) cannot bill an unbounded answer to one call.
+DEFAULT_MAX_OUTPUT_TOKENS = 8192
 
 
 @dataclass(frozen=True)
@@ -80,7 +84,11 @@ class LlmClient:
         retry: RetryPolicy | None = None,
         http_client: httpx2.Client | None = None,
         jitter: Callable[[], float] = random.random,
+        max_output_tokens: int = DEFAULT_MAX_OUTPUT_TOKENS,
     ) -> None:
+        if max_output_tokens < 1:
+            raise ValueError("max_output_tokens must be positive")
+        self._max_output_tokens = max_output_tokens
         self._retry = retry or RetryPolicy()
         self._client = openai.OpenAI(
             base_url=base_url,
@@ -121,6 +129,7 @@ class LlmClient:
                 messages=cast("list[ChatCompletionMessageParam]", list(messages)),
                 tools=[cast("ChatCompletionToolParam", dict(tool.definition)) for tool in tools],
                 tool_choice=tool_choice,
+                max_tokens=self._max_output_tokens,
                 # `required` and named tool choices return 400 while thinking is on; verified against
                 # https://api-docs.deepseek.com/api/create-chat-completion/ (thinking.type = disabled).
                 extra_body={"thinking": {"type": "disabled"}},
@@ -137,6 +146,9 @@ class LlmClient:
     def _tool_call(
         completion: Any, by_name: Mapping[str, ToolDefinition], force_tool: str | None, usage: Usage
     ) -> ToolCall:
+        if completion.choices and getattr(completion.choices[0], "finish_reason", None) == "length":
+            # The answer hit the output cap: whatever tool call it holds is cut, never a partial result (L12).
+            raise LlmResponseError("the answer was cut at the output token limit")
         calls = completion.choices[0].message.tool_calls if completion.choices else None
         if not calls or len(calls) != 1:
             raise LlmResponseError("expected exactly one tool call")
