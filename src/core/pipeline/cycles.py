@@ -67,13 +67,14 @@ class ScanCycleOutput:
 class Steps:
     """The services the cycles chain; every one is injectable (tests use doubles, never real tokens)."""
 
-    news: Callable[[Session, str], NewsCycleOutput]
+    news: Callable[[Session, str], NewsCycleOutput] | None
     scan: Callable[[uuid.UUID | None, str], ScanCycleOutput] | None = None
     evaluate: Evaluator | None = None
     recalculate: Callable[[Session], object] | None = None
     dismissal_package: DismissalPackager | None = None
     judge_caller: ToolCaller | None = None
     tickets: TicketApplier | None = None
+    refresh: Callable[[Session], object] | None = None  # vulnerability catalogue before scanning (NVD, KEV, EPSS)
     correlate_news: Callable[[Session, list[uuid.UUID], datetime], list[StoryOutcome]] = correlate_stories
     correlate_groups: Callable[[Session, set[uuid.UUID], datetime], list[StoryOutcome]] = correlate_new_groups
 
@@ -119,11 +120,11 @@ class Pipeline:
             report.ran = False
             report.notes.append("scan is not configured")
             return report
-        output = self.steps.scan(run_id, reason)
-        report.run_id = output.run_id
         with cycle_lock(self.session_factory) as acquired:
             if not acquired:
-                return self._skipped(report)
+                return self._skipped(report)  # nothing ran: a queued request stays queued for the next tick
+            output = self.steps.scan(run_id, reason)
+            report.run_id = output.run_id
             changed, correlated = self._scan_groups(output.run_id)
             now = self.clock()
             with self.session_factory() as session:
@@ -131,6 +132,22 @@ class Pipeline:
             report.groups = len(changed)
             self._evaluate(report, changed, output.run_id, "new_finding")
             self._news(CycleReport("news"), "after_scan")  # ING-02: an extra news run after each scan
+        self._log(report)
+        return report
+
+    def refresh_cycle(self) -> CycleReport:
+        """ESC-09: refresh the vulnerability catalogue the simulated scan crosses the inventory with."""
+        report = CycleReport("refresh")
+        if self.steps.refresh is None:
+            report.ran = False
+            report.notes.append("vulnerability refresh is not configured")
+            return report
+        with cycle_lock(self.session_factory) as acquired:
+            if not acquired:
+                return self._skipped(report)
+            with self.session_factory() as session:
+                self.steps.refresh(session)
+                session.commit()
         self._log(report)
         return report
 
@@ -152,6 +169,11 @@ class Pipeline:
 
     # --- steps ----------------------------------------------------------------------------------------------
     def _news(self, report: CycleReport, trigger_reason: str) -> None:
+        if self.steps.news is None:
+            report.ran = False
+            report.notes.append("news ingestion is not available (embeddings extra not installed)")
+            self._log(report)
+            return
         with self.session_factory() as session:
             output = self.steps.news(session, trigger_reason)
             session.commit()
