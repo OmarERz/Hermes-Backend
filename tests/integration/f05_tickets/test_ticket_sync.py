@@ -183,3 +183,29 @@ def test_an_itop_refusal_on_one_ticket_does_not_stop_the_pass(factory: sessionma
     double.handle = lambda _op: {"code": 100, "message": "Error: refused"}  # every call is refused
 
     assert syncer(factory, double).sync_open_tickets() == 1
+
+
+def test_an_urgency_write_that_lands_while_itop_is_read_is_not_human(factory: sessionmaker[Session]) -> None:
+    """iTop answered with the old urgency, but our write finished meanwhile (pending F5.1 #44)."""
+    double = ItopDouble()
+    ticket_id = setup(factory, double, urgency="1")
+    with factory() as session, session.begin():
+        write = ItopWrite(ticket_id, "raise_urgency", update_payload({"urgency": "1"}), "u-2")
+        row = record_write(session, write, T0)
+        assert row is not None
+        row.status, row.done_at = "done", T0 + timedelta(hours=1)  # the sync's clock: it started reading then
+
+    syncer(factory, double).sync_open_tickets()
+
+    ticket = reload(factory, ticket_id)
+    assert (ticket.current_urgency, ticket.last_human_change_at) == (3, None)
+
+
+def test_demo_tickets_are_never_read_from_itop(factory: sessionmaker[Session]) -> None:
+    double = ItopDouble()
+    with factory() as session, session.begin():
+        make_ticket(session, itop_id="900", urgency=3).itop_ticket_id = "DEMO-1"
+    run = syncer(factory, double)
+    assert run.sync_open_tickets() == 0
+    assert run.sync_itop_ticket("DEMO-1") is False
+    assert double.operations == []
