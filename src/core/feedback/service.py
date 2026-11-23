@@ -4,9 +4,11 @@
 * One active feedback per user and assessment: a new one archives the previous (`superseded_at`).
 * Effects: `false_positive` suppresses the findings the rated assessment scored (ARQ-06, until their version or
   CVE changes) and leaves a private comment with who and when; `stop_suggestions` turns off suggestions on the
-  group's tickets (TIC-07: the contract carries the assessment, not the ticket, so every custodian's ticket of the
-  group); `wrong_priority` leaves a private comment with the proposed level (calibration data). The others are only
-  stored. Feedback never changes a score by itself.
+  rated tickets (TIC-07); `wrong_priority` leaves a private comment with the proposed level (calibration data).
+  The others are only stored. Feedback never changes a score by itself.
+* With the optional `ticket_itop_id` (the ticket the user clicked on) those effects only touch that ticket and its
+  own CIs; without it they apply to every ticket of the assessment (the original behaviour). An id that is not a
+  ticket of the rated group is rejected (`unknown_ticket`).
 * The comment is untrusted input: stored as data, never sent to iTop and never interpreted (SEG-02/03).
 """
 
@@ -51,6 +53,9 @@ _RATED_TICKETS: Final = text(
     """SELECT DISTINCT tf.ticket_id FROM ticket_finding tf
     WHERE tf.finding_id = ANY(:finding_ids) AND tf.removed_at IS NULL"""
 )
+_TICKET_FINDINGS: Final = text(
+    "SELECT finding_id FROM ticket_finding WHERE ticket_id = :ticket_id AND removed_at IS NULL"
+)
 _LIFT_OTHER_VERSIONS: Final = text(
     """UPDATE suppression SET lifted_at = :now, lift_reason = 'version_changed'
     WHERE finding_id = :finding_id AND lifted_at IS NULL AND suppressed_version <> :version"""
@@ -58,6 +63,16 @@ _LIFT_OTHER_VERSIONS: Final = text(
 _CURRENT_VERSION: Final = text("SELECT observed_version FROM finding_current WHERE finding_id = :finding_id")
 # One writer at a time per user and assessment (D-044): a transaction-scoped advisory lock.
 _LOCK: Final = text("SELECT pg_advisory_xact_lock(hashtextextended(:key, 0))")
+
+
+@dataclass(frozen=True)
+class _Rated:
+    """What a feedback rates: the stored row, its assessment, its author and, if sent, the clicked ticket."""
+
+    feedback: m.Feedback
+    assessment: m.Assessment
+    user: m.AppUser
+    clicked: m.Ticket | None
 
 
 class FeedbackRejectedError(Exception):
@@ -84,6 +99,7 @@ class SqlFeedbackService:
         with self.session_factory() as session, session.begin():
             user = self._authorized_user(session, feedback.user_email)
             assessment = self._assessment(session, feedback.assessment_id)
+            clicked = self._clicked_ticket(session, feedback.ticket_itop_id, assessment)
             session.execute(_LOCK, {"key": f"feedback:{assessment.id}:{user.id}"})
             replaced = session.scalars(
                 update(m.Feedback)
@@ -109,7 +125,7 @@ class SqlFeedbackService:
             session.add(row)
             session.flush()
             if assessment.finding_group_id is not None:
-                self._apply_effects(session, row, assessment, user, now)
+                self._apply_effects(session, _Rated(row, assessment, user, clicked), now)
             log.info("feedback %s stored (verdict %s, replaced %s)", row.id, row.verdict, bool(replaced))
             return FeedbackResult(feedback_id=str(row.id), replaced_previous=bool(replaced))
 
@@ -132,10 +148,19 @@ class SqlFeedbackService:
             raise FeedbackRejectedError("unknown_assessment")
         return assessment
 
+    @staticmethod
+    def _clicked_ticket(session: Session, itop_id: str | None, assessment: m.Assessment) -> m.Ticket | None:
+        """The ticket the user acted on (optional contract field); it must be a ticket of the rated group."""
+        if itop_id is None:
+            return None
+        ticket = session.scalars(select(m.Ticket).where(m.Ticket.itop_ticket_id == itop_id)).first()
+        if ticket is None or ticket.finding_group_id != assessment.finding_group_id:
+            raise FeedbackRejectedError("unknown_ticket")
+        return ticket
+
     # --- effects (NOT-06) -----------------------------------------------------------------------------------
-    def _apply_effects(
-        self, session: Session, feedback: m.Feedback, assessment: m.Assessment, user: m.AppUser, now: datetime
-    ) -> None:
+    def _apply_effects(self, session: Session, rated: _Rated, now: datetime) -> None:
+        feedback, assessment, user = rated.feedback, rated.assessment, rated.user
         session.execute(_GROUP_LOCK, {"group_id": assessment.finding_group_id})
         params = {
             "group_id": assessment.finding_group_id,
@@ -143,8 +168,14 @@ class SqlFeedbackService:
             "assessed_at": assessment.assessed_at,
         }
         assessed = session.execute(_ASSESSED_FINDINGS, params).all()
-        ticket_ids = session.scalars(_RATED_TICKETS, {"finding_ids": [row.finding_id for row in assessed]}).all()
-        tickets = [session.get_one(m.Ticket, ticket_id) for ticket_id in ticket_ids]
+        if rated.clicked is not None:
+            # Only the clicked ticket and its own CIs (the other custodians' tickets are left alone, TIC-07).
+            tickets = [rated.clicked]
+            linked = set(session.scalars(_TICKET_FINDINGS, {"ticket_id": rated.clicked.id}).all())
+            assessed = [row for row in assessed if row.finding_id in linked]
+        else:
+            ticket_ids = session.scalars(_RATED_TICKETS, {"finding_ids": [row.finding_id for row in assessed]}).all()
+            tickets = [session.get_one(m.Ticket, ticket_id) for ticket_id in ticket_ids]
         if feedback.verdict == "false_positive":
             for row in assessed:
                 self._suppress(session, feedback, row.finding_id, row.observed_version, now)

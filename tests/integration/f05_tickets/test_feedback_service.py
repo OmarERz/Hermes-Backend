@@ -10,7 +10,7 @@ from typing import Any
 import pytest
 from f05data import T0
 from f05scenario import Scenario
-from sqlalchemy import select, text
+from sqlalchemy import func, select, text
 from sqlalchemy.orm import Session, sessionmaker
 
 from core.db import models as m
@@ -252,3 +252,110 @@ def test_a_comment_with_a_nul_character_is_stored_without_it(
     result = service(factory).record(feedback(scenario, "relevant", comment="antes\x00después"))
     with factory() as session:
         assert session.get_one(m.Feedback, result.feedback_id).comment == "antesdespués"
+
+
+@pytest.fixture
+def two_custodians(factory: sessionmaker[Session]) -> Iterator[dict[str, Any]]:
+    """One assessment whose CIs belong to two custodians: two tickets, already in iTop."""
+    with factory() as session, session.begin():
+        session.execute(text("UPDATE team SET is_default = false WHERE is_default"))
+        sc = Scenario(session)
+        ops, data = sc.team("Ops"), sc.team("Data")
+        sc.ci("web-01", ops)
+        sc.ci("db-01", data)
+        assessment = sc.assess({"web-01": 80, "db-01": 70}, sc.scan({"web-01": "new", "db-01": "new"}))
+        TicketLifecycle(ItopIdentity("1", "5"), clock=lambda: T0).apply(session, assessment.id)
+        itop_ids: dict[str, str] = {}
+        for number, ticket in enumerate(
+            session.scalars(select(m.Ticket).where(m.Ticket.finding_group_id == sc.group.id))
+        ):
+            ticket.itop_ticket_id, ticket.status = str(9000 + number + uuid.uuid4().int % 1000 * 10), "open"
+            itop_ids["ops" if ticket.custodian_team_id == ops.id else "data"] = ticket.itop_ticket_id
+        analyst = m.AppUser(
+            firebase_uid=f"t-{sc.product}",
+            email=f"t-{sc.product}@example.test",
+            role="analyst",
+            active=True,
+            created_at=T0,
+        )
+        session.add(analyst)
+        data_out = {
+            "assessment_id": str(assessment.id),
+            "group_id": sc.group.id,
+            "emails": {"analyst": analyst.email},
+            "itop": itop_ids,
+            "findings": {name: f.id for name, f in sc.findings.items()},
+        }
+    yield data_out
+
+
+def tickets_by_itop(factory: sessionmaker[Session], group_id: object) -> dict[str, m.Ticket]:
+    with factory() as session:
+        rows = session.scalars(select(m.Ticket).where(m.Ticket.finding_group_id == group_id)).all()
+        return {str(t.itop_ticket_id): t for t in rows}
+
+
+def comment_tickets(factory: sessionmaker[Session], group_id: object) -> set[str]:
+    """iTop ids of the tickets that received a private comment."""
+    with factory() as session:
+        rows = session.execute(
+            select(m.Ticket.itop_ticket_id, m.ItopOutbox.payload)
+            .join(m.TicketUpdate, m.TicketUpdate.ticket_id == m.Ticket.id)
+            .join(m.ItopOutbox, m.ItopOutbox.ticket_update_id == m.TicketUpdate.id)
+            .where(m.Ticket.finding_group_id == group_id, m.ItopOutbox.operation == "comment")
+        ).all()
+        return {str(itop_id) for itop_id, payload in rows if payload.get("log") == "private_log"}
+
+
+def test_stop_suggestions_on_a_clicked_ticket_leaves_the_others(
+    factory: sessionmaker[Session], two_custodians: dict[str, Any]
+) -> None:
+    clicked = two_custodians["itop"]["ops"]
+    service(factory).record(feedback(two_custodians, "stop_suggestions", ticket_itop_id=clicked))
+    switches = {itop: t.suggestions_enabled for itop, t in tickets_by_itop(factory, two_custodians["group_id"]).items()}
+    assert switches == {clicked: False, two_custodians["itop"]["data"]: True}
+
+
+def test_without_a_ticket_the_whole_assessment_is_affected(
+    factory: sessionmaker[Session], two_custodians: dict[str, Any]
+) -> None:
+    service(factory).record(feedback(two_custodians, "stop_suggestions"))
+    switches = {t.suggestions_enabled for t in tickets_by_itop(factory, two_custodians["group_id"]).values()}
+    assert switches == {False}
+
+
+def test_a_false_positive_on_a_clicked_ticket_only_covers_its_cis(
+    factory: sessionmaker[Session], two_custodians: dict[str, Any]
+) -> None:
+    clicked = two_custodians["itop"]["data"]
+    service(factory).record(feedback(two_custodians, "false_positive", ticket_itop_id=clicked))
+    with factory() as session:
+        suppressed = set(session.scalars(select(m.Suppression.finding_id).where(m.Suppression.lifted_at.is_(None))))
+    assert two_custodians["findings"]["db-01"] in suppressed
+    assert two_custodians["findings"]["web-01"] not in suppressed
+    assert comment_tickets(factory, two_custodians["group_id"]) == {clicked}
+
+
+def test_a_wrong_priority_comment_goes_only_to_the_clicked_ticket(
+    factory: sessionmaker[Session], two_custodians: dict[str, Any]
+) -> None:
+    clicked = two_custodians["itop"]["ops"]
+    service(factory).record(feedback(two_custodians, "wrong_priority", proposed_level="low", ticket_itop_id=clicked))
+    assert comment_tickets(factory, two_custodians["group_id"]) == {clicked}
+
+
+def test_a_ticket_outside_the_assessment_is_rejected(
+    factory: sessionmaker[Session], two_custodians: dict[str, Any], scenario: dict[str, Any]
+) -> None:
+    with pytest.raises(FeedbackRejectedError, match="unknown_ticket"):
+        service(factory).record(feedback(two_custodians, "stop_suggestions", ticket_itop_id="999999999999"))
+    with factory() as session:  # a real ticket, but of another group
+        other = session.scalars(select(m.Ticket).where(m.Ticket.finding_group_id == scenario["group_id"])).one()
+        other.itop_ticket_id, other.status = "123456789", "open"
+        session.commit()
+    with pytest.raises(FeedbackRejectedError, match="unknown_ticket"):
+        service(factory).record(feedback(two_custodians, "relevant", ticket_itop_id="123456789"))
+    with factory() as session:
+        rated = uuid.UUID(two_custodians["assessment_id"])
+        stored = session.scalar(select(func.count()).select_from(m.Feedback).where(m.Feedback.assessment_id == rated))
+        assert stored == 0  # nothing stored on rejection
