@@ -189,8 +189,8 @@ class EngineScorer:
         result = compute_group(session, group, Basis(self.formula, [n.story_id for n in matches], None, self.now))
         per_ci = {
             ci.asset_id: {
-                "A": float(ci.a),
-                "D": float(ci.d),
+                "A": ci.a,
+                "D": ci.d,
                 "score": ci.base,
                 "floor_applicable": ci.floor,
             }
@@ -198,11 +198,11 @@ class EngineScorer:
         }
         top = max(result.cis, key=lambda ci: ci.base) if result.cis else None
         base = {
-            "S": float(result.factors.s),
-            "P": float(result.factors.p),
-            "T": float(result.t),
-            "A": float(top.a) if top else 0.0,
-            "D": float(top.d) if top else 0.0,
+            "S": result.factors.s,
+            "P": result.factors.p,
+            "T": result.t,
+            "A": top.a if top else Decimal(0),
+            "D": top.d if top else Decimal(0),
             "score": top.base if top else 0,
             "details": _details(result),
             "floor_applicable": any(ci.floor for ci in result.cis),
@@ -233,12 +233,12 @@ class EngineScorer:
         s, p = formula.s_without_cvss, formula.level("P", p_level)
         score = base_score(formula, Factors(s, p, Decimal(0), a, d), e)
         return {
-            "S": float(s),
-            "P": float(p),
-            "T": 0.0,
-            "A": float(a),
-            "D": float(d),
-            "E": float(e),
+            "S": s,
+            "P": p,
+            "T": Decimal(0),
+            "A": a,
+            "D": d,
+            "E": e,
             "score": score,
             "details": [f"Alerta sin hallazgo: E = {e}", f"Explotación: {grade.value}"],
             "floor_applicable": False,

@@ -434,7 +434,7 @@ def test_the_alert_version_factor_follows_this_storys_alert(session: Session) ->
     asset_ids = list(session.scalars(select(m.Asset.id)))
     facts = _facts(session, other.id)
     unknown = scorer.score_story(session, facts, asset_ids)
-    assert unknown["E"] == pytest.approx(0.6)
+    assert unknown["E"] == Decimal("0.6")
     alert = m.Alert(id=new_id(), story_id=other.id, relevance="R2", status="open", created_at=NOW)
     session.add(alert)
     session.flush()
@@ -442,10 +442,10 @@ def test_the_alert_version_factor_follows_this_storys_alert(session: Session) ->
         m.AlertAsset(alert_id=alert.id, asset_id=asset_ids[0], installed_software_id=None, version_confirmed=True)
     )
     session.flush()
-    assert scorer.score_story(session, facts, asset_ids)["E"] == pytest.approx(1.0)
+    assert scorer.score_story(session, facts, asset_ids)["E"] == Decimal("1.0")
     # another story's confirmed alert does not leak into this one
     third = add_story(session, event_types=["active_exploitation"])
-    assert scorer.score_story(session, _facts(session, third.id), asset_ids)["E"] == pytest.approx(0.6)
+    assert scorer.score_story(session, _facts(session, third.id), asset_ids)["E"] == Decimal("0.6")
 
 
 def _facts(session: Session, story_id: uuid.UUID) -> StoryFacts:

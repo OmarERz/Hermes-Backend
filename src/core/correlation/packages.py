@@ -54,6 +54,17 @@ class NewsMatch:
     relevance: str | None
 
 
+def plain(value: Any) -> Any:
+    """JSON-ready copy of a scorer result: the scoring engine works in Decimal, the package carries numbers."""
+    if isinstance(value, Decimal):
+        return float(value)
+    if isinstance(value, dict):
+        return {key: plain(item) for key, item in value.items()}
+    if isinstance(value, list):
+        return [plain(item) for item in value]
+    return value
+
+
 def _canonical(value: object) -> str:
     return json.dumps(value, sort_keys=True, separators=(",", ":"), default=str)
 
@@ -267,7 +278,7 @@ def _cis_block(session: Session, group: GroupCtx, scored: ScoredGroup) -> list[d
                 "custodian": custodian.name if custodian else None,
                 "status": status or "new",
                 "description": asset.description,
-                "base": scored.per_ci[asset.id],
+                "base": plain(scored.per_ci[asset.id]),
             }
         )
     return cis
@@ -319,7 +330,7 @@ def build_finding_package(
         "cve_data": cve_data,
         "kev": kev,
         "epss": epss,
-        "base": {**scored.base, "relevance": relevance},
+        "base": {**plain(scored.base), "relevance": relevance},
         "news": news,
         "additional_urls": extra_urls,
         "iocs": [
@@ -349,7 +360,7 @@ class _Touch:
 
 def _story_package(session: Session, kind: str, facts: StoryFacts, scorer: BaseScorer, touch: _Touch) -> dict[str, Any]:
     """An alert or a dismissal candidate: no group, no CVE data; the news item is the whole subject."""
-    base = {**scorer.score_story(session, facts, touch.asset_ids), "relevance": sorted(touch.relevances)}
+    base = {**plain(scorer.score_story(session, facts, touch.asset_ids)), "relevance": sorted(touch.relevances)}
     package: dict[str, Any] = {
         "package_id": str(facts.story_id),
         "type": kind,
