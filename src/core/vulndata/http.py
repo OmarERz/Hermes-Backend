@@ -14,6 +14,8 @@ from typing import Any, Final
 
 import httpx
 
+from core.textnum import retry_after_seconds
+
 DEFAULT_RETRYABLE: Final = frozenset({429, 500, 502, 503, 504})
 HTTP_OK: Final = 200
 # A source may redirect within its own origin (the EPSS daily file points `current` to the dated file with a 302).
@@ -170,7 +172,4 @@ class JsonSource:
 
 
 def _retry_after(response: httpx.Response) -> float | None:
-    try:
-        return min(max(float(response.headers.get("Retry-After", "")), 0.0), MAX_BACKOFF_SECONDS)
-    except ValueError:
-        return None
+    return retry_after_seconds(response.headers.get("Retry-After"), MAX_BACKOFF_SECONDS)

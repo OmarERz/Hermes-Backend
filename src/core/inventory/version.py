@@ -10,11 +10,11 @@ from __future__ import annotations
 import re
 from typing import Final, NamedTuple
 
-EPOCH: Final = re.compile(r"^\d+:")
+EPOCH: Final = re.compile(r"^[0-9]+:")
 # A revision counts as a distribution one only with evidence in it (ubuntu, deb, el9, fc39, bpo...). A bare
 # `1.2.3-1` is ambiguous (could be an upstream version) and is kept whole.
 REVISION: Final = re.compile(
-    r"^(?P<upstream>[0-9][^\s-]*)-(?P<revision>[0-9][A-Za-z0-9.+~_]*(?:ubuntu|deb|bpo|build|\.?el\d|\.?fc\d)[A-Za-z0-9.+~_]*)$"
+    r"^(?P<upstream>[0-9][^\s-]*)-(?P<revision>[0-9][A-Za-z0-9.+~_]*(?:ubuntu|deb|bpo|build|\.?el[0-9]|\.?fc[0-9])[A-Za-z0-9.+~_]*)$"
 )
 ANY_REVISION: Final = re.compile(r"^(?P<upstream>[0-9][^\s-]*)-(?P<revision>[0-9][A-Za-z0-9.+~_]*)$")
 

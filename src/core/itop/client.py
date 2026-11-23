@@ -18,6 +18,7 @@ import httpx
 
 from core.config import Settings
 from core.db.session import is_local_host
+from core.textnum import retry_after_seconds
 
 REST_PATH: Final = "/webservices/rest.php"
 API_VERSION: Final = "1.3"
@@ -64,11 +65,7 @@ class ItopObject:
 
 
 def _retry_after(response: httpx.Response) -> float | None:
-    raw = response.headers.get("Retry-After", "")
-    try:
-        return min(max(float(raw), 0.0), MAX_BACKOFF_SECONDS)
-    except ValueError:
-        return None
+    return retry_after_seconds(response.headers.get("Retry-After"), MAX_BACKOFF_SECONDS)
 
 
 @dataclass

@@ -9,6 +9,7 @@ from urllib.parse import urljoin
 import httpx
 
 from core.ingestion.ssrf import Resolver, UnsafeUrlError, resolve_public_address, system_resolver, validate_public_url
+from core.textnum import ascii_int
 
 FEED_CONTENT_TYPES = frozenset(
     {
@@ -126,8 +127,8 @@ class Fetcher:
         content_type = response.headers.get("content-type", "").split(";", 1)[0].strip().lower()
         if content_type not in accepted_types:
             raise FetchError("Unexpected content type")
-        declared = response.headers.get("content-length", "")
-        if declared.isdigit() and int(declared) > self._limits.max_bytes:
+        declared = ascii_int(response.headers.get("content-length", ""))
+        if declared is not None and declared > self._limits.max_bytes:
             raise FetchError("Response too large")
         body = bytearray()
         for chunk in response.iter_bytes():
