@@ -205,8 +205,10 @@ services:
         condition: service_completed_successfully
       auth-emulator:
         condition: service_healthy
+      # Started, not healthy: a broken embeddings service must not stop scans and the other jobs; the news cycle
+      # fails closed on its own (the articles wait for the next cycle).
       embeddings:
-        condition: service_healthy
+        condition: service_started
     # The only service on the embeddings network besides the service itself.
     networks: [default, embeddings]
     healthcheck:

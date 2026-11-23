@@ -44,6 +44,7 @@ class HttpEmbedderConfig:
     max_attempts: int = 3
     backoff_seconds: float = 1.0
     batch_size: int = 32  # the service accepts up to 64 texts per request
+    model: str = EMBEDDING_MODEL  # vectors of another model live in another space: refused, never stored
     sleep: Callable[[float], None] = field(default=time.sleep, repr=False)
 
 
@@ -90,7 +91,7 @@ class HttpEmbedder:
                     problem = f"no answer ({type(exc).__name__})"
                 else:
                     if response.status_code == HTTP_OK:
-                        return _vectors(response)
+                        return _vectors(response, config.model)
                     problem = f"HTTP {response.status_code}"
                     if response.status_code < HTTP_SERVER_ERROR:
                         break  # a client error does not get better with retries
@@ -102,11 +103,13 @@ class HttpEmbedder:
                 client.close()
 
 
-def _vectors(response: httpx.Response) -> list[list[float]]:
+def _vectors(response: httpx.Response, model: str) -> list[list[float]]:
     try:
         body = response.json()
     except ValueError:
         raise EmbeddingError("The embeddings service did not answer JSON") from None
+    if isinstance(body, dict) and body.get("model") != model:
+        raise EmbeddingError(f"The embeddings service runs another model, not {model}")
     vectors = body.get("vectors") if isinstance(body, dict) else None
     if not isinstance(vectors, list) or not all(isinstance(v, list) for v in vectors):
         raise EmbeddingError("The embeddings service answered an unexpected shape")

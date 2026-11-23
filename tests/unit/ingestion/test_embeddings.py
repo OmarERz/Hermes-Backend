@@ -10,6 +10,7 @@ import respx
 
 from core.ingestion.embeddings import (
     EMBEDDING_DIMENSIONS,
+    EMBEDDING_MODEL,
     MAX_EMBED_CHARS,
     EmbeddingError,
     HttpEmbedder,
@@ -23,7 +24,7 @@ URL = "http://embeddings:8080"
 
 
 def vectors(n: int, value: float = 0.5, width: int = EMBEDDING_DIMENSIONS) -> dict[str, object]:
-    return {"model": "m", "dimensions": width, "vectors": [[value] * width for _ in range(n)]}
+    return {"model": EMBEDDING_MODEL, "dimensions": width, "vectors": [[value] * width for _ in range(n)]}
 
 
 def embedder(max_attempts: int = 3, batch_size: int = 32) -> tuple[HttpEmbedder, list[float]]:
@@ -100,8 +101,10 @@ def test_a_client_error_is_not_retried() -> None:
     [
         (httpx.Response(200, text="not json"), "did not answer JSON"),
         (httpx.Response(200, json=[1, 2]), "unexpected shape"),
-        (httpx.Response(200, json={"vectors": "x"}), "unexpected shape"),
-        (httpx.Response(200, json={"vectors": [["a"]]}), "non-numeric"),
+        (httpx.Response(200, json={"model": EMBEDDING_MODEL, "vectors": "x"}), "unexpected shape"),
+        (httpx.Response(200, json={"model": EMBEDDING_MODEL, "vectors": [["a"]]}), "non-numeric"),
+        (httpx.Response(200, json={**vectors(1), "model": "other/model-384"}), "runs another model"),
+        (httpx.Response(200, json={"vectors": [[0.5] * EMBEDDING_DIMENSIONS]}), "runs another model"),
         (httpx.Response(200, json=vectors(1, width=10)), "wrong shape"),
         (httpx.Response(200, json=vectors(2)), "wrong shape"),
     ],

@@ -68,8 +68,11 @@ secrets: ## Gitleaks (Docker, pinned): working tree + branch history (GITLEAKS_F
 	  $(GITLEAKS_IMAGE) git /repo --redact --no-banner -v --log-opts="$$revs" \
 	  --gitleaks-ignore-path /ignore/.gitleaksignore
 
-audit: ## pip-audit on the locked dependencies
+audit: ## pip-audit on the locked dependencies (backend and embeddings service)
 	uv export --locked --no-hashes --no-emit-project --format requirements-txt | uvx pip-audit --no-deps --disable-pip -r /dev/stdin
+	@# The service's torch is the CPU build of the same release (local version +cpu): audit the upstream version.
+	uv export --project docker/embeddings --locked --no-hashes --no-emit-project --format requirements-txt \
+	  | sed 's/+cpu//' | uvx pip-audit --no-deps --disable-pip -r /dev/stdin
 
 SCHEMATHESIS_VERSION ?= 4.33.4
 BRUNO_CLI_VERSION ?= 4.3.0

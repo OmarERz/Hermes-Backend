@@ -13,8 +13,11 @@ dependencies = [
 
 [tool.uv]
 package = false
-# The image is linux/amd64 (python:3.12-slim): lock only that platform.
-environments = ["sys_platform == 'linux' and platform_machine == 'x86_64'"]
+# The image is built for the host: linux/amd64 or linux/arm64 (python:3.12-slim has both).
+environments = [
+    "sys_platform == 'linux' and platform_machine == 'x86_64'",
+    "sys_platform == 'linux' and platform_machine == 'aarch64'",
+]
 
 [tool.uv.sources]
 torch = [{ index = "pytorch-cpu" }]
