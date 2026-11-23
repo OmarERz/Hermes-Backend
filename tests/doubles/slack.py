@@ -3,10 +3,9 @@
 It follows the `NotificationConsumer` protocol of docs/08 NOT-04 structurally: a `process(event)` method that
 raises to ask for a retry and is idempotent by `event_id` (delivery is at least once, NOT-02).
 
-TODO(F0.5): when `notifications_api` defines NotificationEvent and NotificationConsumer, type `process` with
-NotificationEvent and assert in a test that this class satisfies the Protocol. Until then events are duck typed:
-a mapping or an object with `event_id`, `type` and `priority` attributes
-(the field names of notification_event.schema.json).
+It accepts a `notifications_api.NotificationEvent` (the contract, F0.5) and, for the schema tests, the same event as
+a plain mapping: both expose `event_id`, `type` and `priority` (the field names of notification_event.schema.json).
+tests/unit/test_slack_double.py checks it against the real model.
 """
 
 from __future__ import annotations

@@ -23,10 +23,10 @@ import logging
 import uuid
 from collections.abc import Callable, Iterable, Sequence
 from dataclasses import dataclass, field
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 from typing import Any, Final, Protocol
 
-from sqlalchemy import select
+from sqlalchemy import exists, select
 from sqlalchemy.orm import Session, sessionmaker
 
 from core.correlation.engine import StoryOutcome, correlate_new_groups, correlate_stories
@@ -46,6 +46,7 @@ log = logging.getLogger("core.pipeline")
 
 SCAN_EVALUATED_STATUSES: Final = ("new", "reopened", "fixed", "persistent")
 SCAN_CORRELATED_STATUSES: Final = ("new", "reopened")
+CATCH_UP: Final = timedelta(hours=72)  # how far back analysed stories with no trace of correlation are retried
 
 # (session, group_id, run_id, trigger, judge or None) -> the stored assessment id, None when nothing changed.
 Evaluator = Callable[[Session, uuid.UUID, uuid.UUID, str, PipelineJudge | None], uuid.UUID | None]
@@ -224,12 +225,15 @@ class Pipeline:
             return
         report.run_id = output.run_id
         report.stories = len(output.analyzed)
-        if not output.analyzed:
-            self._log(report)
-            return
         now = self.clock()
         with self.session_factory() as session:
-            outcomes = self.steps.correlate_news(session, output.analyzed, now)
+            # Stories analysed in an earlier cycle that failed before correlating them are picked up here (F13.0 #73).
+            stories = list(dict.fromkeys([*output.analyzed, *_uncorrelated_stories(session, now - CATCH_UP)]))
+        if not stories:
+            self._log(report)
+            return
+        with self.session_factory() as session:
+            outcomes = self.steps.correlate_news(session, stories, now)
         groups = {placed.group_id for outcome in outcomes for placed in outcome.matches}
         report.groups = len(groups)
         if output.run_id is not None:
@@ -321,3 +325,20 @@ class Pipeline:
             report.failures,
             "".join(f"; {note}" for note in report.notes),
         )
+
+
+def _uncorrelated_stories(session: Session, since: datetime) -> list[uuid.UUID]:
+    """Stories analysed since `since` that left no trace of correlation: no correlation, no alert and no mode 2
+    package. Correlation is idempotent, so a story that simply matched nothing is retried harmlessly until the window
+    closes."""
+    traces = (
+        exists().where(m.Correlation.story_id == m.NewsAnalysis.story_id),
+        exists().where(m.Alert.story_id == m.NewsAnalysis.story_id),
+        exists().where(m.ReviewPackage.story_id == m.NewsAnalysis.story_id),
+    )
+    rows = session.scalars(
+        select(m.NewsAnalysis.story_id)
+        .where(m.NewsAnalysis.created_at >= since, *(~trace for trace in traces))
+        .order_by(m.NewsAnalysis.created_at, m.NewsAnalysis.story_id)
+    )
+    return list(rows)

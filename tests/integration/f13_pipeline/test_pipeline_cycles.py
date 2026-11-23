@@ -231,3 +231,35 @@ def test_the_scan_cycle_runs_the_cve_analyst_before_scoring(factory: sessionmake
     assert Pipeline(factory, steps).scan_cycle().failures == 1
     steps.analyze_cves = None
     assert "CVE analyst is not wired yet (F3.3)" in Pipeline(factory, steps).scan_cycle().notes
+
+
+def test_a_story_analysed_in_a_failed_cycle_is_correlated_by_the_next_one(factory: sessionmaker[Session]) -> None:
+    """The analysis committed but correlation never ran; the next news cycle catches it up (pending F13.0 #73)."""
+    with factory() as session, session.begin():
+        run_id, missed, correlated = news_run(session), make_story(session), make_story(session)
+        fields: dict[str, Any] = {
+            "agent": "news_analyst", "model": "m", "response_model": {}, "prompt_version": "1", "prompt_hash": "h",
+            "schema_version": "1", "schema_hash": "h", "parameters": {}, "input_ref": "r", "calls": [],
+            "status": "applied", "attempts": 1, "tokens_input": 1, "tokens_cached": 0, "tokens_output": 1,
+            "tokens_reasoning": 0, "cost_usd": 0, "latency_ms": 1, "ladder_level": 0, "created_at": NOW,
+        }  # fmt: skip
+        review, other = m.LlmReview(**fields), m.LlmReview(**fields)
+        session.add_all([review, other])
+        session.flush()
+        for story, rid in ((missed, review.id), (correlated, other.id)):
+            session.add(
+                m.NewsAnalysis(
+                    story_id=story, llm_review_id=rid, summary="s", event_type="other", output={}, created_at=NOW
+                )
+            )
+        session.add(m.Alert(story_id=correlated, relevance="R2", status="open", created_at=NOW))  # already handled
+    seen: list[list[uuid.UUID]] = []
+
+    def correlate(_session: Session, story_ids: list[uuid.UUID], _now: datetime) -> list[StoryOutcome]:
+        seen.append(list(story_ids))
+        return []
+
+    steps = Steps(news=lambda _s, _r: NewsCycleOutput(run_id, []))
+    steps.correlate_news = correlate
+    Pipeline(factory, steps, clock=lambda: NOW).news_cycle()
+    assert seen == [[missed]]

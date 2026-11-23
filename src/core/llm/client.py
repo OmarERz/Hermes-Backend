@@ -31,7 +31,6 @@ from core.llm.usage import Usage
 logger = logging.getLogger(__name__)
 
 Role = Literal["judge", "analysts"]
-HTTP_TOO_MANY_REQUESTS = 429
 MAX_RETRY_AFTER_SECONDS = 60.0
 # Explicit output cap per call (OWASP LLM10, F12.3): DeepSeek's default without thinking is 8K tokens, verified against
 # https://api-docs.deepseek.com/api/create-chat-completion/ (`max_tokens`, 1 to 393 216). A provider whose default is

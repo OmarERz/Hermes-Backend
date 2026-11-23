@@ -19,8 +19,7 @@ from sqlalchemy.orm import Session
 
 from core.configuration.errors import Problem, ValidationFailedError
 from core.db import models as m
-from core.scoring.engine import LEVEL_ORDER, Formula, FormulaError
-from core.scoring.formula_repo import load_formula
+from core.scoring.engine import Formula, FormulaError
 
 STORED_DECIMALS: Final = 4  # formula values are stored as numeric(5,4)
 BONUS: Final = "personal_data_bonus"
@@ -49,14 +48,6 @@ def formula_values(formula: Formula) -> dict[str, str]:
         if limit is not None:
             values[f"decay.{number}.max_age_days"] = str(limit)
     return values
-
-
-def formula_keys() -> list[str]:
-    """Every editable formula key of the standard structure (levels follow `LEVEL_ORDER`)."""
-    keys = [f"weights.{f}" for f in ("S", "P", "T", "A", "D")]
-    keys += [f"levels.{factor}.{code}" for factor, codes in LEVEL_ORDER.items() for code in codes]
-    keys += [f"levels.D.{BONUS}", "formula.s_without_cvss", "formula.kev_exposed_floor"]
-    return keys
 
 
 def _bad(key: str, issue: str) -> ValidationFailedError:
@@ -266,7 +257,3 @@ def save_new_version(session: Session, source_id: uuid.UUID, formula: Formula, m
     version.activated_at = now
     session.flush()
     return version
-
-
-def formula_of(session: Session, version_id: uuid.UUID) -> Formula:
-    return load_formula(session, version_id)

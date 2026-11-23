@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import logging
 from datetime import datetime
 from typing import Annotated, Final, Literal, cast
 
@@ -51,6 +52,7 @@ from core.views import tickets_alerts as ta
 from core.views.common import iso, parse_uuid
 from notifications_api import FeedbackInput, FeedbackResult
 
+logger = logging.getLogger(__name__)
 router = APIRouter(tags=["findings"])
 
 
@@ -392,6 +394,8 @@ def post_feedback(feedback: FeedbackRequest, request: Request, user: CurrentUser
             )
         )
     except FeedbackRejectedError as error:
+        # docs/14 §10.4: rejected feedback is a security event; the code only, never the input or the e-mail.
+        logger.warning("feedback rejected: %s", error.code)
         status, code, message = FEEDBACK_ERRORS.get(error.code, (422, "validation_error", "El feedback no es válido."))
         raise ApiError(status, code, message) from None
 

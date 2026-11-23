@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import logging
 import uuid
 from decimal import Decimal
 
@@ -88,3 +89,18 @@ def test_simulate_compares_the_open_findings_with_the_proposed_formula(client: T
     assert client.get("/api/config").json()["values"] == values
     invalid = client.post("/api/formula/simulate", json={"changes": {"weights.S": "0.9"}})
     assert invalid.status_code == 422
+
+
+def test_rejected_feedback_is_a_logged_security_event(
+    client: TestClient, scenario: Scenario, caplog: pytest.LogCaptureFixture
+) -> None:
+    """docs/14 §10.4 (F12.3): the rejection code is logged, never the input or the e-mail."""
+    as_user(client, "stranger@example.test")
+    with caplog.at_level(logging.WARNING, logger="api.routes.findings"):
+        answer = client.post(
+            "/api/feedback",
+            json={"assessment_id": str(scenario.assessments["A1"]), "verdict": "relevant", "comment": "texto"},
+        )
+    assert answer.status_code == 403
+    assert "feedback rejected: unauthorized_user" in caplog.text
+    assert "stranger@example.test" not in caplog.text and "texto" not in caplog.text

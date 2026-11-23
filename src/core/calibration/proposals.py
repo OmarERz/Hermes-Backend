@@ -33,7 +33,6 @@ from core.scoring.formula_repo import load_active_formula
 
 WEEK: Final = timedelta(days=7)
 SOURCE_PREFIX: Final = "source:"
-ACTIVE_STATUSES: Final = ("approved", "applied")
 LOCK_KEY: Final = 7_001_020
 
 
