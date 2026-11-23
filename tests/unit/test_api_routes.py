@@ -37,9 +37,17 @@ class SampleRuns:
     """In-memory runs for the route tests (the SQL source is tested in tests/integration/f13_pipeline)."""
 
     def __init__(self) -> None:
-        from api.routes import samples  # noqa: PLC0415 - sample data of the route tests
-
-        self.runs = list(samples.RUNS)
+        self.runs = [
+            Run(
+                id="run-1",
+                kind="scan",
+                status="succeeded",
+                started_at="2026-01-15T02:00:00Z",
+                finished_at="2026-01-15T02:07:00Z",
+                progress=100,
+            ),
+            Run(id="run-2", kind="recalculation", status="running", started_at="t", finished_at=None, progress=40),
+        ]
 
     def list(self) -> list[Run]:
         return list(self.runs)

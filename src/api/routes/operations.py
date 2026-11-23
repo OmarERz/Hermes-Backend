@@ -13,7 +13,6 @@ from fastapi.responses import StreamingResponse
 
 from api.errors import ApiError, ErrorDetail
 from api.pagination import PAGINATED_RESPONSES, Page, PageQuery, Signer, paginate
-from api.routes import samples
 from api.routes._auth import guard
 from api.routes._config_support import CurrentUserDep, app_user_id, now, to_api_error
 from api.routes._db import SessionDep
