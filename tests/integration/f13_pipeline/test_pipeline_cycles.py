@@ -170,7 +170,7 @@ def test_cycles_never_overlap(factory: sessionmaker[Session]) -> None:
         assert pipeline.nightly_cycle().ran is False
         scan = Steps(news=steps.news, scan=lambda _r, _q: calls.append("scan") or ScanCycleOutput(uuid.uuid4()))
         assert Pipeline(factory, scan).scan_cycle().ran is False  # the scan itself never starts
-        refresh = Steps(news=steps.news, refresh=calls.append)
+        refresh = Steps(news=steps.news, refresh=lambda: calls.append(None))
         assert Pipeline(factory, refresh).refresh_cycle().ran is False
     assert calls == []
     assert pipeline.news_cycle().ran is True
@@ -202,8 +202,8 @@ def test_a_failing_group_does_not_stop_the_others(factory: sessionmaker[Session]
 
 
 def test_the_refresh_cycle_and_a_missing_news_step(factory: sessionmaker[Session]) -> None:
-    refreshed: list[Session] = []
-    assert Pipeline(factory, Steps(news=None, refresh=refreshed.append)).refresh_cycle().ran is True
+    refreshed: list[None] = []
+    assert Pipeline(factory, Steps(news=None, refresh=lambda: refreshed.append(None))).refresh_cycle().ran is True
     assert len(refreshed) == 1
     assert Pipeline(factory, Steps(news=None)).refresh_cycle().notes == ["vulnerability refresh is not configured"]
     report = Pipeline(factory, Steps(news=None)).news_cycle()

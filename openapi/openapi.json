@@ -839,6 +839,7 @@
           },
           "expected_version": {
             "description": "Version the client read; 409 if it changed (API-03)",
+            "maximum": 2147483647.0,
             "minimum": 1.0,
             "title": "Expected Version",
             "type": "integer"
@@ -2179,6 +2180,7 @@
         "properties": {
           "expected_version": {
             "description": "Current version the client read; 409 if it changed (API-03)",
+            "maximum": 2147483647.0,
             "minimum": 1.0,
             "title": "Expected Version",
             "type": "integer"
@@ -5114,6 +5116,8 @@
             "name": "v",
             "required": true,
             "schema": {
+              "maximum": 2147483647,
+              "minimum": -2147483648,
               "title": "V",
               "type": "integer"
             }

@@ -75,7 +75,8 @@ class Steps:
     dismissal_package: DismissalPackager | None = None
     judge_caller: ToolCaller | None = None
     tickets: TicketApplier | None = None
-    refresh: Callable[[Session], object] | None = None  # vulnerability catalogue before scanning (NVD, KEV, EPSS)
+    # Vulnerability catalogue before scanning (NVD, KEV, EPSS); opens its own short transactions around downloads.
+    refresh: Callable[[], object] | None = None
     analyze_cves: Callable[[Session], object] | None = None  # F3.3 CVE analyst on the CVEs of active groups
     correlate_news: Callable[[Session, list[uuid.UUID], datetime], list[StoryOutcome]] = correlate_stories
     correlate_groups: Callable[[Session, set[uuid.UUID], datetime], list[StoryOutcome]] = correlate_new_groups
@@ -148,9 +149,7 @@ class Pipeline:
         with cycle_lock(self.session_factory) as acquired:
             if not acquired:
                 return self._skipped(report)
-            with self.session_factory() as session:
-                self.steps.refresh(session)
-                session.commit()
+            self.steps.refresh()
         self._log(report)
         return report
 

@@ -258,6 +258,7 @@ def test_restore_errors(client: TestClient) -> None:
     assert client.post("/api/config/versions/1/restore", json={"expected_version": 9}).status_code == 409
     assert client.post("/api/config/versions/99/restore", json={"expected_version": 1}).status_code == 404
     assert client.post("/api/config/versions/0/restore", json={"expected_version": 1}).status_code == 404
+    assert client.post("/api/config/versions/-1/restore", json={"expected_version": 1}).status_code == 404
     assert client.post("/api/config/versions/1/restore").status_code == 422
 
 

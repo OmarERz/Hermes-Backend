@@ -3,18 +3,24 @@
 from __future__ import annotations
 
 import uuid
-from typing import Any
+from collections.abc import Iterator
+from contextlib import contextmanager
+from typing import Any, cast
 
 import pytest
-from sqlalchemy import select
+from sqlalchemy import func, select, text
 from sqlalchemy.orm import Session, sessionmaker
 
 from core.analysts.news import NewsResult
 from core.db import models as m
 from core.ingestion.fetcher import Fetcher
 from core.ingestion.pipeline import PipelineResult
+from core.inventory.sync import SYNC_LOCK_KEY, EmptyInventoryError
+from core.itop.inventory import InventorySnapshot
 from core.pipeline.wiring import cve_step, inventory_refresh, news_step, refresh_vulndata, scan_step
 from core.scan.engine import ScanResult
+from core.vulndata.epss import EpssResult
+from core.vulndata.kev import KevResult
 from doubles.web import FakeWeb
 
 pytestmark = pytest.mark.integration
@@ -66,22 +72,132 @@ def test_the_scan_step_runs_on_the_queued_run(monkeypatch: pytest.MonkeyPatch, f
     assert calls == [(queued, "manual", None)]
 
 
-def test_the_vulnerability_refresh_loads_nvd_kev_and_epss(monkeypatch: pytest.MonkeyPatch) -> None:
-    calls: list[str] = []
-    monkeypatch.setattr("core.pipeline.wiring.load_nvd", lambda _s, _c: calls.append("nvd") or "n")
-    monkeypatch.setattr("core.pipeline.wiring.fetch_catalogue", lambda _src: calls.append("kev-fetch") or [])
-    monkeypatch.setattr("core.pipeline.wiring.load_kev", lambda _s, _e: calls.append("kev") or "k")
-    monkeypatch.setattr("core.pipeline.wiring.refresh_epss", lambda _s, _src: calls.append("epss") or "e")
-    assert refresh_vulndata(object(), object())(object()) == ("n", "k", "e")
-    assert calls == ["nvd", "kev-fetch", "kev", "epss"]
+class Tracking:
+    """A session factory that knows how many sessions are open: downloads must run with none."""
+
+    def __init__(self, factory: sessionmaker[Session]) -> None:
+        self.factory, self.kw, self.open = factory, factory.kw, 0
+
+    @contextmanager
+    def __call__(self) -> Iterator[Session]:
+        with self.factory() as session:
+            self.open += 1
+            try:
+                yield session
+            finally:
+                self.open -= 1
 
 
-def test_the_inventory_refresh_syncs_from_itop(factory: sessionmaker[Session], monkeypatch: pytest.MonkeyPatch) -> None:
+def test_the_vulnerability_refresh_downloads_outside_transactions(
+    factory: sessionmaker[Session], monkeypatch: pytest.MonkeyPatch
+) -> None:
+    tracking = Tracking(factory)
+    calls: list[Any] = []
+
+    class Nvd:
+        def iter_published(self, _start: Any, _end: Any) -> Iterator[dict[str, int]]:
+            for n in range(5):
+                assert tracking.open == 0, "an NVD page is read inside a transaction"
+                yield {"n": n}
+
+    def download(name: str, result: Any) -> Any:
+        def fetch(_source: Any) -> Any:
+            assert tracking.open == 0, f"{name} is downloaded inside a transaction"
+            calls.append(name)
+            return result
+
+        return fetch
+
+    monkeypatch.setattr("core.pipeline.wiring.NVD_BATCH", 2)
+    monkeypatch.setattr("core.pipeline.wiring.ROW_BATCH", 2)
+    monkeypatch.setattr("core.pipeline.wiring.parse_cve", lambda item: None if item["n"] == 2 else item["n"])
+    monkeypatch.setattr(
+        "core.pipeline.wiring.store_cve", lambda _s, record: calls.append(("cve", tracking.open, record))
+    )
+
+    def loader(name: str, result: type[Any]) -> Any:
+        def load(_session: Session, rows: list[Any], *_known: Any) -> Any:
+            calls.append((name, tracking.open, rows))
+            return result(stored=len(rows))
+
+        return load
+
+    monkeypatch.setattr("core.pipeline.wiring.fetch_catalogue", download("kev", ["k1", "k2", "k3"]))
+    monkeypatch.setattr("core.pipeline.wiring.load_kev", loader("kev-load", KevResult))
+    monkeypatch.setattr(
+        "core.pipeline.wiring.fetch_daily", download("epss", [{"cve": "CVE-2026-10001"}, {"cve": "CVE-1999-0001"}])
+    )
+    monkeypatch.setattr("core.pipeline.wiring.load_epss", loader("epss-load", EpssResult))
+    nvd, kev, epss = refresh_vulndata(cast("sessionmaker[Session]", tracking), cast("Any", Nvd()), cast("Any", None))()
+    assert (nvd.stored, nvd.skipped, kev.stored, epss.stored, epss.skipped) == (4, 1, 3, 1, 1)
+    assert calls == [
+        ("cve", 1, 0),
+        ("cve", 1, 1),
+        ("cve", 1, 3),
+        ("cve", 1, 4),
+        "kev",
+        ("kev-load", 1, ["k1", "k2"]),
+        ("kev-load", 1, ["k3"]),
+        "epss",
+        ("epss-load", 1, [{"cve": "CVE-2026-10001"}]),  # only the CVEs of the local catalogue
+    ]
+
+
+def open_transactions(factory: sessionmaker[Session]) -> int:
+    with factory() as session:
+        return int(
+            session.scalar(
+                text(
+                    "SELECT count(*) FROM pg_stat_activity WHERE datname = current_database()"
+                    " AND state LIKE 'idle in transaction%' AND pid <> pg_backend_pid()"
+                )
+            )
+            or 0
+        )
+
+
+def test_the_inventory_refresh_reads_itop_outside_a_transaction(
+    factory: sessionmaker[Session], monkeypatch: pytest.MonkeyPatch
+) -> None:
     seen: list[Any] = []
-    monkeypatch.setattr("core.pipeline.wiring.sync_from_itop", lambda _s, reader: seen.append(reader) or "synced")
+
+    def read(reader: Any) -> str:
+        seen.append((reader, open_transactions(factory)))
+        return "snapshot"
+
+    monkeypatch.setattr("core.pipeline.wiring.read_inventory", read)
+    monkeypatch.setattr("core.pipeline.wiring.sync_inventory", lambda _s, snapshot: f"synced {snapshot}")
     reader = object()
-    assert inventory_refresh(factory, reader)() == "synced"
-    assert seen == [reader]
+    assert inventory_refresh(factory, cast("Any", reader))() == "synced snapshot"
+    assert seen == [(reader, 0)]
+    assert lock_is_free(factory)
+
+
+def test_the_inventory_refresh_frees_the_lock_on_failure_and_skips_when_busy(
+    factory: sessionmaker[Session], monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setattr("core.pipeline.wiring.read_inventory", lambda _r: InventorySnapshot())
+    # The real write takes the same key per transaction (re-entrant on the same connection), then refuses to
+    # decommission the whole seeded inventory.
+    with pytest.raises(EmptyInventoryError):
+        inventory_refresh(factory, cast("Any", None))()
+    assert lock_is_free(factory)
+    with factory.kw["bind"].connect() as other:
+        other.execute(select(func.pg_advisory_lock(SYNC_LOCK_KEY)))
+        try:
+            assert inventory_refresh(factory, cast("Any", None))() is None
+        finally:
+            other.execute(select(func.pg_advisory_unlock(SYNC_LOCK_KEY)))
+            other.commit()
+
+
+def lock_is_free(factory: sessionmaker[Session]) -> bool:
+    with factory.kw["bind"].connect() as conn:
+        free = bool(conn.execute(select(func.pg_try_advisory_lock(SYNC_LOCK_KEY))).scalar())
+        if free:
+            conn.execute(select(func.pg_advisory_unlock(SYNC_LOCK_KEY)))
+        conn.commit()
+        return free
 
 
 def test_the_cve_step_runs_the_analyst_with_the_advisory_provider(monkeypatch: pytest.MonkeyPatch) -> None:

@@ -13,14 +13,20 @@ from typing import Final
 from sqlalchemy import func, select
 from sqlalchemy.orm import Session, sessionmaker
 
-PIPELINE_LOCK_KEY: Final = 7_001_010
+# Unique among the advisory lock keys of the code base (a unit test checks it): 7_001_010 is the configuration
+# write lock, and sharing it made every configuration write wait for a whole pipeline cycle.
+PIPELINE_LOCK_KEY: Final = 7_001_030
 
 
 @contextmanager
 def cycle_lock(factory: sessionmaker[Session], key: int = PIPELINE_LOCK_KEY) -> Iterator[bool]:
-    """Yields True with the lock held, or False at once when another cycle holds it."""
+    """Yields True with the lock held, or False at once when another cycle holds it.
+
+    The guard connection runs in autocommit: it holds the session lock without an open transaction, so it never
+    keeps a snapshot or table locks while the cycle runs.
+    """
     bind = factory.kw["bind"]
-    with bind.connect() as guard:
+    with bind.connect().execution_options(isolation_level="AUTOCOMMIT") as guard:
         acquired = bool(guard.execute(select(func.pg_try_advisory_lock(key))).scalar())
         try:
             yield acquired

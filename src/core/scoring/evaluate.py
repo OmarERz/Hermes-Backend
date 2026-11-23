@@ -445,7 +445,12 @@ def recalculate_open_groups(
     commit: bool = True,
 ) -> RecalculationReport:
     """Recompute every active group with the formula and the clock, **without calling the judge** (COR-05): a
-    weights change or the nightly decay reuses each group's last adjustment. Commits unless `commit` is False."""
+    weights change or the nightly decay reuses each group's last adjustment.
+
+    With `commit` (the default) every group is its own short transaction, so a long recalculation never holds the
+    locks of the groups it already finished. A failure marks the run `failed` and re-raises. With `commit=False`
+    everything stays in the caller's transaction.
+    """
     given = options or EvaluationOptions()
     moment = given.now or utc_now()
     run = m.Run(
@@ -458,18 +463,39 @@ def recalculate_open_groups(
     )
     session.add(run)
     session.flush()
-    options = EvaluationOptions(judge=None, tickets=given.tickets, formula=given.formula, now=moment)
-    groups = load_active_groups(session)
-    changed = 0
-    for group in groups:
-        evaluation = evaluate_group(session, group.id, run.id, trigger, options)
-        changed += evaluation.changed
-    run.status, run.progress, run.finished_at = "succeeded", 100, moment
+    run_id = run.id
     if commit:
-        session.commit()
-    else:
-        session.flush()
-    return RecalculationReport(run.id, len(groups), changed)
+        session.commit()  # the run row exists (ARQ-04) before any work that can fail
+    group_ids: list[uuid.UUID] = []
+    changed = 0
+    try:
+        # Without a given formula each group reads the active one in its own transaction, so a configuration change
+        # committed between two groups applies to the groups still pending.
+        options = EvaluationOptions(judge=None, tickets=given.tickets, formula=given.formula, now=moment)
+        group_ids = [group.id for group in load_active_groups(session)]
+        for group_id in group_ids:
+            changed += evaluate_group(session, group_id, run_id, trigger, options).changed
+            if commit:
+                session.commit()
+        _finish_run(session, run_id, "succeeded", moment)
+        if commit:
+            session.commit()
+        else:
+            session.flush()
+    except Exception:
+        if commit:
+            session.rollback()
+            _finish_run(session, run_id, "failed", moment)
+            session.commit()
+        raise
+    return RecalculationReport(run_id, len(group_ids), changed)
+
+
+def _finish_run(session: Session, run_id: uuid.UUID, status: str, moment: datetime) -> None:
+    run = session.get_one(m.Run, run_id)
+    run.status, run.finished_at = status, moment
+    if status == "succeeded":
+        run.progress = 100
 
 
 @dataclass(frozen=True)

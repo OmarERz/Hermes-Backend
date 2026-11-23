@@ -3,6 +3,8 @@
 from __future__ import annotations
 
 import uuid
+from datetime import UTC, datetime
+from typing import Any
 
 import pytest
 from pipeline_support import NOW, judge_caller
@@ -12,6 +14,7 @@ from sqlalchemy.orm import Session, sessionmaker
 from core.db import models as m
 from core.pipeline.cycles import NewsCycleOutput, Pipeline, ScanCycleOutput, Steps
 from core.pipeline.wiring import engine_dismissal_package, engine_evaluate, engine_recalculate
+from core.scoring import evaluate
 from core.tickets.content import ItopIdentity
 from core.tickets.lifecycle import TicketLifecycle
 from doubles.llm import tool_call_completion
@@ -107,3 +110,36 @@ def test_the_nightly_recalculation_and_the_dismissal_packager(factory: sessionma
         with pytest.raises(LookupError):
             engine_dismissal_package(session, uuid.uuid4())  # a story without analysis has no package
         session.rollback()
+
+
+def test_a_failed_nightly_recalculation_keeps_finished_groups_and_marks_the_run_failed(
+    factory: sessionmaker[Session], monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Per-group transactions (real commits): the group before the failure stays, the failing one is undone."""
+    real = evaluate.evaluate_group
+    marks = [datetime(2001, 1, 1, tzinfo=UTC), datetime(2001, 1, 2, tzinfo=UTC)]
+    calls: list[uuid.UUID] = []
+
+    def flaky(session: Session, group_id: uuid.UUID, *args: Any) -> Any:
+        mark = marks[len(calls)]
+        calls.append(group_id)
+        session.add(m.Run(kind="nightly", status="succeeded", progress=100, trigger_reason="schedule", started_at=mark))
+        session.flush()
+        if len(calls) == len(marks):
+            raise RuntimeError("boom")
+        return real(session, group_id, *args)
+
+    load = evaluate.load_active_groups
+
+    def twice(session: Session, only: Any = None) -> Any:  # the seed has one open group: visit it twice
+        return load(session, only=only) if only is not None else load(session) * 2
+
+    monkeypatch.setattr("core.scoring.evaluate.load_active_groups", twice)
+    monkeypatch.setattr("core.scoring.evaluate.evaluate_group", flaky)
+    with factory() as session, pytest.raises(RuntimeError, match="boom"):
+        engine_recalculate(None)(session)
+    with factory() as other:
+        stored = set(other.scalars(select(m.Run.started_at).where(m.Run.started_at.in_(marks))))
+        failed = other.scalars(select(m.Run).where(m.Run.kind == "nightly", m.Run.status == "failed")).one()
+    assert stored == {marks[0]}
+    assert (failed.progress, failed.finished_at is not None) == (0, True)

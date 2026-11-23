@@ -98,7 +98,7 @@ def build_pipeline(settings: Settings, session_factory: sessionmaker[Session]) -
     steps = Steps(
         news=news_step(Fetcher(), SentenceTransformerEmbedder(), analyst) if _embeddings() else None,
         analyze_cves=cve_step(analyst, Fetcher()) if analyst is not None else None,
-        refresh=refresh_vulndata(nvd_client(settings.nvd_api_key), JsonSource()),
+        refresh=refresh_vulndata(session_factory, nvd_client(settings.nvd_api_key), JsonSource()),
         scan=scan_step(session_factory, reader),
         evaluate=engine_evaluate,
         recalculate=engine_recalculate(tickets),

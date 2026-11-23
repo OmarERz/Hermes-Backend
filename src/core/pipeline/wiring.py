@@ -7,12 +7,14 @@ F4.3 (`evaluate_group`, `recalculate_open_groups`, `EngineScorer`).
 
 from __future__ import annotations
 
+import logging
 import uuid
 from collections.abc import Callable
 from dataclasses import astuple
-from typing import Any
+from datetime import UTC, datetime, timedelta
+from typing import Any, Protocol
 
-from sqlalchemy import select
+from sqlalchemy import func, select
 from sqlalchemy.orm import Session, sessionmaker
 
 from core.analysts.cve import CveOptions, analyze_pending_cves, web_advisory_provider
@@ -22,8 +24,9 @@ from core.db import models as m
 from core.ingestion.embeddings import EmbedFn
 from core.ingestion.fetcher import Fetcher
 from core.ingestion.pipeline import PipelineOptions, run_news_pipeline
-from core.inventory.sync import sync_from_itop
+from core.inventory.sync import SYNC_LOCK_KEY, sync_inventory
 from core.itop.client import ItopReader
+from core.itop.inventory import read_inventory
 from core.llm import LlmClient
 from core.pipeline.cycles import NewsCycleOutput, ScanCycleOutput, TicketApplier
 from core.pipeline.judging import JudgeFn
@@ -37,10 +40,14 @@ from core.scoring.evaluate import (
     recalculate_open_groups,
 )
 from core.scoring.formula_repo import load_active_formula
-from core.vulndata.epss import refresh_epss
+from core.vulndata.epss import EpssResult, fetch_daily, load_epss
 from core.vulndata.http import JsonSource
-from core.vulndata.kev import fetch_catalogue, load_kev
-from core.vulndata.nvd import NvdClient, load_nvd
+from core.vulndata.kev import KevResult, fetch_catalogue, load_kev
+from core.vulndata.nvd import RECENCY_DAYS, LoadResult, NvdClient, parse_cve
+from core.vulndata.records import CveRecord
+from core.vulndata.store import store_cve
+
+log = logging.getLogger(__name__)
 
 
 def news_step(fetcher: Fetcher, embed: EmbedFn, analyst: LlmClient | None) -> Callable[[Session, str], NewsCycleOutput]:
@@ -102,7 +109,7 @@ def engine_recalculate(tickets: TicketApplier | None) -> Callable[[Session], obj
     """F-17 / COR-05: every open group with the formula and the clock, never the judge; tickets follow the scores."""
 
     def run(session: Session) -> object:
-        return recalculate_open_groups(session, "nightly", EvaluationOptions(tickets=tickets), commit=False)
+        return recalculate_open_groups(session, "nightly", EvaluationOptions(tickets=tickets))
 
     return run
 
@@ -113,24 +120,110 @@ def engine_dismissal_package(session: Session, story_id: uuid.UUID) -> dict[str,
     return build_dismissal_package(session, story_id, EngineScorer(formula))
 
 
-def refresh_vulndata(nvd: NvdClient, source: JsonSource) -> Callable[[Session], object]:
-    """ESC-09: the recent NVD publications (recency window), the KEV catalogue and today's EPSS scores."""
+NVD_BATCH = 200  # CVEs stored per transaction while the NVD pages are read
+ROW_BATCH = 2_000  # KEV entries or EPSS rows stored per transaction
 
-    def run(session: Session) -> object:
-        nvd_result = load_nvd(session, nvd)
-        kev_result = load_kev(session, fetch_catalogue(source))
-        epss_result = refresh_epss(session, source)
+
+def refresh_vulndata(
+    factory: sessionmaker[Session], nvd: NvdClient, source: JsonSource
+) -> Callable[[], tuple[LoadResult, object, object]]:
+    """ESC-09: the recent NVD publications (recency window), the KEV catalogue and today's EPSS scores.
+
+    No network call runs inside a database transaction: each download finishes first, then a short transaction
+    stores it (NVD in batches of `NVD_BATCH`), so no write of the API ever waits on a download.
+    """
+
+    def run() -> tuple[LoadResult, object, object]:
+        nvd_result = _load_nvd(factory, nvd)
+        kev_result = _in_batches(factory, load_kev, fetch_catalogue(source), KevResult())
+        epss_result = _load_epss(factory, fetch_daily(source))
         return nvd_result, kev_result, epss_result
 
     return run
 
 
+def _load_nvd(factory: sessionmaker[Session], nvd: NvdClient) -> LoadResult:
+    result = LoadResult()
+    end = datetime.now(UTC)
+    batch: list[CveRecord] = []
+    for item in nvd.iter_published(end - timedelta(days=RECENCY_DAYS), end):
+        record = parse_cve(item)
+        if record is None:
+            result.skipped += 1
+            continue
+        batch.append(record)
+        if len(batch) >= NVD_BATCH:
+            _store_cves(factory, batch, result)
+            batch = []
+    _store_cves(factory, batch, result)
+    return result
+
+
+class _Counted(Protocol):
+    stored: int
+    skipped: int
+
+
+def _in_batches[R: _Counted](
+    factory: sessionmaker[Session],
+    load: Callable[[Session, list[dict[str, Any]]], R],
+    rows: list[dict[str, Any]],
+    total: R,
+) -> R:
+    """Store downloaded rows in short transactions of `ROW_BATCH` (the loaders upsert, so batches are independent)."""
+    for start in range(0, len(rows), ROW_BATCH):
+        with factory() as session, session.begin():
+            part = load(session, rows[start : start + ROW_BATCH])
+        total.stored += part.stored
+        total.skipped += part.skipped
+    return total
+
+
+def _load_epss(factory: sessionmaker[Session], rows: list[dict[str, Any]]) -> EpssResult:
+    """The daily file covers every published CVE: the local catalogue is read once and only its rows are stored."""
+    with factory() as session:
+        known = set(session.scalars(select(m.Cve.id)))
+    ours = [row for row in rows if row.get("cve") in known]
+    result = _in_batches(factory, lambda session, part: load_epss(session, part, known), ours, EpssResult())
+    result.skipped += len(rows) - len(ours)
+    return result
+
+
+def _store_cves(factory: sessionmaker[Session], records: list[CveRecord], result: LoadResult) -> None:
+    if not records:
+        return
+    with factory() as session, session.begin():
+        for record in records:
+            store_cve(session, record)
+    result.stored += len(records)
+
+
 def inventory_refresh(factory: sessionmaker[Session], reader: ItopReader) -> Callable[[], object]:
-    """ARQ-03: the iTop cache every six hours (the scan refreshes it too); a failure leaves the cache as it was."""
+    """ARQ-03: the iTop cache every six hours (the scan refreshes it too); a failure leaves the cache as it was.
+
+    One connection holds the sync lock at session level across the read and the write, so an older read never
+    overwrites a newer one; iTop is read with no transaction open and only the write is a (short) transaction. The
+    write takes the same key at transaction level, which is re-entrant on the same connection. A refresh that finds
+    the lock taken (the scan is syncing) skips this round.
+    """
 
     def run() -> object:
-        with factory() as session, session.begin():
-            return sync_from_itop(session, reader)
+        with factory.kw["bind"].connect() as conn:
+            acquired = bool(conn.execute(select(func.pg_try_advisory_lock(SYNC_LOCK_KEY))).scalar())
+            conn.commit()
+            if not acquired:
+                log.info("inventory refresh skipped: another inventory sync is running")
+                return None
+            try:
+                inventory = read_inventory(reader)
+                with Session(bind=conn) as session:
+                    result = sync_inventory(session, inventory)
+                    session.commit()
+                return result
+            finally:
+                conn.rollback()
+                conn.execute(select(func.pg_advisory_unlock(SYNC_LOCK_KEY)))
+                conn.commit()
 
     return run
 

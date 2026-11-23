@@ -91,10 +91,10 @@ def fetch_daily(source: JsonSource, url: str = EPSS_DAILY_URL) -> list[dict[str,
     return parse_daily_csv(source.get_bytes(url))
 
 
-def load_epss(session: Session, rows: list[dict[str, Any]]) -> EpssResult:
-    """Upsert score rows for the CVEs we hold. The caller owns the transaction."""
+def load_epss(session: Session, rows: list[dict[str, Any]], known: set[str] | None = None) -> EpssResult:
+    """Upsert score rows for the CVEs we hold (`known`, read here when not given). The caller owns the transaction."""
     result = EpssResult()
-    known = set(session.scalars(select(m.Cve.id)))
+    known = set(session.scalars(select(m.Cve.id))) if known is None else known
     for raw in rows:
         cve_id, epss, percentile = raw.get("cve"), _unit(raw.get("epss")), _unit(raw.get("percentile"))
         try:
