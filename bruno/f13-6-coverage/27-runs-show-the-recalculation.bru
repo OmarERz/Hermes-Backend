@@ -1,0 +1,33 @@
+meta {
+  name: runs-show-the-recalculation
+  type: http
+  seq: 27
+}
+
+get {
+  url: {{baseUrl}}/api/runs?limit=20
+  body: none
+  auth: bearer
+}
+
+auth:bearer {
+  token: {{token}}
+}
+
+assert {
+  res.status: eq 200
+  res.body.items: isArray
+}
+
+tests {
+  test("the formula change of 26 queued a recalculation run", function () {
+    const kinds = res.getBody().items.map((run) => run.kind);
+    expect(kinds).to.include("recalculation");
+  });
+}
+
+docs {
+  The run list shows the recalculation queued by the formula change (F10.5).
+
+  operationId: list_runs
+}

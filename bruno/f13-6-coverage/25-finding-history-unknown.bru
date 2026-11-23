@@ -1,0 +1,27 @@
+meta {
+  name: finding-history-unknown
+  type: http
+  seq: 25
+}
+
+get {
+  url: {{baseUrl}}/api/findings/00000000-0000-0000-0000-000000000000/history
+  body: none
+  auth: bearer
+}
+
+auth:bearer {
+  token: {{token}}
+}
+
+assert {
+  res.status: eq 404
+  res.body.error.code: eq not_found
+}
+
+docs {
+  Only the 404 path: no response of the API carries a finding id yet, so a client cannot reach a real
+  finding's history (reported in F13.6; tests/contract/test_bruno_coverage.py lists it as a known gap).
+
+  operationId: get_finding_history
+}

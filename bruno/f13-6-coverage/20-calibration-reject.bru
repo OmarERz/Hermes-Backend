@@ -1,0 +1,46 @@
+meta {
+  name: calibration-reject
+  type: http
+  seq: 20
+}
+
+post {
+  url: {{baseUrl}}/api/calibration/proposals/{{proposalId}}/reject
+  body: none
+  auth: bearer
+}
+
+auth:bearer {
+  token: {{token}}
+}
+
+script:pre-request {
+  async function api(method, path, token, data) {
+    const response = await bru.sendRequest({
+      method,
+      url: `${bru.getEnvVar("baseUrl")}${path}`,
+      headers: { Authorization: `Bearer ${bru.getEnvVar(token || "token")}`, "Content-Type": "application/json" },
+      data,
+    });
+    return response.data;
+  }
+  const proposals = await api("GET", "/api/calibration/proposals?limit=50");
+  const proposed = proposals.items.filter((p) => p.status === "pending");
+  const pick = proposed[0];
+  if (!pick) {
+    bru.runner.skipRequest();  // proposals come from the weekly calibration job, never from the API
+    return;
+  }
+  bru.setVar("proposalId", pick.id);
+}
+
+assert {
+  res.status: eq 200
+  res.body.status: eq rejected
+}
+
+docs {
+  Rejects the next open proposal (19 applied the first one); skipped when there is none.
+
+  operationId: reject_calibration_proposal
+}

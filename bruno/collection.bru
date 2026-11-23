@@ -1,8 +1,13 @@
 docs {
   Hermes API collection (one folder per feature, D-070).
 
-  Local run: start the stack (docker compose up) and, for authenticated requests, get a test token:
-    TEST_TOKEN=$(make emulator-token ROLE=admin) make bruno
-  An admin token reaches every route (the f00-5-contracts folder includes admin-only ones).
-  In the Bruno app, paste the same token into the `token` secret of the `local` environment.
+  Local run: start the stack (docker compose up), load the demo data (make demo) and get one token per role:
+    TEST_TOKEN=$(make emulator-token ROLE=admin) ANALYST_TOKEN=$(make emulator-token ROLE=analyst) \
+    READER_TOKEN=$(make emulator-token ROLE=reader) make bruno BRUNO_ARGS="--env-var demoMinItems=1"
+  `token` is the admin's (it reaches every route); f13-6-auth checks 401 and 403 with the analyst and reader
+  ones. Every operation of openapi/openapi.json has at least one request: each names it with an `operationId:`
+  line in its docs, and tests/contract/test_bruno_coverage.py fails when one is missing. Requests read the
+  current versions and ids first, so the collection runs again on the same installation. With demo data,
+  demoMinItems=1 makes the data-dependent requests fail instead of skipping.
+  In the Bruno app, paste the tokens into the `token`, `analystToken` and `readerToken` secrets of `local`.
 }

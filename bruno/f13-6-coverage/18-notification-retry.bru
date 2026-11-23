@@ -1,0 +1,45 @@
+meta {
+  name: notification-retry
+  type: http
+  seq: 18
+}
+
+post {
+  url: {{baseUrl}}/api/notifications/events/{{failedEventId}}/retry
+  body: none
+  auth: bearer
+}
+
+auth:bearer {
+  token: {{token}}
+}
+
+script:pre-request {
+  async function api(method, path, token, data) {
+    const response = await bru.sendRequest({
+      method,
+      url: `${bru.getEnvVar("baseUrl")}${path}`,
+      headers: { Authorization: `Bearer ${bru.getEnvVar(token || "token")}`, "Content-Type": "application/json" },
+      data,
+    });
+    return response.data;
+  }
+  const failed = await api("GET", "/api/notifications/events?status=error&limit=1");
+  const event = failed.items[0];
+  if (!event) {
+    bru.runner.skipRequest();  // only a failed event can be retried; a healthy installation has none
+    return;
+  }
+  bru.setVar("failedEventId", event.id);
+}
+
+assert {
+  res.status: eq 202
+  res.body.status: eq pending
+}
+
+docs {
+  Requeues a failed event; skipped when no event is in error (the API cannot create one).
+
+  operationId: retry_notification_event
+}

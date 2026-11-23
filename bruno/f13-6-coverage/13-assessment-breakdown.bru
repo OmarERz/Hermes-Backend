@@ -1,0 +1,48 @@
+meta {
+  name: assessment-breakdown
+  type: http
+  seq: 13
+}
+
+get {
+  url: {{baseUrl}}/api/assessments/{{assessmentId}}/breakdown
+  body: none
+  auth: bearer
+}
+
+auth:bearer {
+  token: {{token}}
+}
+
+script:pre-request {
+  async function api(method, path, token, data) {
+    const response = await bru.sendRequest({
+      method,
+      url: `${bru.getEnvVar("baseUrl")}${path}`,
+      headers: { Authorization: `Bearer ${bru.getEnvVar(token || "token")}`, "Content-Type": "application/json" },
+      data,
+    });
+    return response.data;
+  }
+  const page = await api("GET", "/api/recommendations?limit=1");
+  const first = page.items[0];
+  bru.setVar("assessmentId", first ? first.assessment_id : "");
+  bru.setVar("assetCiId", first && first.asset ? first.asset.ci_id : "");
+  if (!first) {
+    if (Number(bru.getEnvVar("demoMinItems") || 0) > 0) throw new Error("a recommendation expected with demo data");
+    bru.runner.skipRequest();  // an installation without data: nothing to call this route on
+    return;
+  }
+}
+
+assert {
+  res.status: eq 200
+  res.body.assessment_id: eq {{assessmentId}}
+  res.body.final: gte 0
+}
+
+docs {
+  Score waterfall of the assessment (EVA-05).
+
+  operationId: get_assessment_breakdown
+}
