@@ -3,7 +3,11 @@ FROM node:22-slim@sha256:e9f565d32859f0cbfb52125eafe8be39390f24dac302dc3cdf566e8
 WORKDIR /emulator
 # firebase-tools is pinned in package.json and package-lock.json, so Dependabot can track it.
 COPY package.json package-lock.json ./
-RUN npm ci --omit=dev --no-fund --no-audit && npm cache clean --force
+# npm and yarn are only needed to install: the runtime never calls them, and their bundled dependencies carry
+# fixable HIGH findings (Trivy, docs/14 §10.4), so they are removed from the image.
+RUN npm ci --omit=dev --no-fund --no-audit && npm cache clean --force \
+ && rm -rf /usr/local/lib/node_modules/npm /usr/local/lib/node_modules/corepack /opt/yarn-* \
+      /usr/local/bin/npm /usr/local/bin/npx /usr/local/bin/corepack /usr/local/bin/yarn /usr/local/bin/yarnpkg
 COPY firebase.json .firebaserc ./
 RUN chown -R node:node /emulator
 ENV PATH="/emulator/node_modules/.bin:${PATH}"

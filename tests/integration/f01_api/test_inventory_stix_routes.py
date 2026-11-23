@@ -221,3 +221,30 @@ def test_stix_export_refuses_bad_scope_data_with_422(client: TestClient, body: d
     response = client.post("/api/stix/export", json=body)
     assert response.status_code == 422, response.text
     assert response.json()["error"]["code"] == "validation_error"
+
+
+def test_every_stix_export_is_audited(client: TestClient, engine: Engine) -> None:
+    """Who exported what, with which marking (ASVS V16; pendientes F1.5 #50); a refused export leaves no row."""
+    with Session(engine) as session, session.begin():
+        seed(session, "demo")
+    as_role(client, Role.ANALYST)
+    scope = {"scope": "vulnerability", "vulnerability_id": "CVE-2026-10001", "exclude_ultra_classified": True}
+    bundle = client.post("/api/stix/export", json=scope).json()
+    assert client.post("/api/stix/export", json={"scope": "run"}).status_code == 422
+    audit = rows(
+        engine,
+        "SELECT action, entity_type, entity_id, after ->> 'scope', after ->> 'tlp', "
+        "(after ->> 'exclude_ultra_classified')::boolean, (after ->> 'objects')::int FROM audit_log "
+        "WHERE action = 'stix_exported'",
+    )
+    assert audit == [
+        (
+            "stix_exported",
+            "stix_bundle",
+            bundle["id"],
+            "vulnerability",
+            "TLP:AMBER",
+            True,
+            len(bundle["objects"]),
+        )
+    ]

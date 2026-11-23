@@ -103,3 +103,10 @@ def test_the_app_builds_the_ticket_sync_when_itop_is_configured(monkeypatch: pyt
     assert fake.calls == ["123"]
     assert built[0][1].endpoint == "http://localhost:8080/webservices/rest.php?version=1.3"
     assert built[0][2] == "Hermes System"
+
+
+@pytest.mark.parametrize("body", [{}, {"class": "Server"}, {"junk": "x" * 100}])
+def test_the_token_is_checked_before_the_body(body: dict[str, str]) -> None:
+    """A caller without the token learns nothing about the payload: 401, never a validation 422 (pendientes #49)."""
+    assert client(sync=FakeSync()).post("/api/itop/webhook", json=body).status_code == 401
+    assert client(token=None).post("/api/itop/webhook", json=body).status_code == 503

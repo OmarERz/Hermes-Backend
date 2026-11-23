@@ -15,7 +15,7 @@ import logging
 import secrets
 from typing import Annotated, Literal
 
-from fastapi import APIRouter, BackgroundTasks, Header, status
+from fastapi import APIRouter, BackgroundTasks, Depends, Header, status
 from pydantic import BaseModel, ConfigDict, Field, SecretStr
 
 from api.errors import ApiError, ErrorResponse
@@ -49,6 +49,17 @@ def _resync(sync: TicketStateSync, itop_id: str) -> None:
 def build_itop_webhook_router(token: SecretStr | None, sync: TicketStateSync | None) -> APIRouter:
     router = APIRouter(prefix="/api/itop", tags=["itop"])
 
+    def require_webhook_token(authorization: Annotated[str | None, Header()] = None) -> TicketStateSync:
+        """Runs before the body is read, so a caller without the token gets 401/503, never a validation 422."""
+        if token is None or sync is None:
+            raise ApiError(503, "webhook_disabled", "El webhook de iTop no está configurado.")
+        expected = f"Bearer {token.get_secret_value()}".encode()
+        if authorization is None or not secrets.compare_digest(authorization.encode(), expected):
+            raise ApiError(401, "unauthorized", "Se requiere autenticación válida.")
+        return sync
+
+    webhook_guard = Depends(require_webhook_token)  # resolved before the body (annotations here are strings)
+
     @router.post(
         "/webhook",
         status_code=status.HTTP_202_ACCEPTED,
@@ -60,15 +71,10 @@ def build_itop_webhook_router(token: SecretStr | None, sync: TicketStateSync | N
     def itop_webhook(
         call: ItopWebhookCall,
         background: BackgroundTasks,
-        authorization: Annotated[str | None, Header()] = None,
+        ready: TicketStateSync = webhook_guard,
     ) -> WebhookAccepted:
         """Doorbell from iTop: re-read the ticket in the background (ARQ-02). Not for the frontend."""
-        if token is None or sync is None:
-            raise ApiError(503, "webhook_disabled", "El webhook de iTop no está configurado.")
-        expected = f"Bearer {token.get_secret_value()}".encode()
-        if authorization is None or not secrets.compare_digest(authorization.encode(), expected):
-            raise ApiError(401, "unauthorized", "Se requiere autenticación válida.")
-        background.add_task(_resync, sync, call.id)
+        background.add_task(_resync, ready, call.id)
         return WebhookAccepted()
 
     return router
