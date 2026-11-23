@@ -283,8 +283,11 @@ class _Pass:
         plan = self.plan(ticket)
         context = load_context(self.session, ticket, self.assessment)
         current = context.current_cis
-        if not (plan.created or plan.added or plan.moved_out or plan.decommissioned) and self._already_decided(ticket):
-            return  # this assessment was already applied to this ticket: nothing is written twice
+        unchanged = not (plan.created or plan.added or plan.moved_out or plan.decommissioned)
+        if unchanged and self._already_decided(ticket) and not self._unreported_fixes(ticket):
+            # Already applied to this ticket with this assessment; only new fixes (a later scan with no new
+            # assessment, e.g. every CI fixed) are worth another pass.
+            return
         history = score_history(self.session, ticket, linked_asset_ids(self.session, ticket.id))
         previous = self._previous_score(ticket)
         if plan.created:
@@ -371,20 +374,24 @@ class _Pass:
         notes += [f"El CI {f.asset_name} pasó al equipo {team}." for f, team in plan.moved_out]
         notes += [f"El CI {f.asset_name} se dio de baja en iTop." for f in plan.decommissioned]
 
-    def _fixes(
-        self, ticket: m.Ticket, context: content.TicketContext, notes: list[str], events: list[TicketEventType]
-    ) -> None:
+    def _unreported_fixes(self, ticket: m.Ticket) -> list[_Finding]:
+        """Linked findings fixed after the last fix comment of the ticket (or its creation)."""
         since = self.session.scalar(_LAST_FIX_REPORT, {"ticket_id": ticket.id}) or ticket.created_at
         linked = self.session.scalars(
             select(m.TicketFinding.finding_id).where(
                 m.TicketFinding.ticket_id == ticket.id, m.TicketFinding.removed_at.is_(None)
             )
         ).all()
-        fixed_now = [
+        return [
             f
             for fid in linked
             if (f := self.findings.get(fid)) is not None and f.status == "fixed" and f.fixed_at and f.fixed_at > since
         ]
+
+    def _fixes(
+        self, ticket: m.Ticket, context: content.TicketContext, notes: list[str], events: list[TicketEventType]
+    ) -> None:
+        fixed_now = self._unreported_fixes(ticket)
         if not fixed_now:
             return
         total, fixed = len(context.cis), sum(1 for ci in context.cis if ci.fixed)
