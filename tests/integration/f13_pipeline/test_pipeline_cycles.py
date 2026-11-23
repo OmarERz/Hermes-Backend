@@ -14,7 +14,7 @@ from sqlalchemy.orm import Session, sessionmaker
 
 from core.correlation.engine import Placed, StoryOutcome
 from core.db import models as m
-from core.pipeline.cycles import NewsCycleOutput, Pipeline, ScanCycleOutput, Steps
+from core.pipeline.cycles import CVE_ANALYST_OFF, NewsCycleOutput, Pipeline, ScanCycleOutput, Steps
 from core.pipeline.judging import PipelineJudge
 from core.pipeline.locks import cycle_lock
 from doubles.llm import tool_call_completion
@@ -222,7 +222,7 @@ def test_the_scan_cycle_runs_the_cve_analyst_before_scoring(factory: sessionmake
     steps.correlate_groups = lambda _s, _g, _n: order.append("correlate") or []
     report = Pipeline(factory, steps).scan_cycle()
     assert order == ["correlate", "cves"]
-    assert "CVE analyst is not wired yet (F3.3)" not in report.notes
+    assert CVE_ANALYST_OFF not in report.notes
 
     def broken(_session: Session) -> None:
         raise RuntimeError("analyst down")
@@ -230,7 +230,7 @@ def test_the_scan_cycle_runs_the_cve_analyst_before_scoring(factory: sessionmake
     steps.analyze_cves = broken
     assert Pipeline(factory, steps).scan_cycle().failures == 1
     steps.analyze_cves = None
-    assert "CVE analyst is not wired yet (F3.3)" in Pipeline(factory, steps).scan_cycle().notes
+    assert CVE_ANALYST_OFF in Pipeline(factory, steps).scan_cycle().notes
 
 
 def test_a_story_analysed_in_a_failed_cycle_is_correlated_by_the_next_one(factory: sessionmaker[Session]) -> None:
@@ -263,3 +263,20 @@ def test_a_story_analysed_in_a_failed_cycle_is_correlated_by_the_next_one(factor
     steps.correlate_news = correlate
     Pipeline(factory, steps, clock=lambda: NOW).news_cycle()
     assert seen == [[missed]]
+
+
+def test_the_nightly_cycle_logs_the_counts_of_its_recalculation(factory: sessionmaker[Session]) -> None:
+    """The cycle report carries the groups and stored assessments of the pass, not zeros (regression 23 nov)."""
+
+    def no_news(_session: Session, _reason: str) -> NewsCycleOutput:
+        return NewsCycleOutput(None, [])
+
+    @dataclass(frozen=True)
+    class Counts:
+        groups: int
+        changed: int
+
+    report = Pipeline(factory, Steps(news=no_news, recalculate=lambda _s: Counts(groups=3, changed=2))).nightly_cycle()
+    assert (report.ran, report.groups, report.assessments) == (True, 3, 2)
+    unknown = Pipeline(factory, Steps(news=no_news, recalculate=lambda _s: None)).nightly_cycle()
+    assert (unknown.groups, unknown.assessments) == (0, 0)
