@@ -15,6 +15,7 @@ from typing import Any
 from sqlalchemy import select
 from sqlalchemy.orm import Session, sessionmaker
 
+from core.analysts.cve import CveOptions, analyze_pending_cves, web_advisory_provider
 from core.analysts.news import NewsResult, analyze_pending
 from core.correlation.packages import build_dismissal_package
 from core.db import models as m
@@ -130,5 +131,16 @@ def inventory_refresh(factory: sessionmaker[Session], reader: ItopReader) -> Cal
     def run() -> object:
         with factory() as session, session.begin():
             return sync_from_itop(session, reader)
+
+    return run
+
+
+def cve_step(analyst: LlmClient, fetcher: Fetcher) -> Callable[[Session], object]:
+    """F-04 step 8 (F3.3): the CVE analyst on the pending CVEs of active groups, reading vendor advisories only from
+    the allowed domains (`ADVISORY_DOMAINS`, default list in `core.analysts.cve`)."""
+    options = CveOptions(advisory=web_advisory_provider(fetcher))
+
+    def run(session: Session) -> object:
+        return analyze_pending_cves(session, analyst, options)
 
     return run

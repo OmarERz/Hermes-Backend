@@ -33,6 +33,7 @@ def test_without_the_embeddings_extra_the_news_cycle_is_off(monkeypatch: pytest.
 def test_without_keys_there_is_no_judge_nor_tickets_but_scoring_runs() -> None:
     steps = build_pipeline(SETTINGS, MagicMock()).steps
     assert steps.refresh is not None
+    assert steps.analyze_cves is None  # no analyst without the DeepSeek key
     assert (steps.judge_caller, steps.tickets) == (None, None)
     assert steps.evaluate is engine_evaluate
     assert steps.recalculate is not None
@@ -52,6 +53,7 @@ def test_with_keys_and_identity_the_judge_and_tickets_are_wired() -> None:
     )
     steps = build_pipeline(settings, MagicMock()).steps
     assert steps.judge_caller is not None
+    assert steps.analyze_cves is not None
     assert steps.tickets is not None
 
 

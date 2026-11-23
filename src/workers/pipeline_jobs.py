@@ -18,6 +18,7 @@ from core.itop.client import reader_from_settings
 from core.llm import LlmClient
 from core.pipeline.cycles import Pipeline, Steps
 from core.pipeline.wiring import (
+    cve_step,
     engine_dismissal_package,
     engine_evaluate,
     engine_recalculate,
@@ -93,8 +94,10 @@ def build_pipeline(settings: Settings, session_factory: sessionmaker[Session]) -
     """The pipeline with the production services (F1 to F6, scoring of F4.3, tickets of F5)."""
     reader = reader_from_settings(settings) if settings.itop_url and settings.itop_token else None
     tickets = _tickets(settings)
+    analyst = _llm(settings, "analysts")
     steps = Steps(
-        news=news_step(Fetcher(), SentenceTransformerEmbedder(), _llm(settings, "analysts")) if _embeddings() else None,
+        news=news_step(Fetcher(), SentenceTransformerEmbedder(), analyst) if _embeddings() else None,
+        analyze_cves=cve_step(analyst, Fetcher()) if analyst is not None else None,
         refresh=refresh_vulndata(nvd_client(settings.nvd_api_key), JsonSource()),
         scan=scan_step(session_factory, reader),
         evaluate=engine_evaluate,
@@ -102,8 +105,6 @@ def build_pipeline(settings: Settings, session_factory: sessionmaker[Session]) -
         dismissal_package=engine_dismissal_package,
         judge_caller=_llm(settings, "judge"),
         tickets=tickets,
-        # TODO(F3.3): analyze_cves=lambda s: analyze_pending_cves(s, analyst, CveOptions(...web_advisory_provider(
-        # Fetcher()) from ADVISORY_DOMAINS)) once PR #39 is in develop; until then the scan cycle notes it.
     )
     return Pipeline(session_factory, steps)
 

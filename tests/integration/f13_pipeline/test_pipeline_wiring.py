@@ -13,7 +13,7 @@ from core.analysts.news import NewsResult
 from core.db import models as m
 from core.ingestion.fetcher import Fetcher
 from core.ingestion.pipeline import PipelineResult
-from core.pipeline.wiring import inventory_refresh, news_step, refresh_vulndata, scan_step
+from core.pipeline.wiring import cve_step, inventory_refresh, news_step, refresh_vulndata, scan_step
 from core.scan.engine import ScanResult
 from doubles.web import FakeWeb
 
@@ -82,3 +82,14 @@ def test_the_inventory_refresh_syncs_from_itop(factory: sessionmaker[Session], m
     reader = object()
     assert inventory_refresh(factory, reader)() == "synced"
     assert seen == [reader]
+
+
+def test_the_cve_step_runs_the_analyst_with_the_advisory_provider(monkeypatch: pytest.MonkeyPatch) -> None:
+    seen: list[Any] = []
+    monkeypatch.setattr(
+        "core.pipeline.wiring.analyze_pending_cves",
+        lambda session, client, options: seen.append((session, client, options.advisory is not None)) or ["done"],
+    )
+    analyst, session = object(), object()
+    assert cve_step(analyst, Fetcher())(session) == ["done"]
+    assert seen == [(session, analyst, True)]
