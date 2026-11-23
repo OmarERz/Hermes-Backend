@@ -73,9 +73,9 @@ def test_a_lower_role_gets_403(client: TestClient) -> None:
     assert response.status_code == 403
     assert response.json()["error"]["code"] == "forbidden"
     as_role(Role.ANALYST)
-    assert client.get("/api/audit").status_code == 403
+    assert client.get("/api/connections/status").status_code == 403
     as_role(Role.ADMIN)
-    assert client.get("/api/audit").status_code == 200
+    assert client.get("/api/connections/status").status_code == 200
 
 
 GET_SAMPLES = [
@@ -84,8 +84,6 @@ GET_SAMPLES = [
     "/api/metrics",
     "/api/notifications/events",
     "/api/connections/status",
-    "/api/setup/status",
-    "/api/audit",
 ]
 
 
@@ -179,8 +177,6 @@ def test_runs_stix_calibration_and_notifications(client: TestClient) -> None:
     assert client.post("/api/notifications/events/evt-1/retry").json()["status"] == "pending"
     assert client.post("/api/notifications/events/zzz/retry").status_code == 404
     assert client.post("/api/connections/test", json={"names": ["itop"]}).json()[0]["name"] == "itop"
-    assert client.put("/api/setup/steps/3", json={"done": True}).json()["done"] is True
-    assert client.put("/api/setup/steps/99", json={}).status_code == 404
 
 
 def test_decided_proposal_and_non_error_event_conflict() -> None:

@@ -419,6 +419,11 @@ class ConnectionStatus(_Model):
     ok: bool
     latency_ms: int | None
     missing_variable: str | None = Field(description="Name of the missing variable; never a key, not even partial")
+    message: str | None = Field(
+        default=None, description="Generic status in Spanish (e.g. 'Llave rechazada'); never an error body (SEG-23)"
+    )
+    checked_at: DateTimeString | None = Field(default=None, description="When this result was checked (UTC)")
+    last_ok_at: DateTimeString | None = Field(default=None, description="Last successful check since the API started")
 
 
 class ConnectionTestRequest(_Model):
@@ -435,6 +440,18 @@ class SetupStep(_Model):
 class SetupStepUpdate(_Model):
     done: bool = True
     skipped: bool = False
+
+
+class AuditFilters(_Model):
+    """Filters of the audit trail; every one optional."""
+
+    # The same query string also carries `cursor` and `limit`, read by other parameters.
+    model_config = ConfigDict(extra="ignore", strict=False)  # query strings need coercion
+
+    actor: str | None = Field(default=None, max_length=100, description="E-mail or display name; 'sistema' for none")
+    action: str | None = Field(default=None, max_length=100, description="Exact action, e.g. 'source.enable'")
+    date_from: DateTimeString | None = Field(default=None, description="On or after (RFC 3339)")
+    date_to: DateTimeString | None = Field(default=None, description="On or before (RFC 3339)")
 
 
 class AuditEntry(_Model):
