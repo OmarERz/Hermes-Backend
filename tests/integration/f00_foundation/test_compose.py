@@ -17,11 +17,14 @@ from pathlib import Path
 import httpx
 import pytest
 
+from harness.isolation import free_port, run_name
+
 pytestmark = [pytest.mark.e2e, pytest.mark.slow]
 
 ROOT = Path(__file__).resolve().parents[3]
-PROJECT = "hermes-e2e"
-PORTS = {"API_PORT": "18000", "AUTH_EMULATOR_PORT": "19099", "DB_PORT": "15432"}
+# Unique per run: other worktrees may run this weekly suite on the same Docker host (tests/harness/isolation.py).
+PROJECT = run_name("hermes-e2e")
+PORTS = {name: str(free_port()) for name in ("API_PORT", "AUTH_EMULATOR_PORT", "DB_PORT")}
 
 
 def compose(env: dict[str, str], *args: str, timeout: int = 900) -> subprocess.CompletedProcess[str]:
