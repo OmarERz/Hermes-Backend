@@ -27,7 +27,7 @@ from collections.abc import Callable, Iterator
 from contextlib import contextmanager
 from pathlib import Path
 from types import FrameType
-from typing import Final
+from typing import Any, Final
 
 import docker
 from docker.errors import APIError, DockerException, NotFound
@@ -38,6 +38,7 @@ LABEL: Final = "dev.hermes.test"
 HOST: Final = socket.gethostname()
 LABELS: Final = {LABEL: "1", f"{LABEL}.run": RUN_ID, f"{LABEL}.pid": str(os.getpid()), f"{LABEL}.host": HOST}
 COMPOSE_PROJECT: Final = "com.docker.compose.project"
+PORT_RANGE: Final = (20000, 39999)  # published test ports: below the 49152+ ranges Windows may reserve (WSL)
 # A Compose project of the e2e tests: run_name("hermes-...e2e") = prefix-<repo hash>-<pid>-<random>
 E2E_PROJECT: Final = re.compile(r"^hermes-[a-z0-9-]*e2e-[0-9a-f]{8}-(\d+)-[0-9a-f]{6}$")
 
@@ -47,11 +48,21 @@ def run_name(prefix: str) -> str:
     return f"{prefix}-{RUN_ID}".lower()
 
 
-def free_port() -> int:
-    """A local TCP port that was free a moment ago, for a Compose stack that publishes ports."""
-    with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as probe:
-        probe.bind(("127.0.0.1", 0))
-        return int(probe.getsockname()[1])
+def free_port(attempts: int = 200) -> int:
+    """A local TCP port that was free a moment ago, for a Compose stack that publishes ports.
+
+    Drawn from `PORT_RANGE`, never from the kernel's ephemeral range: Docker Desktop on WSL cannot publish the
+    ports Windows reserves above 49152, which `bind(0)` hands out. Each candidate is bound once to check it.
+    """
+    for _ in range(attempts):
+        port = secrets.randbelow(PORT_RANGE[1] - PORT_RANGE[0] + 1) + PORT_RANGE[0]
+        with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as probe:
+            try:
+                probe.bind(("127.0.0.1", port))
+            except OSError:
+                continue  # taken: try another one
+            return port
+    raise RuntimeError(f"no free port in {PORT_RANGE} after {attempts} attempts")
 
 
 @contextmanager
@@ -84,44 +95,64 @@ def _alive(pid: str) -> bool:
 
 
 def sweep_dead_runs(client: docker.DockerClient, alive: Callable[[str], bool] = _alive) -> list[str]:
-    """Remove the containers and tags left by test runs of this host whose process is gone. Returns what it removed."""
+    """Remove the containers and tags left by test runs of this host whose process is gone. Returns what it removed.
+
+    Only the list endpoints are used (no per-item inspect), so a container or image another run removes in the
+    meantime is simply gone, never an error.
+    """
     removed: list[str] = []
     owned = {"label": [f"{LABEL}=1", f"{LABEL}.host={HOST}"]}
-    for container in client.containers.list(all=True, filters=owned):
-        if not alive(container.labels.get(f"{LABEL}.pid", "")):
-            with contextlib.suppress(NotFound, APIError):
-                container.remove(force=True)
-                removed.append(container.name)
-    for image in client.images.list(filters=owned):
-        if not alive(image.labels.get(f"{LABEL}.pid", "")):
-            for tag in image.tags:
+    for container in client.api.containers(all=True, filters=owned):
+        if not alive((container.get("Labels") or {}).get(f"{LABEL}.pid", "")) and _remove_container(client, container):
+            removed.append(_name(container))
+    for image in client.api.images(filters=owned):
+        if not alive((image.get("Labels") or {}).get(f"{LABEL}.pid", "")):
+            for tag in _tags(image):
                 untag(client, tag)
                 removed.append(tag)
     removed += _sweep_dead_stacks(client, alive)
     return removed
 
 
+def _name(container: dict[str, Any]) -> str:
+    names = container.get("Names") or [container["Id"]]
+    return str(names[0]).lstrip("/")
+
+
+def _tags(image: dict[str, Any]) -> list[str]:
+    """Real tags only: older daemons list an untagged image as `<none>:<none>`."""
+    return [tag for tag in image.get("RepoTags") or [] if tag != "<none>:<none>"]
+
+
+def _remove_container(client: docker.DockerClient, container: dict[str, Any]) -> bool:
+    """True if this call removed it; gone already, or in the way of another removal, is False."""
+    try:
+        client.api.remove_container(container["Id"], force=True)
+    except (NotFound, APIError):
+        return False
+    return True
+
+
 def _sweep_dead_stacks(client: docker.DockerClient, alive: Callable[[str], bool]) -> list[str]:
     """The Compose stacks of e2e runs whose process is gone: containers, networks, volumes and built images."""
     dead: set[str] = set()
-    for container in client.containers.list(all=True, filters={"label": COMPOSE_PROJECT}):
-        match = E2E_PROJECT.match(container.labels.get(COMPOSE_PROJECT, ""))
+    for container in client.api.containers(all=True, filters={"label": COMPOSE_PROJECT}):
+        match = E2E_PROJECT.match((container.get("Labels") or {}).get(COMPOSE_PROJECT, ""))
         if match and not alive(match.group(1)):
             dead.add(match.group(0))
     removed: list[str] = []
     for project in sorted(dead):
         scope = {"label": f"{COMPOSE_PROJECT}={project}"}
-        for container in client.containers.list(all=True, filters=scope):
+        for container in client.api.containers(all=True, filters=scope):
+            _remove_container(client, container)
+        for network in client.api.networks(filters=scope):
             with contextlib.suppress(NotFound, APIError):
-                container.remove(force=True)
-        for network in client.networks.list(filters=scope):
+                client.api.remove_network(network["Id"])
+        for volume in (client.api.volumes(filters=scope) or {}).get("Volumes") or []:
             with contextlib.suppress(NotFound, APIError):
-                network.remove()
-        for volume in client.volumes.list(filters=scope):
-            with contextlib.suppress(NotFound, APIError):
-                volume.remove(force=True)
-        for image in client.images.list(name=f"{project}-*"):
-            for tag in image.tags:
+                client.api.remove_volume(volume["Name"], force=True)
+        for image in client.api.images(name=f"{project}-*"):
+            for tag in _tags(image):
                 untag(client, tag)
         removed.append(project)
     return removed

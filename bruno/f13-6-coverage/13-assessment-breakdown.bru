@@ -1,0 +1,34 @@
+meta {
+  name: assessment-breakdown
+  type: http
+  seq: 13
+}
+
+get {
+  url: {{baseUrl}}/api/assessments/{{assessmentId}}/breakdown
+  body: none
+  auth: bearer
+}
+
+auth:bearer {
+  token: {{token}}
+}
+
+script:pre-request {
+  const hermes = require("./lib/hermes");
+  const api = (method, path, token, data) => hermes.api(bru, method, path, token, data);
+  const first = await hermes.recommendation(bru);
+  if (!hermes.needData(bru, first, "a recommendation")) return;
+}
+
+assert {
+  res.status: eq 200
+  res.body.assessment_id: eq {{assessmentId}}
+  res.body.final: gte 0
+}
+
+docs {
+  Score waterfall of the assessment (EVA-05).
+
+  operationId: get_assessment_breakdown
+}

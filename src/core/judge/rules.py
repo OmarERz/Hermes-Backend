@@ -30,7 +30,7 @@ MAX_ABS_POINTS = 100  # L1 has no cap, but the final is limited to 0-100: larger
 CORROBORATION_ABOVE = 20  # SEG-12: more than 20 points in one reason needs 2 independent sources
 RECENT_DAYS = 30  # mass_exploitation: evidence from the last 30 days
 RANSOMWARE_NEWS_MAX = 10  # ransomware only reported by news: at most +10
-CVE_ID = re.compile(r"CVE-\d{4}-\d{4,}")
+CVE_ID = re.compile(r"CVE-[0-9]{4}-[0-9]{4,}(?!\d)")  # `(?!\d)`: not the prefix of a longer number
 
 
 @dataclass(frozen=True)

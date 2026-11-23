@@ -29,6 +29,7 @@ from sqlalchemy.orm import Session, sessionmaker
 from core.db import models as m
 from core.itop import oql
 from core.itop.client import ItopError, ItopReader, ItopUnavailableError
+from core.textnum import ascii_int
 
 log = logging.getLogger("core.tickets.sync")
 
@@ -111,7 +112,7 @@ def last_urgency_change(reader: ItopReader, itop_ticket_id: str) -> UrgencyChang
     dated = [(at, obj) for obj in changes if (at := _parse_itop_date(obj.text("date"))) is not None]
     if not dated:
         return None
-    at, newest = max(dated, key=lambda pair: (pair[0], int(pair[1].key) if pair[1].key.isdigit() else 0))
+    at, newest = max(dated, key=lambda pair: (pair[0], ascii_int(pair[1].key) or 0))
     return UrgencyChange(at=at, by=newest.text("userinfo") or "")
 
 
@@ -178,7 +179,7 @@ class TicketStateSync:
             return
         remote = found[0]
         urgency_text = remote.text("urgency")
-        urgency = int(urgency_text) if urgency_text and urgency_text.isdigit() else None
+        urgency = ascii_int(urgency_text)
         change: UrgencyChange | None = None
         with self.session_factory() as session:
             ticket = session.get_one(m.Ticket, ticket_id)

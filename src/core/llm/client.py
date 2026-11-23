@@ -27,6 +27,7 @@ from core.config import Settings
 from core.llm.errors import LlmRequestError, LlmResponseError, LlmTransportError, ToolArgumentsError
 from core.llm.tools import ToolDefinition
 from core.llm.usage import Usage
+from core.textnum import retry_after_seconds
 
 logger = logging.getLogger(__name__)
 
@@ -218,7 +219,4 @@ def _usage(completion: Any) -> Usage:
 def _retry_after(exc: Exception) -> float | None:
     response = getattr(exc, "response", None)
     value = response.headers.get("retry-after") if response is not None else None
-    try:
-        return max(0.0, float(str(value))) if value is not None else None
-    except ValueError:
-        return None  # HTTP-date form: fall back to the computed backoff
+    return retry_after_seconds(None if value is None else str(value))  # HTTP-date form: the computed backoff

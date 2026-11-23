@@ -1,0 +1,38 @@
+meta {
+  name: formula-restore
+  type: http
+  seq: 28
+}
+
+put {
+  url: {{baseUrl}}/api/config
+  body: json
+  auth: bearer
+}
+
+auth:bearer {
+  token: {{token}}
+}
+
+script:pre-request {
+  const hermes = require("./lib/hermes");
+  const api = (method, path, token, data) => hermes.api(bru, method, path, token, data);
+  const current = await api("GET", "/api/config");
+  bru.setVar("configVersion", current.version);
+  bru.setVar("nextConfigVersion", current.version + 1);
+}
+
+body:json {
+  {"expected_version": {{configVersion}}, "changes": {"formula.kev_exposed_floor": "{{kevFloorBefore}}"}}
+}
+
+assert {
+  res.status: eq 200
+  res.body.version: eq {{nextConfigVersion}}
+}
+
+docs {
+  Puts back the KEV floor 26 changed, so a run leaves the formula as it found it (one more recalculation).
+
+  operationId: update_config
+}

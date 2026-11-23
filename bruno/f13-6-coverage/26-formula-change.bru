@@ -1,0 +1,41 @@
+meta {
+  name: formula-change
+  type: http
+  seq: 26
+}
+
+put {
+  url: {{baseUrl}}/api/config
+  body: json
+  auth: bearer
+}
+
+auth:bearer {
+  token: {{token}}
+}
+
+script:pre-request {
+  const hermes = require("./lib/hermes");
+  const api = (method, path, token, data) => hermes.api(bru, method, path, token, data);
+  const current = await api("GET", "/api/config");
+  bru.setVar("configVersion", current.version);
+  bru.setVar("nextConfigVersion", current.version + 1);
+  // A real formula change (an unchanged value creates no version): alternate the KEV floor between 90 and 91.
+  bru.setVar("kevFloorBefore", String(current.values["formula.kev_exposed_floor"]));
+  bru.setVar("kevFloor", bru.getVar("kevFloorBefore") === "90" ? "91" : "90");
+}
+
+body:json {
+  {"expected_version": {{configVersion}}, "changes": {"formula.kev_exposed_floor": "{{kevFloor}}"}}
+}
+
+assert {
+  res.status: eq 200
+  res.body.version: eq {{nextConfigVersion}}
+}
+
+docs {
+  Saving a formula change makes a new version and queues a recalculation run (FRO-08); 27 checks it.
+
+  operationId: update_config
+}

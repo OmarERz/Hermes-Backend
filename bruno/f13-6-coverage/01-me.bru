@@ -1,0 +1,27 @@
+meta {
+  name: me
+  type: http
+  seq: 1
+}
+
+get {
+  url: {{baseUrl}}/api/me
+  body: none
+  auth: bearer
+}
+
+auth:bearer {
+  token: {{token}}
+}
+
+assert {
+  res.status: eq 200
+  res.body.role: eq admin
+  res.body.uid: isString
+}
+
+docs {
+  The signed-in user and the effective role (the lower of the token claim and the stored copy).
+
+  operationId: get_current_user
+}

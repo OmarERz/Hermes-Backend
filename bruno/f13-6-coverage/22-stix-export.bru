@@ -1,0 +1,38 @@
+meta {
+  name: stix-export
+  type: http
+  seq: 22
+}
+
+post {
+  url: {{baseUrl}}/api/stix/export
+  body: json
+  auth: bearer
+}
+
+auth:bearer {
+  token: {{token}}
+}
+
+script:pre-request {
+  const hermes = require("./lib/hermes");
+  const api = (method, path, token, data) => hermes.api(bru, method, path, token, data);
+  const group = await hermes.vulnerabilityGroup(bru);
+  if (!hermes.needData(bru, group, "a vulnerability group")) return;
+}
+
+body:json {
+  {"scope": "vulnerability", "vulnerability_id": "{{groupId}}", "exclude_ultra_classified": true}
+}
+
+assert {
+  res.status: eq 200
+  res.body.type: eq bundle
+  res.body.objects: isArray
+}
+
+docs {
+  STIX 2.1 bundle of one vulnerability group (STX-01), ultra-classified CIs left out.
+
+  operationId: export_stix
+}

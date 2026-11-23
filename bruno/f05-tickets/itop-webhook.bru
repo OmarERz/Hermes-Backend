@@ -18,11 +18,19 @@ body:json {
   {"class": "UserRequest", "id": "1", "ref": "R-000001"}
 }
 
-assert {
-  res.status: in 202,503
+tests {
+  test("202 with the webhook token configured, 503 without it", function () {
+    if (bru.getEnvVar("itopWebhookToken")) {
+      expect(res.status).to.equal(202);
+    } else {
+      expect(res.status).to.equal(503);
+    }
+  });
 }
 
 docs {
   With the webhook token configured (set the secret variable itopWebhookToken) the API answers 202 and re-reads
   ticket 1 from iTop in the background; 503 when ITOP_WEBHOOK_TOKEN or iTop is not configured.
+
+  operationId: receive_itop_webhook
 }

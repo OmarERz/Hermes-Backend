@@ -77,7 +77,7 @@ Los requisitos de cada pantalla (FRO-xx) están en la especificación del produc
 | Pendientes de inventario y mapeo CPE | `GET /api/pending/inventory`, `GET /api/cpe/candidates?q=`, `PUT /api/mappings/{software}` | reader ver; analyst buscar y mapear |
 | Vistas agrupadas (por vulnerabilidad, criticidad, activo) | `GET /api/vulnerabilities?view=vulnerability\|criticality\|asset` + filtros | reader |
 | Detalle de vulnerabilidad / de activo | `GET /api/vulnerabilities/{group_id}`, `GET /api/assets/{ci_id}` | reader |
-| Historial de puntuación | `GET /api/findings/{id}/history` | reader |
+| Historial de puntuación | `GET /api/findings/{id}/history`, con el `finding_id` de cada activo de `GET /api/vulnerabilities/{group_id}` | reader |
 | Comparación crudo vs. procesado y cascada del Δ | `GET /api/comparison/summary`, `GET /api/comparison/table`, `GET /api/assessments/{id}/breakdown` | reader |
 | Historial de recomendaciones y feedback | `GET /api/recommendations`, `GET /api/recommendations/{assessment_id}`, `GET /api/recommendations/{id}/feedback`, `POST /api/feedback` | reader ver; analyst dar feedback |
 | Tickets y alertas | `GET /api/tickets`, `GET /api/alerts` | reader |
@@ -152,6 +152,10 @@ Todo error responde con:
   `ticket_itop_id` (el ticket que el usuario tiene a la vista) para que «no sugerir más» y «falso positivo» solo
   afecten a ese ticket; sin él se aplican a todos los tickets de la evaluación. Errores: 404 si la evaluación no
   existe, 403 si el usuario no es analista o admin activo, 422 si el ticket no es de esa evaluación.
+- **Historial de un hallazgo:** abre el detalle `GET /api/vulnerabilities/{group_id}`; cada activo trae su
+  `finding_id`, que es el `{id}` de `GET /api/findings/{id}/history` (puntaje de ese CI en cada evaluación del
+  grupo, del más antiguo al más reciente). En las recomendaciones `asset.finding_id` llega nulo: su CI puede ser
+  el de una alerta, sin hallazgo de escaneo.
 - **Niveles por nombre:** la comparación muestra el nivel CVSS (Crítica/Alta/Media/Baja) contra la urgencia
   final por su nombre, cada uno con su escala; no compares números entre escalas.
 - **Cascada del Δ:** `GET /api/assessments/{id}/breakdown` devuelve las barras (factores, juez, piso, límites,

@@ -23,6 +23,7 @@ from core.judge.mode2 import (
     relation_identity,
     relationship_parts,
     review_candidate,
+    still_holds,
 )
 from core.judge.package import ReviewPackage
 from core.judge.session import Failure, JudgeEnvironment, ReviewStatus
@@ -543,3 +544,19 @@ def test_the_blind_mode2_review_counts_the_cost_of_the_first_one() -> None:
     double.use("case")
     review_candidate(double_llm_client(double), package(content), env(daily_budget=Recording(), price=price), ctx())
     assert seen == [Decimal(0), Decimal("0.015000")]
+
+
+def test_an_accepted_alert_still_holds_only_while_its_inventory_facts_do() -> None:
+    """F12.2 #105: re-checked when stored, against the inventory and refutations of that moment."""
+    inventory = FakeInventory({NGINX_ASSET: [(NGINX_SOFTWARE, "Nginx"), (OPENSSL_SOFTWARE, "OpenSSL")]})
+    decision, _rule, _reason = check_alert(alert_args(ci_id="CI-7"), package(), ctx(inventory=inventory))
+    assert decision is not None
+    assert decision.installed_software_id == OPENSSL_SOFTWARE
+    assert still_holds(decision, ctx(inventory=inventory))
+    assert not still_holds(decision, ctx(inventory=EmptyInventory()))  # the CI was retired or left the inventory
+    removed = FakeInventory({NGINX_ASSET: [(NGINX_SOFTWARE, "Nginx")]})
+    assert not still_holds(decision, ctx(inventory=removed))  # the linked installation was removed
+    assert not still_holds(decision, ctx(inventory=inventory, refuted=lambda _kind, _sub, _obj: True))
+    without_ci, _rule, _reason = check_alert(alert_args(), package(), ctx())
+    assert without_ci is not None
+    assert still_holds(without_ci, ctx(inventory=EmptyInventory()))  # nothing in the inventory to re-check

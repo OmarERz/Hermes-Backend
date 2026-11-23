@@ -109,6 +109,7 @@ class AffectedAsset:
     classification_at_evaluation: str
     finding_status: str
     score: int
+    finding_id: uuid.UUID | None = None  # the scan finding of this CI in the group (GET /api/findings/{id}/history)
 
 
 @dataclass(frozen=True)
@@ -264,6 +265,7 @@ def group_detail(
             classification_at_evaluation=r.snap_confidentiality,
             finding_status=r.status,
             score=r.final,
+            finding_id=r.finding_id,
         )
         for r in ordered
     ]

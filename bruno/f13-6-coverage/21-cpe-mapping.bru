@@ -1,0 +1,43 @@
+meta {
+  name: cpe-mapping
+  type: http
+  seq: 21
+}
+
+put {
+  url: {{baseUrl}}/api/mappings/{{softwareId}}
+  body: json
+  auth: bearer
+}
+
+auth:bearer {
+  token: {{token}}
+}
+
+script:pre-request {
+  if (!require("./lib/hermes").optIn(bru)) return;
+  const hermes = require("./lib/hermes");
+  const api = (method, path, token, data) => hermes.api(bru, method, path, token, data);
+  const pending = await api("GET", "/api/pending/inventory");
+  const software = pending.software_without_cpe[0];
+  if (!software) {
+    bru.runner.skipRequest();  // every product is mapped: no route lists mapped software to edit
+    return;
+  }
+  bru.setVar("softwareId", software.ci_id);  // for software the item id is the product id
+}
+
+body:json {
+  {"cpe": "cpe:2.3:a:example:bruno_product:*:*:*:*:*:*:*:*"}
+}
+
+assert {
+  res.status: eq 200
+}
+
+docs {
+  Maps the first product without a CPE to an example CPE, which no route can undo and which hides its real
+  CVEs from the scan. Opt-in (stateChanging=1, a test installation only) and skipped when every product is mapped.
+
+  operationId: set_cpe_mapping
+}

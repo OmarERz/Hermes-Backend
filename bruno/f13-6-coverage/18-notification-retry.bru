@@ -1,0 +1,40 @@
+meta {
+  name: notification-retry
+  type: http
+  seq: 18
+}
+
+post {
+  url: {{baseUrl}}/api/notifications/events/{{failedEventId}}/retry
+  body: none
+  auth: bearer
+}
+
+auth:bearer {
+  token: {{token}}
+}
+
+script:pre-request {
+  if (!require("./lib/hermes").optIn(bru)) return;
+  const hermes = require("./lib/hermes");
+  const api = (method, path, token, data) => hermes.api(bru, method, path, token, data);
+  const failed = await api("GET", "/api/notifications/events?status=error&limit=1");
+  const event = failed.items[0];
+  if (!event) {
+    bru.runner.skipRequest();  // only a failed event can be retried; a healthy installation has none
+    return;
+  }
+  bru.setVar("failedEventId", event.id);
+}
+
+assert {
+  res.status: eq 202
+  res.body.status: eq pending
+}
+
+docs {
+  Requeues a failed event (a real notification goes out again). Opt-in (stateChanging=1) and skipped
+  when no event is in error, which the API cannot create.
+
+  operationId: retry_notification_event
+}

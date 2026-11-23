@@ -20,6 +20,7 @@ from sqlalchemy.orm import Session
 from core.configuration.errors import Problem, ValidationFailedError
 from core.db import models as m
 from core.scoring.engine import Formula, FormulaError
+from core.textnum import ascii_int
 
 STORED_DECIMALS: Final = 4  # formula values are stored as numeric(5,4)
 BONUS: Final = "personal_data_bonus"
@@ -127,14 +128,16 @@ class _Draft:
             raise _bad(key, "unknown_parameter")
 
     def _band(self, key: str, rest: list[str], raw: str) -> None:
-        if len(rest) != 1 or not rest[0].isdigit() or int(rest[0]) not in self.bands:
+        band = ascii_int(rest[0]) if len(rest) == 1 else None
+        if band is None or band not in self.bands:
             raise _bad(key, "unknown_parameter")
-        self.bands[int(rest[0])] = _integer(key, raw)
+        self.bands[band] = _integer(key, raw)
 
     def _decay(self, key: str, rest: list[str], raw: str) -> None:
-        if len(rest) != DECAY_PARTS or not rest[0].isdigit() or not 1 <= int(rest[0]) <= len(self.limits):
+        number = ascii_int(rest[0]) if len(rest) == DECAY_PARTS else None
+        if number is None or not 1 <= number <= len(self.limits):
             raise _bad(key, "unknown_parameter")
-        index = int(rest[0]) - 1
+        index = number - 1
         if rest[1] == "multiplier":
             self.multipliers[index] = _number(key, raw)
         elif rest[1] == "max_age_days" and self.limits[index] is not None:

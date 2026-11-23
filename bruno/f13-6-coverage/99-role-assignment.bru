@@ -1,0 +1,47 @@
+meta {
+  name: role-assignment
+  type: http
+  seq: 99
+}
+
+put {
+  url: {{baseUrl}}/api/admin/users/{{readerUid}}/role
+  body: json
+  auth: bearer
+}
+
+auth:bearer {
+  token: {{token}}
+}
+
+script:pre-request {
+  const hermes = require("./lib/hermes");
+  const api = (method, path, token, data) => hermes.api(bru, method, path, token, data);
+  let reader;
+  try {
+    reader = await api("GET", "/api/me", "readerToken");  // also registers the reader on a fresh installation
+  } catch (error) {
+    // An earlier run with this same token already assigned the role, which revoked it: mint new tokens to run it.
+    bru.runner.skipRequest();
+    return;
+  }
+  bru.setVar("readerUid", reader.uid);
+}
+
+body:json {
+  {"role": "reader", "expected_role": "reader"}
+}
+
+assert {
+  res.status: eq 200
+  res.body.role: eq reader
+  res.body.sessions_revoked: eq true
+}
+
+docs {
+  Assigns the reader its own role again (its uid read with the reader token). Last on purpose: the change
+  revokes that user's sessions, so the reader token stops working: a second run with the same tokens skips this
+  request (make bruno takes freshly minted tokens).
+
+  operationId: assign_user_role
+}

@@ -4,6 +4,12 @@ One run per CVE, stored once. The material is the CVE description, its CWE, its 
 download it from an allowed domain (D-014), the vendor advisory text. The model never gives a score: the vector is
 validated for CVSS 3.1 syntax and the **code** computes the score (`core.scoring.cvss`); the scoring engine marks
 that S as estimated (ANA-14). The analyst does not write mitigations (D-017).
+
+No transaction is open while the advisory downloads or the model answers (F12.2 #105): a read transaction loads the
+CVE, its CWEs and its references, and is committed; then the advisory is downloaded and the
+model answers; then a short write transaction takes the CVE's lock and re-checks that the CVE still exists with the
+same description and CVSS and still has no analysis before storing it. The review is stored either way (its tokens
+were paid); a stale answer is not applied and the CVE is analyzed again in the next run.
 """
 
 from __future__ import annotations
@@ -17,11 +23,19 @@ from decimal import Decimal
 from typing import Any, Protocol
 from urllib.parse import urlsplit
 
-from sqlalchemy import select, text
+from sqlalchemy import func, select, text
 from sqlalchemy.orm import Session
 
 from core.analysts import prompt as prompts
-from core.analysts.runner import Request, ReviewInfo, Seams, default_seams, record_review, run_analyst
+from core.analysts.runner import (
+    Request,
+    ReviewInfo,
+    RunResult,
+    Seams,
+    default_seams,
+    record_review,
+    run_analyst,
+)
 from core.db import models as m
 from core.db.ids import new_id
 from core.ingestion.article import extract_article
@@ -116,7 +130,7 @@ class CveOptions:
 @dataclass(frozen=True)
 class CveResult:
     cve_id: str
-    status: str  # analyzed | exists | no_cve | budget | queued
+    status: str  # analyzed | exists | no_cve | budget | queued | stale
     analysis_id: object | None = None
     reason: str | None = None
     inferred_score: Decimal | None = None
@@ -124,6 +138,9 @@ class CveResult:
 
 def _tool() -> ToolDefinition:
     return load_tools()[TOOL_NAME]
+
+
+STALE = "stale"  # the CVE changed while the model answered: the answer is not applied
 
 
 @dataclass(frozen=True)
@@ -134,27 +151,47 @@ class Material:
     quotable: str
 
 
-def _material(session: Session, cve: m.Cve, advisory: str | None) -> Material:
+@dataclass(frozen=True)
+class CveFacts:
+    """The CVE as the read transaction saw it: everything the material and the validation need, as plain values."""
+
+    cve_id: str
+    cvss_score: Decimal | None
+    description: str | None
+    cwes: tuple[str, ...]
+    references: tuple[tuple[str, tuple[str, ...]], ...]  # (url, tags), at most MAX_REFERENCES
+    advisory_urls: tuple[str, ...]
+
+
+def _facts(session: Session, cve: m.Cve) -> CveFacts:
+    cwes = tuple(sorted(session.scalars(select(m.CveCwe.cwe_id).where(m.CveCwe.cve_id == cve.id))))
+    references = []
+    for ref in session.scalars(select(m.CveReference).where(m.CveReference.cve_id == cve.id).limit(MAX_REFERENCES)):
+        tags = sorted(session.scalars(select(m.CveReferenceTag.tag).where(m.CveReferenceTag.reference_id == ref.id)))
+        references.append((ref.url, tuple(tags)))
+    return CveFacts(
+        cve.id, cve.cvss_score, cve.description, cwes, tuple(references), tuple(_advisory_urls(session, cve.id))
+    )
+
+
+def _material(facts: CveFacts, advisory: str | None) -> Material:
     """External text is cleaned first (SEG-01). Order: header, description, advisory, then references, so that the
     cut at the context limit falls on the references and never on text a quote may cite."""
-    cwes = sorted(session.scalars(select(m.CveCwe.cwe_id).where(m.CveCwe.cve_id == cve.id)))
     header = "\n".join(
         [
-            f"CVE: {cve.id}",
-            f"CVSS: {cve.cvss_score if cve.cvss_score is not None else 'ninguno'}",
-            f"CWE: {', '.join(clean_plain(c).text for c in cwes) if cwes else 'ninguno'}",
+            f"CVE: {facts.cve_id}",
+            f"CVSS: {facts.cvss_score if facts.cvss_score is not None else 'ninguno'}",
+            f"CWE: {', '.join(clean_plain(c).text for c in facts.cwes) if facts.cwes else 'ninguno'}",
         ]
     )
-    description = clean_html(cve.description or "").text
+    description = clean_html(facts.description or "").text
     body = description
     if advisory:
         body += "\nAviso del fabricante:\n" + clean_html(advisory).text
     room = max(0, prompts.MAX_ARTICLE_CHARS - len(header) - 1)
     lines = [header, body[:room]]
-    references = session.scalars(select(m.CveReference).where(m.CveReference.cve_id == cve.id).limit(MAX_REFERENCES))
-    for ref in references:
-        tags = sorted(session.scalars(select(m.CveReferenceTag.tag).where(m.CveReferenceTag.reference_id == ref.id)))
-        lines.append(f"Referencia: {clean_plain(ref.url).text} [{', '.join(clean_plain(t).text for t in tags)}]")
+    for url, tags in facts.references:
+        lines.append(f"Referencia: {clean_plain(url).text} [{', '.join(clean_plain(t).text for t in tags)}]")
     return Material("\n".join(lines), body[:room])
 
 
@@ -169,14 +206,14 @@ def _advisory_urls(session: Session, cve_id: str) -> list[str]:
 
 
 def _violations(
-    output: dict[str, Any], cve: m.Cve, quotable: str, schema: ToolSchema, exists: Callable[[str], bool]
+    output: dict[str, Any], facts: CveFacts, quotable: str, schema: ToolSchema, exists: Callable[[str], bool]
 ) -> list[Violation]:
     found = validate_schema(output, schema)
     if found:
         return found
-    found = check_cve_analysis(output, cve.id, quotable, exists)
+    found = check_cve_analysis(output, facts.cve_id, quotable, exists)
     vector = output["inferred_cvss_vector"]
-    if vector and cve.cvss_score is not None:
+    if vector and facts.cvss_score is not None:
         found.append(
             Violation("VAL-03.cvss_known", "inferred_cvss_vector", "The CVE already has a CVSS: leave it empty")
         )
@@ -192,36 +229,90 @@ def _allowed(session: Session) -> bool:
     return can_start(config, spent_on_day(session, datetime.now(UTC).date()), ESTIMATED_CALL_USD, critical=False)
 
 
+def _lock(session: Session, cve_id: str) -> None:
+    session.execute(select(func.pg_advisory_xact_lock(func.hashtextextended(f"cve-analyst:{cve_id}", 0))))
+
+
+@dataclass(frozen=True)
+class _Prepared:
+    """What the call and the write need, read in the first transaction."""
+
+    facts: CveFacts
+    model: str
+
+
 def analyze_cve(session: Session, client: LlmClient, cve_id: str, options: CveOptions | None = None) -> CveResult:
-    """Analyze one CVE. Flushes (the caller commits). Idempotent: a CVE with an analysis is not analyzed again."""
+    """Analyze one CVE. Commits twice: the read transaction before the advisory download and the model call (with
+    anything the caller's session already held) and the write transaction after them. Idempotent: a CVE with an
+    analysis is not analyzed again."""
     options = options or CveOptions()
     now = options.now or datetime.now(UTC)
+    prepared = _prepare(session, cve_id, now)
+    session.commit()  # no transaction stays open during the download or while the model answers
+    if isinstance(prepared, CveResult):
+        return prepared
+    facts = prepared.facts
+    advisory = options.advisory(list(facts.advisory_urls)) if options.advisory else None
+    material = _material(facts, advisory)
+    schema = ToolSchema.load(SCHEMA_FILE, SCHEMA_VERSION, default_schemas_dir())
+    request = Request(
+        model=prepared.model,
+        tool=_tool(),
+        system=prompts.CVE_SYSTEM,
+        user=prompts.cve_user_message(cve_id, material.text),
+        validate=lambda output: _violations(output, facts, material.quotable, schema, _exists_without_query),
+    )
+    result = run_analyst(client, request, options.seams or default_seams())
+    versions = prompts.fingerprint(prompts.CVE_PROMPT_VERSION, prompts.CVE_SYSTEM, schema.version, schema.hash)
+    outcome = _finish(session, facts, ReviewInfo(AGENT, request, versions, cve_id), result, now)
+    session.commit()
+    return outcome
+
+
+def _exists_without_query(_cve_id: str) -> bool:
+    """The validator's `exists` without a query while the model answers: the output must name the CVE being analyzed
+    (VAL-03.cve_id), which exists; any other identifier is rejected by that rule, which is the one reported."""
+    return True
+
+
+def _prepare(session: Session, cve_id: str, now: datetime) -> _Prepared | CveResult:
     cve = session.get(m.Cve, cve_id)
     if cve is None:
         return CveResult(cve_id, "no_cve")
     if session.scalar(select(m.CveAnalysis.id).where(m.CveAnalysis.cve_id == cve_id)) is not None:
         return CveResult(cve_id, "exists")
-    ref = QueueRef(AGENT, cve_id=cve_id)
     if not _allowed(session):
-        enqueue_failure(session, ref, "budget", now)
+        _lock(session, cve_id)
+        enqueue_failure(session, QueueRef(AGENT, cve_id=cve_id), "budget", now)
         return CveResult(cve_id, "budget", reason="budget")
-    advisory = options.advisory(_advisory_urls(session, cve_id)) if options.advisory else None
-    material = _material(session, cve, advisory)
-    schema = ToolSchema.load(SCHEMA_FILE, SCHEMA_VERSION, default_schemas_dir())
-    request = Request(
-        model=str(get_setting(session, "analyst_model")),
-        tool=_tool(),
-        system=prompts.CVE_SYSTEM,
-        user=prompts.cve_user_message(cve_id, material.text),
-        validate=lambda output: _violations(
-            output, cve, material.quotable, schema, lambda c: session.get(m.Cve, c) is not None
-        ),
-    )
-    result = run_analyst(client, request, options.seams or default_seams())
-    versions = prompts.fingerprint(prompts.CVE_PROMPT_VERSION, prompts.CVE_SYSTEM, schema.version, schema.hash)
-    review = record_review(session, ReviewInfo(AGENT, request, versions, cve_id), result, now)
+    facts = _facts(session, cve)
+    return _Prepared(facts, str(get_setting(session, "analyst_model")))
+
+
+def _recheck(session: Session, facts: CveFacts) -> str | None:
+    """Under the CVE's lock: None when the CVE is as it was read, else the status that applies now."""
+    cve = session.get(m.Cve, facts.cve_id, populate_existing=True)
+    if cve is None:
+        return "no_cve"
+    if session.scalar(select(m.CveAnalysis.id).where(m.CveAnalysis.cve_id == facts.cve_id)) is not None:
+        return "exists"
+    if (cve.cvss_score, cve.description) != (facts.cvss_score, facts.description):
+        return STALE  # a refresh changed what the model read (and the cvss_known rule)
+    return None
+
+
+def _finish(session: Session, facts: CveFacts, info: ReviewInfo, result: RunResult, now: datetime) -> CveResult:
+    """The write step: store the review (paid either way), then the analysis only if the CVE did not change."""
+    cve_id = facts.cve_id
+    _lock(session, cve_id)
+    changed = _recheck(session, facts)
+    if changed is not None:
+        record_review(session, info, result if result.failure else replace(result, failure=STALE), now)
+        log.info("cve analyst: %s changed while the model answered (%s); answer not applied", cve_id, changed)
+        return CveResult(cve_id, changed, reason=STALE)
+    review = record_review(session, info, result, now)
     if result.failure is not None or result.outcome is None or result.outcome.output is None:
-        enqueue_failure(session, ref, result.failure or "failed", now)
+        enqueue_failure(session, QueueRef(AGENT, cve_id=cve_id), result.failure or "failed", now)
         return CveResult(cve_id, "queued", reason=result.failure)
     for row in session.scalars(
         select(m.ErrorQueue).where(
@@ -262,11 +353,11 @@ def pending_cves(session: Session, limit: int = 50) -> list[str]:
 def analyze_pending_cves(
     session: Session, client: LlmClient, options: CveOptions | None = None, limit: int = 50
 ) -> list[CveResult]:
-    """Analyze the pending CVEs one by one; a failing CVE never stops the next one. Commits per CVE."""
+    """Analyze the pending CVEs one by one; a failing CVE never stops the next one. Commits per CVE (each CVE is a
+    read transaction and a write transaction, with the download and the model call between them)."""
     options = options or CveOptions()
     shared = replace(options, seams=options.seams or default_seams())  # one circuit breaker for the whole batch
     results = []
     for cve_id in pending_cves(session, limit):
         results.append(analyze_cve(session, client, cve_id, shared))
-        session.commit()
     return results

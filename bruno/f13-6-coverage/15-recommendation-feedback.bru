@@ -1,0 +1,34 @@
+meta {
+  name: recommendation-feedback
+  type: http
+  seq: 15
+}
+
+get {
+  url: {{baseUrl}}/api/recommendations/{{assessmentId}}/feedback
+  body: none
+  auth: bearer
+}
+
+auth:bearer {
+  token: {{token}}
+}
+
+script:pre-request {
+  const hermes = require("./lib/hermes");
+  const api = (method, path, token, data) => hermes.api(bru, method, path, token, data);
+  const first = await hermes.recommendation(bru);
+  if (!hermes.needData(bru, first, "a recommendation")) return;
+}
+
+assert {
+  res.status: eq 200
+  res.body: isArray
+  res.body.length: gte 1
+}
+
+docs {
+  The feedback history of the recommendation, with the one 14 added.
+
+  operationId: list_recommendation_feedback
+}

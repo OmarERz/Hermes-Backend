@@ -1,0 +1,36 @@
+meta {
+  name: feedback-create
+  type: http
+  seq: 14
+}
+
+post {
+  url: {{baseUrl}}/api/feedback
+  body: json
+  auth: bearer
+}
+
+auth:bearer {
+  token: {{token}}
+}
+
+script:pre-request {
+  const hermes = require("./lib/hermes");
+  const api = (method, path, token, data) => hermes.api(bru, method, path, token, data);
+  const first = await hermes.recommendation(bru);
+  if (!hermes.needData(bru, first, "a recommendation")) return;
+}
+
+body:json {
+  {"assessment_id": "{{assessmentId}}", "verdict": "investigating", "comment": "Bruno F13.6"}
+}
+
+assert {
+  res.status: eq 201
+}
+
+docs {
+  `investigating` has no effect on scores or tickets, so repeating it is harmless (FRO-10).
+
+  operationId: create_feedback
+}

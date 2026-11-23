@@ -1,0 +1,39 @@
+meta {
+  name: finding-history
+  type: http
+  seq: 25
+}
+
+get {
+  url: {{baseUrl}}/api/findings/{{findingId}}/history
+  body: none
+  auth: bearer
+}
+
+auth:bearer {
+  token: {{token}}
+}
+
+script:pre-request {
+  const hermes = require("./lib/hermes");
+  const api = (method, path, token, data) => hermes.api(bru, method, path, token, data);
+  const group = await hermes.vulnerabilityGroup(bru);
+  if (!hermes.needData(bru, group, "a vulnerability group")) return;
+  const detail = await api("GET", `/api/vulnerabilities/${group.group_id}`);
+  const finding = detail.assets.find((asset) => asset.finding_id);
+  if (!hermes.needData(bru, finding, "a finding id on the vulnerability detail")) return;
+  bru.setVar("findingId", finding.finding_id);
+}
+
+assert {
+  res.status: eq 200
+  res.body: isArray
+  res.body.length: gte 1
+}
+
+docs {
+  Score history of one CI's finding (EVA-05): the finding id comes from the assets of the vulnerability
+  detail (F13.8).
+
+  operationId: get_finding_history
+}

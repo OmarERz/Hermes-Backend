@@ -1,0 +1,30 @@
+meta {
+  name: source-deactivate
+  type: http
+  seq: 9
+}
+
+patch {
+  url: {{baseUrl}}/api/sources/{{sourceId}}
+  body: json
+  auth: bearer
+}
+
+auth:bearer {
+  token: {{token}}
+}
+
+body:json {
+  {"active": false}
+}
+
+assert {
+  res.status: eq 200
+  res.body.active: eq false
+}
+
+docs {
+  Turns off the source created by 08, so the ingestion never fetches it.
+
+  operationId: update_source
+}

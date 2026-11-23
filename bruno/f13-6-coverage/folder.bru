@@ -1,0 +1,12 @@
+meta {
+  name: f13-6-coverage
+  seq: 16
+}
+
+docs {
+  One success per operation that no other folder covers with a 2xx (D-070, F13.6). Every request reads the
+  current versions and ids first, so the folder runs again on the same installation. Requests that need data
+  (recommendations, assessments, CIs) skip on an empty installation and fail if `demoMinItems` > 0 (demo data
+  loaded); those that need a state the API cannot create (a failed event, a calibration proposal, unmapped
+  software) skip when there is none. The role assignment runs last: it revokes the reader's sessions.
+}

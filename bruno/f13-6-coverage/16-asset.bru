@@ -1,0 +1,34 @@
+meta {
+  name: asset
+  type: http
+  seq: 16
+}
+
+get {
+  url: {{baseUrl}}/api/assets/{{assetCiId}}
+  body: none
+  auth: bearer
+}
+
+auth:bearer {
+  token: {{token}}
+}
+
+script:pre-request {
+  const hermes = require("./lib/hermes");
+  const api = (method, path, token, data) => hermes.api(bru, method, path, token, data);
+  const first = await hermes.recommendation(bru);
+  if (!hermes.needData(bru, first, "a recommendation")) return;
+}
+
+assert {
+  res.status: eq 200
+  res.body.ci_id: eq {{assetCiId}}
+  res.body.findings: isArray
+}
+
+docs {
+  The CI of that recommendation with its vulnerabilities (D-035).
+
+  operationId: get_asset
+}

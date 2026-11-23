@@ -255,6 +255,12 @@ class AffectedAsset(_Model):
     classification_at_evaluation: Classification
     finding_status: FindingStatus
     score: int = Field(ge=0, le=100)
+    finding_id: str | None = Field(
+        default=None,
+        description="Id del hallazgo de este CI en la vulnerabilidad: se usa en GET /api/findings/{id}/history. "
+        "Viene en el detalle de vulnerabilidad; es nulo en una recomendación (su CI puede ser el de una alerta, "
+        "sin hallazgo de escaneo).",
+    )
 
 
 class VulnerabilityDetail(VulnerabilityGroup):

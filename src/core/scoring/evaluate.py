@@ -4,6 +4,13 @@
 current CI. The judge adjustment is reused when the package fingerprint did not change (COR-06), and the judge is
 never called by a recalculation (COR-05): a recalculation reuses the last adjustment and only recomputes what the
 formula and the clock change.
+
+With a staged judge (the pipeline's) no transaction is open while the model answers (F12.2 #105, F6.2 #74): the read
+transaction decides that the package needs a review and is committed; the judge reviews it; a new transaction reads
+the group again and applies the review only if the package it would build now has the same fingerprint. A package
+that changed meanwhile is judged once more; if it changes again the score is the base (EVA-04), not queued: the next
+scan evaluates the group again. Every review is stored (its tokens were paid); one that was not applied is stored
+as `no_judge_review`, with failure `stale` when the judge answered and its real cause when it did not.
 """
 
 from __future__ import annotations
@@ -11,10 +18,10 @@ from __future__ import annotations
 import logging
 import uuid
 from collections.abc import Callable
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from datetime import UTC, datetime
 from decimal import Decimal
-from typing import Any, Protocol
+from typing import Any, Protocol, runtime_checkable
 
 from sqlalchemy import func, select, text
 from sqlalchemy.orm import Session
@@ -47,6 +54,7 @@ RECALCULATION_TRIGGERS = frozenset({"nightly", "formula_change"})
 JUDGE_TRIGGERS = frozenset({"new_finding", "news", "level_change", "manual"})  # a recalculation never calls the judge
 FOUR_PLACES = Decimal("0.0001")
 APPLIED_REVIEW_STATUSES = ("applied", "partial_review")  # reviews whose proposal reached the score; others did not
+MAX_JUDGE_ROUNDS = 2  # a package that changed while the model answered is judged once more, then base only
 
 
 class GroupNotActiveError(LookupError):
@@ -61,7 +69,28 @@ class JudgeVerdict:
     llm_review_id: uuid.UUID | None
 
 
-JudgeFn = Callable[[dict[str, Any]], JudgeVerdict]
+JudgeFn = Callable[[dict[str, Any]], JudgeVerdict]  # one step, inside the caller's transaction (tests, demo)
+
+
+@runtime_checkable
+class StagedJudge[T](Protocol):
+    """A judge in two steps, so that no transaction is open while the model answers (F12.2 #105)."""
+
+    def assess(self, package: dict[str, Any]) -> T:
+        """The model's review of `package`. Never touches the database."""
+        ...
+
+    def record(self, session: Session, package: dict[str, Any], assessed: T) -> JudgeVerdict:
+        """Store the package and its review in the session's transaction; the verdict for the score."""
+        ...
+
+    def discard(self, session: Session, package: dict[str, Any], assessed: T) -> None:
+        """Store a review whose package changed while the model answered: kept (its tokens were paid), never
+        applied, so it must not look applied."""
+        ...
+
+
+Judge = JudgeFn | StagedJudge[Any]
 
 
 class TicketApplier(Protocol):
@@ -298,7 +327,7 @@ def _unchanged(session: Session, previous: m.Assessment, current: tuple[object, 
 class EvaluationOptions:
     """The seams of an evaluation: who judges, who applies tickets, which formula and which clock."""
 
-    judge: JudgeFn | None = None
+    judge: Judge | None = None
     tickets: TicketApplier | None = None
     formula: tuple[uuid.UUID, Formula] | None = None
     now: datetime | None = None
@@ -310,9 +339,20 @@ class _Plan:
     matches: list[NewsMatch]
     trigger: str
     previous: m.Assessment | None
-    judge: JudgeFn | None
+    judge: Judge | None
     formula: Formula
+    version_id: uuid.UUID
     now: datetime
+
+
+def _plan(session: Session, group_id: uuid.UUID, trigger: str, options: EvaluationOptions, now: datetime) -> _Plan:
+    """What an evaluation rests on, read from the database (the group, its news, its last assessment, the formula)."""
+    version_id, formula = options.formula or load_active_formula(session)
+    groups = load_active_groups(session, only={group_id})
+    if not groups:
+        raise GroupNotActiveError(str(group_id))
+    matches, previous = _matches(session, group_id), _previous(session, group_id)
+    return _Plan(groups[0], matches, trigger, previous, options.judge, formula, version_id, now)
 
 
 def _proposal(session: Session, assessment: m.Assessment | None) -> int | None:
@@ -327,21 +367,60 @@ def _proposal(session: Session, assessment: m.Assessment | None) -> int | None:
     )
 
 
-def _decide_adjustment(session: Session, plan: _Plan) -> tuple[int | None, uuid.UUID | None, bool, bool]:
-    """(adjustment, llm_review_id, judge_called, reused) for this evaluation (COR-05, COR-06)."""
+@dataclass(frozen=True)
+class _Decision:
+    adjustment: int | None
+    review_id: uuid.UUID | None
+    called: bool
+    reused: bool
+    pending: dict[str, Any] | None = None  # the package a staged judge still has to review
+
+
+def _decide_adjustment(session: Session, plan: _Plan, package: dict[str, Any] | None = None) -> _Decision:
+    """The adjustment for this evaluation (COR-05, COR-06), or the package a staged judge must review first."""
     previous = plan.previous
     reusable = _proposal(session, previous)
     reusable_review = previous.llm_review_id if previous is not None and reusable is not None else None
     if plan.trigger in RECALCULATION_TRIGGERS:
         # A formula change or the nightly job keeps the last adjustment whatever the fingerprint says (D-033, COR-05).
-        return reusable, reusable_review, False, reusable is not None
-    package = build_finding_package(session, plan.ctx, plan.matches, EngineScorer(plan.formula, plan.now))
+        return _Decision(reusable, reusable_review, False, reusable is not None)
+    if package is None:
+        package = build_finding_package(session, plan.ctx, plan.matches, EngineScorer(plan.formula, plan.now))
     if previous is not None and reusable is not None and _fingerprint_of(session, previous) == package["fingerprint"]:
-        return reusable, reusable_review, False, True  # same context: the judge's review still stands (COR-06)
+        return _Decision(reusable, reusable_review, False, True)  # same context: the review still stands (COR-06)
     if plan.judge is None or plan.trigger not in JUDGE_TRIGGERS:
-        return None, None, False, False  # changed context and no judge allowed: base only, flagged no_judge_review
+        return _Decision(None, None, False, False)  # changed context and no judge allowed: base only, no_judge_review
+    if isinstance(plan.judge, StagedJudge):
+        return _Decision(None, None, False, False, pending=package)
     verdict = plan.judge(package)
-    return verdict.adjustment, verdict.llm_review_id, True, False
+    return _Decision(verdict.adjustment, verdict.llm_review_id, True, False)
+
+
+def _judge_outside_transaction(
+    session: Session, plan: _Plan, decision: _Decision, options: EvaluationOptions
+) -> tuple[_Plan, _Decision]:
+    """Run a staged judge with no transaction open, then re-check the group before applying its verdict (#105)."""
+    judge = plan.judge
+    rounds = 0
+    while decision.pending is not None and isinstance(judge, StagedJudge):
+        package = decision.pending
+        rounds += 1
+        session.commit()  # the reads (and a stale review of the last round): no transaction during the call
+        assessed = judge.assess(package)
+        try:  # a new transaction: read the group again before storing the review
+            plan = _plan(session, plan.ctx.id, plan.trigger, options, plan.now)
+        except GroupNotActiveError:
+            judge.discard(session, package, assessed)  # the caller commits it
+            raise
+        current = build_finding_package(session, plan.ctx, plan.matches, EngineScorer(plan.formula, plan.now))
+        if current["fingerprint"] == package["fingerprint"]:
+            verdict = judge.record(session, package, assessed)
+            return plan, _Decision(verdict.adjustment, verdict.llm_review_id, True, False)
+        judge.discard(session, package, assessed)
+        log.info("group %s changed while the judge answered: its review is kept but not applied", plan.ctx.id)
+        unjudged = replace(plan, judge=None) if rounds >= MAX_JUDGE_ROUNDS else plan
+        decision = replace(_decide_adjustment(session, unjudged, current), called=True)
+    return plan, decision
 
 
 @dataclass(frozen=True)
@@ -407,28 +486,29 @@ def evaluate_group(
     The judge is called only for a trigger in `JUDGE_TRIGGERS`, when a judge is given and the package fingerprint
     changed. A nightly or formula-change recalculation never reaches it. Without a usable review the final is the
     base (`no_judge_review`), and the KEV floor still applies (EVA-04).
+
+    A staged judge commits the session's read transaction before the model call (with anything the session already
+    held) and stores its review in a new one. If the group lost its last finding while the model answered,
+    `GroupNotActiveError` is raised after the review was stored: the caller commits it.
     """
     options = options or EvaluationOptions()
     now = options.now or utc_now()
-    version_id, formula = options.formula or load_active_formula(session)
-    groups = load_active_groups(session, only={group_id})
-    if not groups:
-        raise GroupNotActiveError(str(group_id))
-    ctx = groups[0]
-    matches = _matches(session, group_id)
-    previous = _previous(session, group_id)
-    adjustment, review_id, called, reused = _decide_adjustment(
-        session, _Plan(ctx, matches, trigger, previous, options.judge, formula, now)
+    plan = _plan(session, group_id, trigger, options, now)
+    decision = _decide_adjustment(session, plan)
+    if decision.pending is not None:
+        plan, decision = _judge_outside_transaction(session, plan, decision, options)
+    result = compute_group(
+        session, plan.ctx, Basis(plan.formula, [n.story_id for n in plan.matches], decision.adjustment, now)
     )
-    result = compute_group(session, ctx, Basis(formula, [n.story_id for n in matches], adjustment, now))
-    snapshot = _snapshot(result, version_id, review_id)
+    snapshot = _snapshot(result, plan.version_id, decision.review_id)
+    previous = plan.previous
     if previous is not None and _unchanged(session, previous, snapshot):
-        return Evaluation(group_id, None, False, called, reused, result)
-    assessment = _store(session, result, _Stamp(run_id, trigger, version_id, review_id, now))
+        return Evaluation(group_id, None, False, decision.called, decision.reused, result)
+    assessment = _store(session, result, _Stamp(run_id, trigger, plan.version_id, decision.review_id, now))
     if options.tickets is not None:
         options.tickets.apply(session, assessment.id)
     log.info("assessed group %s (%s): %d CIs", group_id, trigger, len(result.cis))
-    return Evaluation(group_id, assessment.id, True, called, reused, result)
+    return Evaluation(group_id, assessment.id, True, decision.called, decision.reused, result)
 
 
 @dataclass(frozen=True)

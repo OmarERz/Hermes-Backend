@@ -1,0 +1,48 @@
+meta {
+  name: profile-update
+  type: http
+  seq: 4
+}
+
+put {
+  url: {{baseUrl}}/api/profile
+  body: json
+  auth: bearer
+}
+
+auth:bearer {
+  token: {{token}}
+}
+
+script:pre-request {
+  const hermes = require("./lib/hermes");
+  const api = (method, path, token, data) => hermes.api(bru, method, path, token, data);
+  const profile = await api("GET", "/api/profile");
+  bru.setVar("profileVersion", profile.version);
+  bru.setVar("profileSector", profile.sector || "retail");  // a fresh installation has no sector yet
+  bru.setVar("profileSubsectors", JSON.stringify(profile.subsectors));
+  bru.setVar("profileCountries", JSON.stringify(profile.countries.length ? profile.countries : ["MX"]));
+  bru.setVar("profileLanguage", profile.language);
+}
+
+body:json {
+  {
+    "expected_version": {{profileVersion}},
+    "sector": "{{profileSector}}",
+    "subsectors": {{profileSubsectors}},
+    "countries": {{profileCountries}},
+    "language": "{{profileLanguage}}"
+  }
+}
+
+assert {
+  res.status: eq 200
+  res.body.sector: eq {{profileSector}}
+  res.body.language: eq {{profileLanguage}}
+}
+
+docs {
+  Writes the current profile back with its version (API-03); a fresh installation gets retail / MX.
+
+  operationId: update_profile
+}
