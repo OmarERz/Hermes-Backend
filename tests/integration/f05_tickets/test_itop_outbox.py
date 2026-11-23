@@ -520,3 +520,20 @@ def test_a_legacy_row_does_not_take_another_comment_with_its_short_marker(factor
 
     assert [c.operation for c in double.writes] == ["core/update"]
     assert outbox_row(factory, row_id).status == "done"
+
+
+def test_adding_an_owner_keeps_the_contacts_a_person_added(factory: sessionmaker[Session]) -> None:
+    """`contacts_list` replaces the whole list in iTop: the worker merges it with what the ticket has (F5.2 #54)."""
+    double, clock = ItopDouble(), Clock()
+    manual = [{"contact_id": "7", "role": "Seguridad", "role_code": "manual", "contact_id_friendlyname": "Ana"}]
+    double.add("UserRequest", 70, title="t", status="new", ref="R-000070", contacts_list=manual)
+    ticket = new_ticket(factory, itop_id="70")
+    owners = [{"contact_id": "9"}, {"contact_id": "7"}]
+    queue(factory, ticket.id, update_payload({"contacts_list": owners}), "u-contacts", action="add_owner")
+
+    worker(factory, double, clock).drain()
+
+    assert double.data["UserRequest"]["70"]["contacts_list"] == [
+        {"contact_id": "7", "role": "Seguridad", "role_code": "manual"},
+        {"contact_id": "9"},
+    ]

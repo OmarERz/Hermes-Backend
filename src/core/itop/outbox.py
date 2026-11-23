@@ -74,7 +74,8 @@ def create_payload(fields: dict[str, Any], *, fallback_team_id: str | None = Non
 
 
 def update_payload(fields: dict[str, Any]) -> dict[str, Any]:
-    """`core/update` of plain fields. A linked set (`functionalcis_list`, `contacts_list`) replaces the whole list."""
+    """`core/update` of plain fields. A linked set (`functionalcis_list`, `contacts_list`) replaces the whole list; the
+    worker merges `contacts_list` with the contacts already on the ticket before writing."""
     if not fields:
         raise ValueError("an update needs at least one field")
     if LOG_FIELDS & fields.keys():
@@ -355,6 +356,8 @@ class ItopOutboxWorker:
         key = claim.itop_ticket_id
         if kind == "update":
             fields = dict(claim.payload["fields"])
+            if "contacts_list" in fields:
+                fields["contacts_list"] = self._merged_contacts(key, fields["contacts_list"])
             self.writer.write({"operation": "core/update", "class": TICKET_CLASS, "key": key, "fields": fields})
             return _Result(fields=fields)
         if kind == "comment":
@@ -390,6 +393,24 @@ class ItopOutboxWorker:
         operation = {"operation": "core/apply_stimulus", "class": TICKET_CLASS, "key": key, "stimulus": stimulus}
         self.writer.write({**operation, "fields": {}, "output_fields": "id"})
         return _Result()
+
+    def _merged_contacts(self, key: str, wanted: list[dict[str, Any]]) -> list[dict[str, Any]]:
+        """A linked set write replaces the whole list: the contacts already on the ticket (a person may have added
+        them by hand) are kept, with their role, and the owners we add go after them (pending F5.2 #54). It is a union:
+        an owner whose CIs left the ticket is not removed; and a contact added in iTop between this read and the write
+        would be lost (milliseconds; the REST API has no conditional update)."""
+        found = self.writer.get(TICKET_CLASS, key, ["contacts_list"])
+        current = found[0].fields.get("contacts_list") if found else None
+        merged: dict[str, dict[str, Any]] = {}
+        for entry in [*(current if isinstance(current, list) else []), *wanted]:
+            contact = str(entry.get("contact_id") or "") if isinstance(entry, dict) else ""
+            if contact and contact != "0" and contact not in merged:
+                kept = {"contact_id": contact}
+                for attribute in ("role", "role_code"):  # the writable link attributes (⚠️ P-011)
+                    if entry.get(attribute):
+                        kept[attribute] = str(entry[attribute])
+                merged[contact] = kept
+        return list(merged.values())
 
     def _remote_contains(self, key: str, field_name: str, markers: tuple[str, ...]) -> bool:
         found = self.writer.get(TICKET_CLASS, key, [field_name])
