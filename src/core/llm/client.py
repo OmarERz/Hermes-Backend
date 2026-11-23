@@ -16,7 +16,7 @@ import random
 import time
 from collections.abc import Callable, Mapping, Sequence
 from dataclasses import dataclass, field
-from typing import Any, Literal, cast
+from typing import Any, Literal, Protocol, cast
 
 import httpx2
 import openai
@@ -72,6 +72,20 @@ class ToolCall:
     call_id: str = ""
     usage: Usage = field(default_factory=Usage)
     response_model: str | None = None
+
+
+class ToolCaller(Protocol):
+    """What the analysts and the judge need from an LLM backend (D-084): `LlmClient` (DeepSeek, D-029) or
+    `ClaudeCodeClient` (the Claude Code CLI). Both raise the typed errors of `core.llm.errors`."""
+
+    def call_tool(
+        self,
+        *,
+        model: str,
+        messages: Sequence[Mapping[str, Any]],
+        tools: Sequence[ToolDefinition],
+        force_tool: str | None = None,
+    ) -> ToolCall: ...
 
 
 class LlmClient:

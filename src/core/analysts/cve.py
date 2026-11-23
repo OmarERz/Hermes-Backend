@@ -42,7 +42,7 @@ from core.ingestion.article import extract_article
 from core.ingestion.cleaning import clean_html, clean_plain
 from core.ingestion.fetcher import ARTICLE_CONTENT_TYPES, Fetcher, FetchError
 from core.ingestion.settings import get_decimal, get_setting
-from core.llm.client import LlmClient
+from core.llm.client import ToolCaller
 from core.llm.tools import ToolDefinition, default_schemas_dir, load_tools
 from core.scoring.cvss import base_score
 from core.validation.budget import BudgetConfig, can_start
@@ -241,7 +241,7 @@ class _Prepared:
     model: str
 
 
-def analyze_cve(session: Session, client: LlmClient, cve_id: str, options: CveOptions | None = None) -> CveResult:
+def analyze_cve(session: Session, client: ToolCaller, cve_id: str, options: CveOptions | None = None) -> CveResult:
     """Analyze one CVE. Commits twice: the read transaction before the advisory download and the model call (with
     anything the caller's session already held) and the write transaction after them. Idempotent: a CVE with an
     analysis is not analyzed again."""
@@ -351,7 +351,7 @@ def pending_cves(session: Session, limit: int = 50) -> list[str]:
 
 
 def analyze_pending_cves(
-    session: Session, client: LlmClient, options: CveOptions | None = None, limit: int = 50
+    session: Session, client: ToolCaller, options: CveOptions | None = None, limit: int = 50
 ) -> list[CveResult]:
     """Analyze the pending CVEs one by one; a failing CVE never stops the next one. Commits per CVE (each CVE is a
     read transaction and a write transaction, with the download and the model call between them)."""

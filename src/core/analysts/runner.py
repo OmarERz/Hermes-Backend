@@ -21,7 +21,7 @@ from sqlalchemy.orm import Session
 from core.analysts.prompt import PromptVersions, retry_message
 from core.db import models as m
 from core.db.ids import new_id
-from core.llm.client import LlmClient
+from core.llm.client import ToolCaller
 from core.llm.errors import LlmError, LlmRequestError, LlmResponseError, LlmTransportError, ToolArgumentsError
 from core.llm.tools import ToolDefinition
 from core.llm.usage import Usage
@@ -86,7 +86,7 @@ def default_seams() -> Seams:
     return Seams(breaker=CircuitBreaker(ANALYST_RETRY, time.monotonic), timing=Timing(time.sleep, random.random))
 
 
-def run_analyst(client: LlmClient, request: Request, seams: Seams) -> RunResult:
+def run_analyst(client: ToolCaller, request: Request, seams: Seams) -> RunResult:
     """Call the model until its output validates or the retry policy gives up; the tokens of every call count."""
     usage = Usage()
     returned: list[str] = []

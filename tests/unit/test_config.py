@@ -115,6 +115,8 @@ def test_example_env_file_loads(monkeypatch: pytest.MonkeyPatch) -> None:
     settings = Settings(_env_file=example)  # type: ignore[call-arg]
     assert str(settings.llm_base_url_judge) == DEFAULT_LLM_BASE_URL
     assert settings.itop_token is None
+    assert settings.llm_provider == "deepseek"  # blank LLM_PROVIDER and CLAUDE_CODE_* fall back to the defaults
+    assert (settings.claude_code_model_judge, settings.claude_code_effort) == ("opus", "medium")
 
 
 def test_blank_judge_url_uses_default(monkeypatch: pytest.MonkeyPatch) -> None:
