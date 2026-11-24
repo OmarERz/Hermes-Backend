@@ -99,7 +99,7 @@ def _tickets(settings: Settings) -> TicketLifecycle | None:
         log.info("ITOP_ORG_ID / ITOP_CALLER_ID are not configured: assessments do not open tickets")
         return None
     identity = ItopIdentity(settings.itop_org_id, settings.itop_caller_id, settings.itop_service_id)
-    return TicketLifecycle(identity, itop_base_url=str(settings.itop_url) if settings.itop_url else None)
+    return TicketLifecycle(identity, itop_base_url=settings.itop_link_url)
 
 
 def build_pipeline(settings: Settings, session_factory: sessionmaker[Session]) -> Pipeline:

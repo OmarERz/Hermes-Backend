@@ -114,3 +114,23 @@ def test_the_real_project_block_of_the_env_example_comes_after_the_values_it_ove
         default = max(i for i, line in enumerate(lines) if line.startswith(f"{name}="))
         override = lines.index(f"# {name}={real}")
         assert override > default, name
+
+
+@needs_docker
+def test_the_real_project_combines_with_the_itop_network(tmp_path: Path) -> None:
+    # The demo uses both overrides (README sections 9 and 10): neither may drop what the other adds.
+    placeholder = tmp_path / "service-account.json"
+    placeholder.write_text("{}", encoding="utf-8")
+    result = compose_config(
+        tmp_path,
+        "compose.yaml",
+        "compose.itop-link.yaml",
+        "compose.firebase.yaml",
+        FIREBASE_SERVICE_ACCOUNT_FILE=str(placeholder),
+        FIREBASE_PROJECT_ID="hermes-real-test",
+    )
+    assert result.returncode == 0, result.stderr
+    api = json.loads(result.stdout)["services"]["api"]
+    assert {"default", "hermes-itop-link"} <= set(api["networks"])
+    assert MOUNT_NAME in secret_sources(api)
+    assert api["environment"]["FIREBASE_AUTH_EMULATOR_HOST"] == ""
