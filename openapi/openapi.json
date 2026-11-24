@@ -1918,6 +1918,298 @@
         "title": "HistoryEvent",
         "type": "object"
       },
+      "InstalledSoftwareItem": {
+        "additionalProperties": false,
+        "properties": {
+          "cpe": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Identificador CPE 2.3 del software.",
+            "title": "Cpe"
+          },
+          "has_cpe": {
+            "description": "Si tiene un CPE asignado.",
+            "title": "Has Cpe",
+            "type": "boolean"
+          },
+          "name": {
+            "description": "Nombre del software en iTop.",
+            "title": "Name",
+            "type": "string"
+          },
+          "open_vulnerabilities": {
+            "description": "Vulnerabilidades abiertas del software en este CI.",
+            "title": "Open Vulnerabilities",
+            "type": "integer"
+          },
+          "software_id": {
+            "description": "Id (UUID) del producto de software.",
+            "title": "Software Id",
+            "type": "string"
+          },
+          "version": {
+            "description": "Versión instalada, tal como la da iTop.",
+            "title": "Version",
+            "type": "string"
+          },
+          "version_known": {
+            "description": "Si iTop da una versión real (no vacía ni un marcador como `N/A`).",
+            "title": "Version Known",
+            "type": "boolean"
+          },
+          "worst_level": {
+            "anyOf": [
+              {
+                "enum": [
+                  "critical",
+                  "high",
+                  "medium",
+                  "low"
+                ],
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Peor nivel de sus vulnerabilidades abiertas; nulo si no tiene. Valores: `critical`: Crítica (urgencia 1); `high`: Alta (urgencia 2); `medium`: Media (urgencia 3); `low`: Baja (urgencia 4).",
+            "title": "Worst Level"
+          }
+        },
+        "required": [
+          "software_id",
+          "name",
+          "version",
+          "version_known",
+          "cpe",
+          "has_cpe",
+          "open_vulnerabilities",
+          "worst_level"
+        ],
+        "title": "InstalledSoftwareItem",
+        "type": "object"
+      },
+      "InventoryAsset": {
+        "additionalProperties": false,
+        "examples": [
+          {
+            "ci_id": "CI-0001",
+            "classification": "highly_classified",
+            "criticality": "high",
+            "custodian": "Infraestructura Linux",
+            "exposed": true,
+            "itop_class": "Server",
+            "itop_url": "https://itop.example.test/pages/UI.php?operation=details&class=Server&id=CI-0001",
+            "kev_findings": 1,
+            "level": "critical",
+            "name": "srv-pagos-01",
+            "open_findings": 2,
+            "os": "Ubuntu 22.04",
+            "owner": "Dueña de Pagos",
+            "personal_data": true,
+            "risk": 90,
+            "service": "Pagos",
+            "software_count": 4,
+            "synced_at": "2026-11-23T06:00:00Z"
+          }
+        ],
+        "properties": {
+          "ci_id": {
+            "description": "Id del CI en iTop.",
+            "title": "Ci Id",
+            "type": "string"
+          },
+          "classification": {
+            "description": "Clasificación de datos del CI en iTop. Valores: `public`: Información pública; `classified`: Clasificada; `highly_classified`: Altamente clasificada (se puede excluir de las exportaciones); `unclassified`: Sin clasificación asignada en iTop.",
+            "enum": [
+              "public",
+              "classified",
+              "highly_classified",
+              "unclassified"
+            ],
+            "title": "Classification",
+            "type": "string"
+          },
+          "criticality": {
+            "description": "Criticidad del activo en iTop. Valores: `high`: Alta; `medium`: Media; `low`: Baja; `unknown`: Sin dato en iTop.",
+            "enum": [
+              "high",
+              "medium",
+              "low",
+              "unknown"
+            ],
+            "title": "Criticality",
+            "type": "string"
+          },
+          "custodian": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Equipo custodio del activo.",
+            "title": "Custodian"
+          },
+          "exposed": {
+            "anyOf": [
+              {
+                "type": "boolean"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Si está expuesto a internet; nulo si iTop no lo dice.",
+            "title": "Exposed"
+          },
+          "itop_class": {
+            "description": "Clase del CI en iTop, por ejemplo `Server`.",
+            "title": "Itop Class",
+            "type": "string"
+          },
+          "itop_url": {
+            "description": "Enlace al activo en iTop.",
+            "title": "Itop Url",
+            "type": "string"
+          },
+          "kev_findings": {
+            "description": "Hallazgos abiertos del CI con CVE en el catálogo KEV.",
+            "title": "Kev Findings",
+            "type": "integer"
+          },
+          "level": {
+            "anyOf": [
+              {
+                "enum": [
+                  "critical",
+                  "high",
+                  "medium",
+                  "low"
+                ],
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Nivel de su riesgo; nulo sin hallazgos. Valores: `critical`: Crítica (urgencia 1); `high`: Alta (urgencia 2); `medium`: Media (urgencia 3); `low`: Baja (urgencia 4).",
+            "title": "Level"
+          },
+          "name": {
+            "description": "Nombre del CI.",
+            "title": "Name",
+            "type": "string"
+          },
+          "open_findings": {
+            "description": "Hallazgos abiertos del CI (vulnerabilidades distintas).",
+            "title": "Open Findings",
+            "type": "integer"
+          },
+          "os": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Sistema operativo del CI, según iTop.",
+            "title": "Os"
+          },
+          "owner": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Responsable del activo.",
+            "title": "Owner"
+          },
+          "personal_data": {
+            "anyOf": [
+              {
+                "type": "boolean"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Si el CI guarda datos personales; nulo si iTop no lo dice.",
+            "title": "Personal Data"
+          },
+          "risk": {
+            "anyOf": [
+              {
+                "maximum": 100.0,
+                "minimum": 0.0,
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Riesgo del CI: el mayor final de sus hallazgos abiertos; nulo sin hallazgos.",
+            "title": "Risk"
+          },
+          "service": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Servicio de negocio del CI, según iTop.",
+            "title": "Service"
+          },
+          "software_count": {
+            "description": "Instalaciones de software en el CI.",
+            "title": "Software Count",
+            "type": "integer"
+          },
+          "synced_at": {
+            "description": "Última sincronización del CI con iTop (UTC).",
+            "title": "Synced At",
+            "type": "string"
+          }
+        },
+        "required": [
+          "ci_id",
+          "name",
+          "itop_class",
+          "criticality",
+          "exposed",
+          "classification",
+          "personal_data",
+          "owner",
+          "custodian",
+          "service",
+          "os",
+          "itop_url",
+          "synced_at",
+          "open_findings",
+          "kev_findings",
+          "risk",
+          "level",
+          "software_count"
+        ],
+        "title": "InventoryAsset",
+        "type": "object"
+      },
       "InventoryItem": {
         "additionalProperties": false,
         "properties": {
@@ -2006,6 +2298,105 @@
           "outside_delivery_model"
         ],
         "title": "InventoryPending",
+        "type": "object"
+      },
+      "InventorySummary": {
+        "additionalProperties": false,
+        "properties": {
+          "by_class": {
+            "additionalProperties": {
+              "type": "integer"
+            },
+            "description": "CIs por clase de iTop.",
+            "title": "By Class",
+            "type": "object"
+          },
+          "by_classification": {
+            "additionalProperties": {
+              "type": "integer"
+            },
+            "description": "CIs por clasificación de datos.",
+            "title": "By Classification",
+            "type": "object"
+          },
+          "by_criticality": {
+            "additionalProperties": {
+              "type": "integer"
+            },
+            "description": "CIs por criticidad.",
+            "title": "By Criticality",
+            "type": "object"
+          },
+          "by_exposure": {
+            "additionalProperties": {
+              "type": "integer"
+            },
+            "description": "CIs por exposición: `exposed`, `internal` o `unknown` (sin dato).",
+            "title": "By Exposure",
+            "type": "object"
+          },
+          "custodians": {
+            "description": "Equipos custodios distintos de los CIs.",
+            "title": "Custodians",
+            "type": "integer"
+          },
+          "last_sync_at": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Última sincronización de un CI con iTop (UTC).",
+            "title": "Last Sync At"
+          },
+          "owners": {
+            "description": "Responsables distintos de los CIs.",
+            "title": "Owners",
+            "type": "integer"
+          },
+          "software": {
+            "$ref": "#/components/schemas/SoftwareHealth",
+            "description": "Salud del software del inventario."
+          },
+          "total_assets": {
+            "description": "CIs vigentes.",
+            "title": "Total Assets",
+            "type": "integer"
+          },
+          "with_kev_findings": {
+            "description": "CIs con algún hallazgo abierto en KEV.",
+            "title": "With Kev Findings",
+            "type": "integer"
+          },
+          "with_open_findings": {
+            "description": "CIs con hallazgos abiertos.",
+            "title": "With Open Findings",
+            "type": "integer"
+          },
+          "without_owner": {
+            "description": "Activos sin responsable.",
+            "title": "Without Owner",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "total_assets",
+          "by_class",
+          "by_criticality",
+          "by_exposure",
+          "by_classification",
+          "owners",
+          "without_owner",
+          "custodians",
+          "with_open_findings",
+          "with_kev_findings",
+          "last_sync_at",
+          "software"
+        ],
+        "title": "InventorySummary",
         "type": "object"
       },
       "ItopWebhookCall": {
@@ -2556,6 +2947,35 @@
         "title": "Page[HistoryEvent]",
         "type": "object"
       },
+      "Page_InventoryAsset_": {
+        "properties": {
+          "items": {
+            "description": "Elementos de la página.",
+            "items": {
+              "$ref": "#/components/schemas/InventoryAsset"
+            },
+            "title": "Items",
+            "type": "array"
+          },
+          "next_cursor": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Opaque cursor for the next page; null if none",
+            "title": "Next Cursor"
+          }
+        },
+        "required": [
+          "items"
+        ],
+        "title": "Page[InventoryAsset]",
+        "type": "object"
+      },
       "Page_LlmReviewEntry_": {
         "properties": {
           "items": {
@@ -2699,6 +3119,35 @@
           "items"
         ],
         "title": "Page[Run]",
+        "type": "object"
+      },
+      "Page_SoftwareItem_": {
+        "properties": {
+          "items": {
+            "description": "Elementos de la página.",
+            "items": {
+              "$ref": "#/components/schemas/SoftwareItem"
+            },
+            "title": "Items",
+            "type": "array"
+          },
+          "next_cursor": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Opaque cursor for the next page; null if none",
+            "title": "Next Cursor"
+          }
+        },
+        "required": [
+          "items"
+        ],
+        "title": "Page[SoftwareItem]",
         "type": "object"
       },
       "Page_Source_": {
@@ -3602,6 +4051,186 @@
         "title": "SimulationResult",
         "type": "object"
       },
+      "SoftwareHealth": {
+        "additionalProperties": false,
+        "properties": {
+          "cpe_percent": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Software con CPE, en %, como texto; nulo sin software.",
+            "title": "Cpe Percent"
+          },
+          "known_version_percent": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Software con versión conocida, en %, como texto; nulo sin software.",
+            "title": "Known Version Percent"
+          },
+          "total": {
+            "description": "Software instalado en CIs vigentes.",
+            "title": "Total",
+            "type": "integer"
+          },
+          "with_cpe": {
+            "description": "Software con CPE.",
+            "title": "With Cpe",
+            "type": "integer"
+          },
+          "with_known_version": {
+            "description": "Software con versión conocida.",
+            "title": "With Known Version",
+            "type": "integer"
+          },
+          "without_critical": {
+            "description": "Software sin vulnerabilidades críticas abiertas.",
+            "title": "Without Critical",
+            "type": "integer"
+          },
+          "without_critical_percent": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Software sin vulnerabilidades críticas abiertas, en %, como texto; nulo sin software.",
+            "title": "Without Critical Percent"
+          }
+        },
+        "required": [
+          "total",
+          "with_cpe",
+          "with_known_version",
+          "without_critical",
+          "cpe_percent",
+          "known_version_percent",
+          "without_critical_percent"
+        ],
+        "title": "SoftwareHealth",
+        "type": "object"
+      },
+      "SoftwareItem": {
+        "additionalProperties": false,
+        "examples": [
+          {
+            "ci_count": 3,
+            "cpe": "cpe:2.3:a:openssl:openssl:*:*:*:*:*:*:*:*",
+            "has_cpe": true,
+            "id": "0192f3a9-5061-7273-9e8f-9a0b1c2d3e4f",
+            "instances": 3,
+            "name": "OpenSSL",
+            "open_vulnerabilities": 2,
+            "version_known": true,
+            "versions": [
+              "3.0.7"
+            ],
+            "worst_level": "critical"
+          }
+        ],
+        "properties": {
+          "ci_count": {
+            "description": "CIs vigentes con el software.",
+            "title": "Ci Count",
+            "type": "integer"
+          },
+          "cpe": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "CPE 2.3 del producto (versión comodín); nulo si no tiene.",
+            "title": "Cpe"
+          },
+          "has_cpe": {
+            "description": "Si tiene un CPE asignado.",
+            "title": "Has Cpe",
+            "type": "boolean"
+          },
+          "id": {
+            "description": "Id (UUID) del producto de software.",
+            "title": "Id",
+            "type": "string"
+          },
+          "instances": {
+            "description": "Instalaciones del software en CIs vigentes.",
+            "title": "Instances",
+            "type": "integer"
+          },
+          "name": {
+            "description": "Nombre del software en iTop.",
+            "title": "Name",
+            "type": "string"
+          },
+          "open_vulnerabilities": {
+            "description": "Vulnerabilidades abiertas (CVE por producto) en CIs vigentes.",
+            "title": "Open Vulnerabilities",
+            "type": "integer"
+          },
+          "version_known": {
+            "description": "Si iTop da una versión real (no vacía ni un marcador como `N/A`).",
+            "title": "Version Known",
+            "type": "boolean"
+          },
+          "versions": {
+            "description": "Versiones conocidas instaladas, ordenadas (hasta 20).",
+            "items": {
+              "type": "string"
+            },
+            "title": "Versions",
+            "type": "array"
+          },
+          "worst_level": {
+            "anyOf": [
+              {
+                "enum": [
+                  "critical",
+                  "high",
+                  "medium",
+                  "low"
+                ],
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Peor nivel de sus vulnerabilidades abiertas; nulo si no tiene. Valores: `critical`: Crítica (urgencia 1); `high`: Alta (urgencia 2); `medium`: Media (urgencia 3); `low`: Baja (urgencia 4).",
+            "title": "Worst Level"
+          }
+        },
+        "required": [
+          "id",
+          "name",
+          "versions",
+          "version_known",
+          "instances",
+          "ci_count",
+          "cpe",
+          "has_cpe",
+          "open_vulnerabilities",
+          "worst_level"
+        ],
+        "title": "SoftwareItem",
+        "type": "object"
+      },
       "Source": {
         "additionalProperties": false,
         "examples": [
@@ -3622,6 +4251,18 @@
             "description": "Si está activo.",
             "title": "Active",
             "type": "boolean"
+          },
+          "description": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Qué es la fuente; nulo en los feeds propios.",
+            "title": "Description"
           },
           "health": {
             "description": "Salud de la fuente. Valores: `ok`: Responde bien; `degraded`: Responde con fallas; `failing`: No responde.",
@@ -3670,6 +4311,30 @@
             "description": "Nombre de la fuente.",
             "title": "Name",
             "type": "string"
+          },
+          "provider": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Quién la publica; nulo en los feeds propios.",
+            "title": "Provider"
+          },
+          "refresh_interval_minutes": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Cada cuántos minutos la lee Hermes; nulo si no tiene agenda propia.",
+            "title": "Refresh Interval Minutes"
           },
           "structural": {
             "description": "Si es una fuente estructural: no se puede apagar.",
@@ -7861,6 +8526,805 @@
         "summary": "Historial de eventos",
         "tags": [
           "runs"
+        ]
+      }
+    },
+    "/api/inventory/assets": {
+      "get": {
+        "description": "Todos los CIs vigentes de la réplica de iTop, con o sin hallazgos, en orden alfabético: clase, criticidad, exposición, clasificación, dueño, custodio, liga a iTop, hallazgos abiertos, en KEV y su riesgo (el mayor final de sus hallazgos abiertos, nunca una suma). Búsqueda y filtros. Pagina por cursor. Rol mínimo: `reader`.",
+        "operationId": "list_inventory_assets",
+        "parameters": [
+          {
+            "description": "Texto a buscar en el nombre o el id del CI.",
+            "in": "query",
+            "name": "q",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "maxLength": 100,
+                  "minLength": 1,
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Texto a buscar en el nombre o el id del CI.",
+              "title": "Q"
+            }
+          },
+          {
+            "description": "Clase de iTop exacta, por ejemplo `Server`.",
+            "in": "query",
+            "name": "itop_class",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "maxLength": 100,
+                  "minLength": 1,
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Clase de iTop exacta, por ejemplo `Server`.",
+              "title": "Itop Class"
+            }
+          },
+          {
+            "description": "Criticidad del CI en iTop. Valores: `high`: Alta; `medium`: Media; `low`: Baja; `unknown`: Sin dato en iTop.",
+            "in": "query",
+            "name": "criticality",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "enum": [
+                    "high",
+                    "medium",
+                    "low",
+                    "unknown"
+                  ],
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Criticidad del CI en iTop.",
+              "title": "Criticality"
+            }
+          },
+          {
+            "description": "Solo activos expuestos a internet (`true`) o no (`false`).",
+            "in": "query",
+            "name": "exposed",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "boolean"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Exposed"
+            }
+          },
+          {
+            "description": "Clasificación de los activos afectados. Valores: `public`: Información pública; `classified`: Clasificada; `highly_classified`: Altamente clasificada (se puede excluir de las exportaciones); `unclassified`: Sin clasificación asignada en iTop.",
+            "in": "query",
+            "name": "classification",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "enum": [
+                    "public",
+                    "classified",
+                    "highly_classified",
+                    "unclassified"
+                  ],
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Classification"
+            }
+          },
+          {
+            "description": "Responsable del activo (texto exacto).",
+            "in": "query",
+            "name": "owner",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "maxLength": 100,
+                  "minLength": 1,
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Owner"
+            }
+          },
+          {
+            "description": "Equipo custodio del activo (texto exacto).",
+            "in": "query",
+            "name": "custodian",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "maxLength": 100,
+                  "minLength": 1,
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Custodian"
+            }
+          },
+          {
+            "description": "Solo CIs con (`true`) o sin (`false`) hallazgos abiertos.",
+            "in": "query",
+            "name": "with_findings",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "boolean"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Solo CIs con (`true`) o sin (`false`) hallazgos abiertos.",
+              "title": "With Findings"
+            }
+          },
+          {
+            "description": "Opaque cursor from `next_cursor`: base64url(payload).base64url(signature). A cursor that is not ours or was altered is answered with 400 `invalid_cursor`.",
+            "in": "query",
+            "name": "cursor",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "maxLength": 1024,
+                  "pattern": "^[A-Za-z0-9_-]+\\.[A-Za-z0-9_-]+$",
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Opaque cursor from `next_cursor`: base64url(payload).base64url(signature). A cursor that is not ours or was altered is answered with 400 `invalid_cursor`.",
+              "title": "Cursor"
+            }
+          },
+          {
+            "description": "Page size",
+            "in": "query",
+            "name": "limit",
+            "required": false,
+            "schema": {
+              "default": 50,
+              "description": "Page size",
+              "maximum": 200,
+              "minimum": 1,
+              "title": "Limit",
+              "type": "integer"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Page_InventoryAsset_"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Cursor inválido o alterado (code: invalid_cursor)"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Se requiere autenticación válida."
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "No tienes permiso para realizar esta acción."
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "El recurso solicitado no existe."
+          },
+          "405": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Método no permitido para esta ruta."
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "La solicitud entra en conflicto con el estado actual del recurso."
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Los datos enviados no son válidos."
+          },
+          "429": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Demasiadas solicitudes; intenta de nuevo más tarde."
+          },
+          "500": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Error interno del servidor."
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "Inventario de activos",
+        "tags": [
+          "inventory"
+        ]
+      }
+    },
+    "/api/inventory/assets/{ci_id}/software": {
+      "get": {
+        "description": "El software de un CI vigente con su versión, su CPE y el peor nivel de sus vulnerabilidades abiertas en ese CI; 404 si el CI no está en el inventario vigente. Rol mínimo: `reader`.",
+        "operationId": "list_asset_software",
+        "parameters": [
+          {
+            "description": "Id del CI en iTop (por ejemplo `CI-0001`).",
+            "in": "path",
+            "name": "ci_id",
+            "required": true,
+            "schema": {
+              "maxLength": 100,
+              "minLength": 1,
+              "pattern": "^[^\\x00-\\x1f\\x7f-\\x9f/\\u202a-\\u202e\\u2066-\\u2069]+$",
+              "title": "Ci Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "items": {
+                    "$ref": "#/components/schemas/InstalledSoftwareItem"
+                  },
+                  "title": "Response Asset Software Api Inventory Assets  Ci Id  Software Get",
+                  "type": "array"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "La solicitud no es válida."
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Se requiere autenticación válida."
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "No tienes permiso para realizar esta acción."
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "El recurso solicitado no existe."
+          },
+          "405": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Método no permitido para esta ruta."
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "La solicitud entra en conflicto con el estado actual del recurso."
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Los datos enviados no son válidos."
+          },
+          "429": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Demasiadas solicitudes; intenta de nuevo más tarde."
+          },
+          "500": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Error interno del servidor."
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "Software instalado en un activo",
+        "tags": [
+          "inventory"
+        ]
+      }
+    },
+    "/api/inventory/software": {
+      "get": {
+        "description": "El software instalado en CIs vigentes, en orden alfabético: versiones, instancias, CIs, CPE y el peor nivel de sus vulnerabilidades abiertas. Filtros. Pagina por cursor. Rol mínimo: `reader`.",
+        "operationId": "list_inventory_software",
+        "parameters": [
+          {
+            "description": "Texto a buscar en el nombre del software.",
+            "in": "query",
+            "name": "q",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "maxLength": 100,
+                  "minLength": 1,
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Texto a buscar en el nombre del software.",
+              "title": "Q"
+            }
+          },
+          {
+            "description": "Solo software con (`true`) o sin (`false`) CPE.",
+            "in": "query",
+            "name": "has_cpe",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "boolean"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Solo software con (`true`) o sin (`false`) CPE.",
+              "title": "Has Cpe"
+            }
+          },
+          {
+            "description": "Peor nivel de sus vulnerabilidades abiertas. Valores: `critical`: Crítica (urgencia 1); `high`: Alta (urgencia 2); `medium`: Media (urgencia 3); `low`: Baja (urgencia 4).",
+            "in": "query",
+            "name": "worst_level",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "enum": [
+                    "critical",
+                    "high",
+                    "medium",
+                    "low"
+                  ],
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Peor nivel de sus vulnerabilidades abiertas.",
+              "title": "Worst Level"
+            }
+          },
+          {
+            "description": "Solo software con (`true`) o sin (`false`) vulnerabilidades abiertas.",
+            "in": "query",
+            "name": "with_vulnerabilities",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "boolean"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Solo software con (`true`) o sin (`false`) vulnerabilidades abiertas.",
+              "title": "With Vulnerabilities"
+            }
+          },
+          {
+            "description": "Opaque cursor from `next_cursor`: base64url(payload).base64url(signature). A cursor that is not ours or was altered is answered with 400 `invalid_cursor`.",
+            "in": "query",
+            "name": "cursor",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "maxLength": 1024,
+                  "pattern": "^[A-Za-z0-9_-]+\\.[A-Za-z0-9_-]+$",
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Opaque cursor from `next_cursor`: base64url(payload).base64url(signature). A cursor that is not ours or was altered is answered with 400 `invalid_cursor`.",
+              "title": "Cursor"
+            }
+          },
+          {
+            "description": "Page size",
+            "in": "query",
+            "name": "limit",
+            "required": false,
+            "schema": {
+              "default": 50,
+              "description": "Page size",
+              "maximum": 200,
+              "minimum": 1,
+              "title": "Limit",
+              "type": "integer"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Page_SoftwareItem_"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Cursor inválido o alterado (code: invalid_cursor)"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Se requiere autenticación válida."
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "No tienes permiso para realizar esta acción."
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "El recurso solicitado no existe."
+          },
+          "405": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Método no permitido para esta ruta."
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "La solicitud entra en conflicto con el estado actual del recurso."
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Los datos enviados no son válidos."
+          },
+          "429": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Demasiadas solicitudes; intenta de nuevo más tarde."
+          },
+          "500": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Error interno del servidor."
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "Software del inventario",
+        "tags": [
+          "inventory"
+        ]
+      }
+    },
+    "/api/inventory/summary": {
+      "get": {
+        "description": "Totales de los CIs vigentes por clase, criticidad, exposición y clasificación; dueños, custodios, CIs con hallazgos y en KEV, última sincronización con iTop y la salud del software (con CPE, con versión conocida y sin vulnerabilidades críticas abiertas). Rol mínimo: `reader`.",
+        "operationId": "get_inventory_summary",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/InventorySummary"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "La solicitud no es válida."
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Se requiere autenticación válida."
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "No tienes permiso para realizar esta acción."
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "El recurso solicitado no existe."
+          },
+          "405": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Método no permitido para esta ruta."
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "La solicitud entra en conflicto con el estado actual del recurso."
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Los datos enviados no son válidos."
+          },
+          "429": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Demasiadas solicitudes; intenta de nuevo más tarde."
+          },
+          "500": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Error interno del servidor."
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "Resumen del inventario",
+        "tags": [
+          "inventory"
         ]
       }
     },
@@ -12618,6 +14082,10 @@
     {
       "description": "Operación. Métricas, eventos de notificación, conexiones, instalación y auditoría.",
       "name": "operations"
+    },
+    {
+      "description": "Inventario. Todos los CIs vigentes de iTop y su software, con o sin hallazgos. Solo lectura: el inventario se edita en iTop.",
+      "name": "inventory"
     },
     {
       "description": "Telemetría de agentes. Corridas y revisiones de los agentes de IA (analistas y juez): resúmenes, series diarias y bitácora. Solo metadatos; nunca prompts, llamadas crudas ni texto de noticias.",

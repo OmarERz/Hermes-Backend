@@ -1,0 +1,26 @@
+meta {
+  name: asset-software-unknown
+  type: http
+  seq: 11
+}
+
+get {
+  url: {{baseUrl}}/api/inventory/assets/CI-NO-EXISTE/software
+  body: none
+  auth: bearer
+}
+
+auth:bearer {
+  token: {{token}}
+}
+
+assert {
+  res.status: eq 404
+  res.body.error.code: eq not_found
+}
+
+docs {
+  A CI outside the live inventory is a 404 with the error envelope.
+
+  operationId: list_asset_software
+}

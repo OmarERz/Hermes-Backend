@@ -52,6 +52,12 @@ TAGS: Final = (
     ("calibration", "Calibración", "Propuestas de ajuste supervisadas por un administrador."),
     ("operations", "Operación", "Métricas, eventos de notificación, conexiones, instalación y auditoría."),
     (
+        "inventory",
+        "Inventario",
+        "Todos los CIs vigentes de iTop y su software, con o sin hallazgos. Solo lectura: el inventario se edita "
+        "en iTop.",
+    ),
+    (
         "telemetry",
         "Telemetría de agentes",
         "Corridas y revisiones de los agentes de IA (analistas y juez): resúmenes, series diarias y bitácora. "
@@ -381,6 +387,37 @@ OPERATIONS: Final[dict[tuple[str, str], Op]] = {
         "cambio de configuración su versión y su autor. La auditoría completa sigue siendo solo de `admin` "
         "(`GET /api/audit`). Filtros por tipo, estado y fechas. Pagina por cursor. Rol mínimo: `reader`.",
     ),
+    ("GET", "/api/inventory/assets"): Op(
+        "list_inventory_assets",
+        "inventory",
+        "Inventario de activos",
+        "Todos los CIs vigentes de la réplica de iTop, con o sin hallazgos, en orden alfabético: clase, criticidad, "
+        "exposición, clasificación, dueño, custodio, liga a iTop, hallazgos abiertos, en KEV y su riesgo (el mayor "
+        "final de sus hallazgos abiertos, nunca una suma). Búsqueda y filtros. Pagina por cursor. "
+        "Rol mínimo: `reader`.",
+    ),
+    ("GET", "/api/inventory/summary"): Op(
+        "get_inventory_summary",
+        "inventory",
+        "Resumen del inventario",
+        "Totales de los CIs vigentes por clase, criticidad, exposición y clasificación; dueños, custodios, CIs con "
+        "hallazgos y en KEV, última sincronización con iTop y la salud del software (con CPE, con versión conocida "
+        "y sin vulnerabilidades críticas abiertas). Rol mínimo: `reader`.",
+    ),
+    ("GET", "/api/inventory/software"): Op(
+        "list_inventory_software",
+        "inventory",
+        "Software del inventario",
+        "El software instalado en CIs vigentes, en orden alfabético: versiones, instancias, CIs, CPE y el peor nivel "
+        "de sus vulnerabilidades abiertas. Filtros. Pagina por cursor. Rol mínimo: `reader`.",
+    ),
+    ("GET", "/api/inventory/assets/{ci_id}/software"): Op(
+        "list_asset_software",
+        "inventory",
+        "Software instalado en un activo",
+        "El software de un CI vigente con su versión, su CPE y el peor nivel de sus vulnerabilidades abiertas en ese "
+        "CI; 404 si el CI no está en el inventario vigente. Rol mínimo: `reader`.",
+    ),
 }
 
 PARAMS: Final[dict[str, str]] = {
@@ -407,6 +444,8 @@ PARAMS: Final[dict[str, str]] = {
     "days": "Cuántos días hacia atrás, hoy incluido (1 a 90).",
     "agent": "Agente de IA.",
     "type": "Tipo de evento.",
+    "itop_class": "Clase de iTop exacta, por ejemplo `Server`.",
+    "with_findings": "Solo CIs con (`true`) o sin (`false`) hallazgos abiertos.",
 }
 
 ENUMS: Final[dict[tuple[str, ...], dict[str, str]]] = {
@@ -558,6 +597,12 @@ ENUMS: Final[dict[tuple[str, ...], dict[str, str]]] = {
         "manual": "Lanzada por una persona",
         "after_scan": "Después de un escaneo",
         "formula_change": "Por un cambio de fórmula",
+    },
+    ("high", "medium", "low", "unknown"): {
+        "high": "Alta",
+        "medium": "Media",
+        "low": "Baja",
+        "unknown": "Sin dato en iTop",
     },
     ("deepseek", "claude-code"): {"deepseek": "API de DeepSeek", "claude-code": "Claude por la CLI de Claude Code"},
     ("decimal", "integer", "boolean", "string", "enum"): {
@@ -773,6 +818,37 @@ FIELDS: Final[dict[str, str]] = {
     "duration_seconds": "Duración en segundos; nula si no terminó.",
     "run_kind": "Tipo de corrida, si el evento es una corrida.",
     "trigger": "Por qué se lanzó la corrida.",
+    "by_class": "CIs por clase de iTop.",
+    "by_classification": "CIs por clasificación de datos.",
+    "by_criticality": "CIs por criticidad.",
+    "by_exposure": "CIs por exposición: `exposed`, `internal` o `unknown` (sin dato).",
+    "cpe_percent": "Software con CPE, en %, como texto; nulo sin software.",
+    "instances": "Instalaciones del software en CIs vigentes.",
+    "itop_class": "Clase del CI en iTop, por ejemplo `Server`.",
+    "kev_findings": "Hallazgos abiertos del CI con CVE en el catálogo KEV.",
+    "known_version_percent": "Software con versión conocida, en %, como texto; nulo sin software.",
+    "last_sync_at": "Última sincronización de un CI con iTop (UTC).",
+    "open_findings": "Hallazgos abiertos del CI (vulnerabilidades distintas).",
+    "open_vulnerabilities": "Vulnerabilidades abiertas (CVE por producto) en CIs vigentes.",
+    "os": "Sistema operativo del CI, según iTop.",
+    "personal_data": "Si el CI guarda datos personales; nulo si iTop no lo dice.",
+    "service": "Servicio de negocio del CI, según iTop.",
+    "software_count": "Instalaciones de software en el CI.",
+    "software_id": "Id (UUID) del producto de software.",
+    "synced_at": "Última sincronización del CI con iTop (UTC).",
+    "total": "Total.",
+    "total_assets": "CIs vigentes.",
+    "version_known": "Si iTop da una versión real (no vacía ni un marcador como `N/A`).",
+    "versions": "Versiones conocidas instaladas, ordenadas (hasta 20).",
+    "with_cpe": "Software con CPE.",
+    "with_kev_findings": "CIs con algún hallazgo abierto en KEV.",
+    "with_known_version": "Software con versión conocida.",
+    "with_open_findings": "CIs con hallazgos abiertos.",
+    "without_critical": "Software sin vulnerabilidades críticas abiertas.",
+    "without_critical_percent": "Software sin vulnerabilidades críticas abiertas, en %, como texto; nulo sin software.",
+    "worst_level": "Peor nivel de sus vulnerabilidades abiertas; nulo si no tiene.",
+    "has_cpe": "Si tiene un CPE asignado.",
+    "refresh_interval_minutes": "Cada cuántos minutos la lee Hermes; nulo si no tiene agenda propia.",
 }
 OVERRIDES: Final[dict[str, str]] = {
     "Alert.id": "Id de la alerta.",
@@ -856,6 +932,24 @@ OVERRIDES: Final[dict[str, str]] = {
     "RoleAssignment.role": "Rol que se asigna.",
     "RoleAssigned.role": "Rol asignado.",
     "WebhookAccepted.status": "Siempre `accepted`.",
+    "InventoryAsset.risk": "Riesgo del CI: el mayor final de sus hallazgos abiertos; nulo sin hallazgos.",
+    "InventoryAsset.level": "Nivel de su riesgo; nulo sin hallazgos.",
+    "InventoryAsset.name": "Nombre del CI.",
+    "InventoryAsset.exposed": "Si está expuesto a internet; nulo si iTop no lo dice.",
+    "InventoryAsset.classification": "Clasificación de datos del CI en iTop.",
+    "InventorySummary.owners": "Responsables distintos de los CIs.",
+    "InventorySummary.custodians": "Equipos custodios distintos de los CIs.",
+    "InventorySummary.software": "Salud del software del inventario.",
+    "InstalledSoftwareItem.name": "Nombre del software en iTop.",
+    "InstalledSoftwareItem.version": "Versión instalada, tal como la da iTop.",
+    "InstalledSoftwareItem.open_vulnerabilities": "Vulnerabilidades abiertas del software en este CI.",
+    "SoftwareItem.id": "Id (UUID) del producto de software.",
+    "SoftwareItem.name": "Nombre del software en iTop.",
+    "SoftwareItem.cpe": "CPE 2.3 del producto (versión comodín); nulo si no tiene.",
+    "SoftwareItem.ci_count": "CIs vigentes con el software.",
+    "SoftwareHealth.total": "Software instalado en CIs vigentes.",
+    "Source.description": "Qué es la fuente; nulo en los feeds propios.",
+    "Source.provider": "Quién la publica; nulo en los feeds propios.",
     "Run.trigger_reason": "Por qué se lanzó la corrida.",
     "Run.triggered_by": "Nombre de quien la lanzó; nulo si la lanzó la agenda.",
     "HistoryEvent.id": "Id del evento (el de la corrida, la revisión o el registro del cambio).",
@@ -1040,6 +1134,42 @@ EXAMPLES: Final[dict[str, list[dict[str, Any]]]] = {
             "assessment_id": "0192f3a4-7b1e-7c2d-8a5f-3e4d5c6b7a89",
             "reasons_accepted": 2,
             "reasons_rejected": 1,
+        }
+    ],
+    "InventoryAsset": [
+        {
+            "ci_id": "CI-0001",
+            "name": "srv-pagos-01",
+            "itop_class": "Server",
+            "criticality": "high",
+            "exposed": True,
+            "classification": "highly_classified",
+            "personal_data": True,
+            "owner": "Dueña de Pagos",
+            "custodian": "Infraestructura Linux",
+            "service": "Pagos",
+            "os": "Ubuntu 22.04",
+            "itop_url": "https://itop.example.test/pages/UI.php?operation=details&class=Server&id=CI-0001",
+            "synced_at": "2026-11-23T06:00:00Z",
+            "open_findings": 2,
+            "kev_findings": 1,
+            "risk": 90,
+            "level": "critical",
+            "software_count": 4,
+        }
+    ],
+    "SoftwareItem": [
+        {
+            "id": "0192f3a9-5061-7273-9e8f-9a0b1c2d3e4f",
+            "name": "OpenSSL",
+            "versions": ["3.0.7"],
+            "version_known": True,
+            "instances": 3,
+            "ci_count": 3,
+            "cpe": "cpe:2.3:a:openssl:openssl:*:*:*:*:*:*:*:*",
+            "has_cpe": True,
+            "open_vulnerabilities": 2,
+            "worst_level": "critical",
         }
     ],
     "HistoryEvent": [

@@ -13,6 +13,7 @@ from sqlalchemy.orm import Session, sessionmaker
 from core.config import Settings
 from core.ingestion.embeddings import HttpEmbedder
 from core.ingestion.fetcher import Fetcher
+from core.ingestion.source_info import NEWS_CYCLE_MINUTES, VULNDATA_REFRESH_MINUTES
 from core.itop.client import reader_from_settings
 from core.llm import ClaudeCodeClient, LlmClient, LlmRequestError, ToolCaller
 from core.llm.client import Role
@@ -39,11 +40,13 @@ if TYPE_CHECKING:
 
 log = logging.getLogger("workers.pipeline")
 
-NEWS_SECONDS = 3600.0  # D-010: news every hour
+NEWS_SECONDS = NEWS_CYCLE_MINUTES * 60.0  # D-010: news every hour (the front shows this period, F18.1)
 SCAN_REQUEST_SECONDS = 10.0  # POST /api/scans is picked up within seconds
 RECALC_REQUEST_SECONDS = 10.0  # a saved formula is recalculated within seconds (FRO-08)
 NIGHTLY_RECALC_SECONDS = 24 * 3600.0  # F-17
-VULNDATA_SECONDS = 24 * 3600.0  # ESC-09: NVD recent publications, KEV and EPSS once a day (and at start)
+VULNDATA_SECONDS = (
+    VULNDATA_REFRESH_MINUTES * 60.0
+)  # ESC-09: NVD recent publications, KEV and EPSS once a day (and at start)
 INVENTORY_SECONDS = 6 * 3600.0  # ARQ-03
 
 

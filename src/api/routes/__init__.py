@@ -2,7 +2,7 @@
 
 from fastapi import APIRouter
 
-from api.routes import admin, catalog, config, findings, operations, sources, telemetry
+from api.routes import admin, catalog, config, findings, inventory, operations, sources, telemetry
 
 routers: list[APIRouter] = [
     config.router,
@@ -12,4 +12,5 @@ routers: list[APIRouter] = [
     sources.router,
     admin.router,
     telemetry.router,
+    inventory.router,
 ]

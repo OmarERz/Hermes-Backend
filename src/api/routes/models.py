@@ -144,6 +144,9 @@ class Source(_Model):
     last_capture: str | None
     items_per_run: int
     health: Literal["ok", "degraded", "failing"]
+    description: str | None = None
+    provider: str | None = None
+    refresh_interval_minutes: int | None = None
 
 
 class SourceCreate(_Model):
@@ -713,3 +716,110 @@ class HistoryEvent(_Model):
     assessment_id: str | None
     config_version: int | None
     duration_seconds: int | None
+
+
+# --- inventory and software (D-088, F18.1) -----------------------------------------------------------------------
+Criticality = Literal["high", "medium", "low", "unknown"]
+FilterText = Annotated[str, Field(min_length=1, max_length=100)]
+
+
+class InventoryAssetFilters(_Model):
+    """Optional filters of the inventory list (AC-1). Text filters compare the exact value, `q` searches."""
+
+    # The same query string also carries `cursor` and `limit`, read by other parameters.
+    model_config = ConfigDict(extra="ignore", strict=False)
+
+    q: FilterText | None = Field(default=None, description="Texto a buscar en el nombre o el id del CI.")
+    itop_class: FilterText | None = Field(default=None, description="Clase de iTop exacta, por ejemplo `Server`.")
+    criticality: Criticality | None = Field(default=None, description="Criticidad del CI en iTop.")
+    exposed: bool | None = None
+    classification: Classification | None = None
+    owner: FilterText | None = None
+    custodian: FilterText | None = None
+    with_findings: bool | None = Field(
+        default=None, description="Solo CIs con (`true`) o sin (`false`) hallazgos abiertos."
+    )
+
+
+class InventoryAsset(_Model):
+    ci_id: str
+    name: str
+    itop_class: str
+    criticality: Criticality
+    exposed: bool | None
+    classification: Classification
+    personal_data: bool | None
+    owner: str | None
+    custodian: str | None
+    service: str | None
+    os: str | None
+    itop_url: str
+    synced_at: str
+    open_findings: int
+    kev_findings: int
+    risk: int | None = Field(ge=0, le=100)
+    level: Level | None
+    software_count: int
+
+
+class SoftwareHealth(_Model):
+    total: int
+    with_cpe: int
+    with_known_version: int
+    without_critical: int
+    cpe_percent: str | None
+    known_version_percent: str | None
+    without_critical_percent: str | None
+
+
+class InventorySummary(_Model):
+    total_assets: int
+    by_class: dict[str, int]
+    by_criticality: dict[str, int]
+    by_exposure: dict[str, int]
+    by_classification: dict[str, int]
+    owners: int
+    without_owner: int
+    custodians: int
+    with_open_findings: int
+    with_kev_findings: int
+    last_sync_at: str | None
+    software: SoftwareHealth
+
+
+class SoftwareFilters(_Model):
+    """Optional filters of the software list (ST-1)."""
+
+    # The same query string also carries `cursor` and `limit`, read by other parameters.
+    model_config = ConfigDict(extra="ignore", strict=False)
+
+    q: FilterText | None = Field(default=None, description="Texto a buscar en el nombre del software.")
+    has_cpe: bool | None = Field(default=None, description="Solo software con (`true`) o sin (`false`) CPE.")
+    worst_level: Level | None = Field(default=None, description="Peor nivel de sus vulnerabilidades abiertas.")
+    with_vulnerabilities: bool | None = Field(
+        default=None, description="Solo software con (`true`) o sin (`false`) vulnerabilidades abiertas."
+    )
+
+
+class SoftwareItem(_Model):
+    id: str
+    name: str
+    versions: list[str]
+    version_known: bool
+    instances: int
+    ci_count: int
+    cpe: str | None
+    has_cpe: bool
+    open_vulnerabilities: int
+    worst_level: Level | None
+
+
+class InstalledSoftwareItem(_Model):
+    software_id: str
+    name: str
+    version: str
+    version_known: bool
+    cpe: str | None
+    has_cpe: bool
+    open_vulnerabilities: int
+    worst_level: Level | None

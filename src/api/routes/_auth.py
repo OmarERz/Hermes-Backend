@@ -70,6 +70,10 @@ FRONT_ROUTE_ROLES: dict[tuple[str, str], Role] = {
     ("GET", "/api/telemetry/daily"): Role.READER,
     ("GET", "/api/telemetry/reviews"): Role.READER,
     ("GET", "/api/history"): Role.READER,
+    ("GET", "/api/inventory/assets"): Role.READER,
+    ("GET", "/api/inventory/summary"): Role.READER,
+    ("GET", "/api/inventory/software"): Role.READER,
+    ("GET", "/api/inventory/assets/{ci_id}/software"): Role.READER,
 }
 ROUTE_ROLES.update(FRONT_ROUTE_ROLES)
 

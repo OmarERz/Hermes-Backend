@@ -5,6 +5,7 @@ Recent activity (relative to now):
   runs     scan succeeded by Ana (-3 h, 10 min) · news failed (-2 h) · nightly running (-10 min)
   reviews  judge applied 1 000 ms · judge no_judge_review 3 000 ms · cve_analyst applied 500 ms (all -1 h)
   config   one change by Ana (-30 min), version 2
+  software "Software sin mapeo CPE" (no CPE) installed on CI-2 with version "N/A" (unknown)
 """
 
 from __future__ import annotations
@@ -120,6 +121,18 @@ def build_front(session: Session) -> Front:
             before={"dead_zone": "4"},
             after={"values": {"dead_zone": "5"}, "summary": "Cambió: dead_zone"},
             created_at=NOW - timedelta(minutes=30),
+        )
+    )
+    unmapped = session.scalars(
+        select(m.SoftwareProduct.id).where(m.SoftwareProduct.itop_name == "Software sin mapeo CPE")
+    ).one()
+    session.add(
+        m.InstalledSoftware(
+            itop_instance_id="SI-90",
+            asset_id=scenario.assets["CI-2"],
+            software_product_id=unmapped,
+            version="N/A",
+            synced_at=NOW,
         )
     )
     session.flush()
