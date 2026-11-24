@@ -4,13 +4,13 @@ from __future__ import annotations
 
 import secrets
 from collections.abc import Iterator
-from dataclasses import dataclass
 from pathlib import Path
 
 import pytest
 from alembic import command
 from alembic.config import Config
 from dbprovision import provisioned_database
+from slackdb import SlackDatabase
 from sqlalchemy import Engine, text
 from sqlalchemy.engine import make_url
 
@@ -19,14 +19,6 @@ from core.db.session import make_engine
 from slack_app import migrate
 
 ROOT = Path(__file__).resolve().parents[3]
-
-
-@dataclass(frozen=True)
-class SlackDatabase:
-    superuser_url: str
-    migrator_url: str
-    slack_url: str  # the slack_module role, with a login password
-    app_url: str
 
 
 @pytest.fixture(scope="module")

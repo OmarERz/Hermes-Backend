@@ -75,6 +75,7 @@ def test_nologin_takes_optional_roles_without_a_password_only() -> None:
 
 def test_main_passes_the_optional_slack_password_only_when_set(monkeypatch: pytest.MonkeyPatch) -> None:
     calls: list[tuple[dict[str, str], list[str]]] = []
+    monkeypatch.setattr("core.db.provision.configure_logging", lambda *a, **k: None)  # keep pytest's log capture
     monkeypatch.setattr("core.db.provision.wait_for_database", lambda *a, **k: None)
     monkeypatch.setattr(
         "core.db.provision.provision", lambda url, passwords, **kw: calls.append((dict(passwords), list(kw["nologin"])))

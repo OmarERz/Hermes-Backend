@@ -12,6 +12,7 @@ import pytest
 from alembic import command
 from alembic.config import Config
 from dbprovision import MigratedDatabase, provisioned_database
+from slackdb import SlackDatabase
 from sqlalchemy import Engine, MetaData, Table, literal_column, select, text
 from sqlalchemy import table as sql_table
 from sqlalchemy.engine import make_url
@@ -121,6 +122,9 @@ BAD = [
     ("slack_delivery", {"event_id": "e" * 129}),
     ("slack_delivery", {"delivery": "email"}),
     ("slack_delivery", {"message_ts": "1.2.3"}),
+    ("slack_delivery", {"audience": "everyone"}),
+    ("slack_delivery", {"channel_id": "general"}),
+    ("slack_digest_item", {"channel_id": "general"}),
     ("slack_digest_item", {"payload": [1, 2]}),
     ("slack_digest_item", {"status": "sent"}),
     ("slack_digest_item", {"attempts": -1}),
@@ -146,6 +150,8 @@ def test_valid_rows_are_accepted_and_keys_are_unique(slack_engine: Engine) -> No
     for table, row in GOOD.items():
         insert(slack_engine, table, row)
     insert(slack_engine, "slack_delivery", {**GOOD["slack_delivery"], "audience": "standard"})  # other audience
+    failed = {**GOOD["slack_digest_item"], "event_id": "evt-3", "status": "failed", "next_attempt_at": None}
+    insert(slack_engine, "slack_digest_item", failed)  # a failed item has no next attempt
     with pytest.raises(IntegrityError):
         insert(slack_engine, "slack_delivery", GOOD["slack_delivery"])
 
@@ -157,7 +163,7 @@ def test_slack_module_uses_only_its_tables(slack_engine: Engine) -> None:
         conn.execute(text("SELECT 1 FROM slack_alembic_version"))
 
 
-def test_the_backend_roles_cannot_read_slack_tables(slack_db: Any) -> None:
+def test_the_backend_roles_cannot_read_slack_tables(slack_db: SlackDatabase) -> None:
     engine = make_engine(slack_db.app_url)
     try:
         for table in TABLES:
@@ -167,14 +173,28 @@ def test_the_backend_roles_cannot_read_slack_tables(slack_db: Any) -> None:
         engine.dispose()
 
 
-def test_without_its_password_slack_module_cannot_log_in(fresh_db: MigratedDatabase) -> None:
-    """Optional login role (approved 23 Nov 2026): LOGIN only while SLACK_DB_PASSWORD is configured."""
+def can_login(superuser_url: str) -> bool:
+    with psycopg.connect(superuser_url) as conn:
+        row = conn.execute("SELECT rolcanlogin FROM pg_roles WHERE rolname = 'slack_module'").fetchone()
+    return bool(row and row[0])
+
+
+def test_without_its_password_slack_module_cannot_log_in(fresh_db: MigratedDatabase, slack_db: SlackDatabase) -> None:
+    """Optional login role (approved 23 Nov 2026): LOGIN only while SLACK_DB_PASSWORD is configured.
+
+    Roles are cluster-wide: the module's own slack_module password is restored at the end for the other tests."""
     sql_path = ROOT / "migrations" / "provision.sql"
     password = secrets.token_urlsafe(16)
     url = make_url(fresh_db.superuser_url).set(username="slack_module", password=password)
-    provision(fresh_db.superuser_url, {"slack_module": password}, sql_path)
-    with psycopg.connect(url.render_as_string(hide_password=False)) as conn:
-        assert conn.execute("SELECT current_user").fetchone() == ("slack_module",)
-    provision(fresh_db.superuser_url, {}, sql_path, nologin=["slack_module"])
-    with pytest.raises(psycopg.OperationalError):
-        psycopg.connect(url.render_as_string(hide_password=False))
+    try:
+        provision(fresh_db.superuser_url, {"slack_module": password}, sql_path)
+        with psycopg.connect(url.render_as_string(hide_password=False)) as conn:
+            assert conn.execute("SELECT current_user").fetchone() == ("slack_module",)
+        provision(fresh_db.superuser_url, {}, sql_path, nologin=["slack_module"])
+        assert not can_login(fresh_db.superuser_url)
+        with pytest.raises(psycopg.OperationalError):
+            psycopg.connect(url.render_as_string(hide_password=False))
+    finally:
+        original = make_url(slack_db.slack_url).password
+        assert original is not None
+        provision(slack_db.superuser_url, {"slack_module": str(original)}, sql_path)
