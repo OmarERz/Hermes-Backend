@@ -299,7 +299,8 @@ software se identifica por **nombre y versión** (`@Software:PostgreSQL 15.4`), 
 producto son dos entradas del catálogo; `key` y `ref` cambian la identidad o el nombre de referencia de un objeto.
 Sirve cualquier campo de iTop, p. ej. `type` (categoría del software), `status` y `softwarelicence_id` (estado y
 licencia de una instalación, con la licencia como objeto `SoftwareLicence`), `description`, `cpu` y `ram`;
-`inventories/prueba-lyft.yaml` los usa todos.
+`inventories/lyft-challenge.yaml` los usa todos. Pon entre comillas las fechas y los `yes`/`no`
+(`"2024-01-15"`, `"yes"`): sin comillas YAML los convierte en fecha o booleano y el cargador rechaza el archivo.
 
 - `make itop-load INVENTORY=<archivo>` es un simulacro: lista qué crearía (`+ create`), qué ya existe (`= exists`) y
   un resumen; no escribe nada. Si una referencia no existe, no escribe nada y dice cuál falla.
@@ -309,7 +310,9 @@ licencia de una instalación, con la licencia como objeto `SoftwareLicence`), `d
   `ITOP_SERVICE_ID`, listos para copiarlos a la configuración de Hermes.
 - La sección `cpe:` asigna el CPE de cada producto. Hermes conoce un producto después de sincronizar el inventario
   (lo hace cada escaneo), así que: carga, pide un escaneo (`POST /api/scans`), corre
-  `HERMES_API_TOKEN=$(make -s emulator-token ROLE=analyst) make itop-map-cpe INVENTORY=<archivo>` y vuelve a escanear.
+  `HERMES_API_TOKEN=<token de un analista> make itop-map-cpe INVENTORY=<archivo>` y vuelve a escanear. Con el
+  emulador de Firebase el token sale de `make -s emulator-token ROLE=analyst`; con un proyecto real de Firebase hace
+  falta el token de ID de un usuario con rol de analista (o asigna los CPE en la pantalla de pendientes del front).
   Un producto con `null` queda a propósito sin CPE (aparece en la pantalla de pendientes).
 
 **Conectar Hermes con iTop**

@@ -1,10 +1,10 @@
 # Test inventory for the M6 challenge (D-085, D-087): a FICTIONAL ride-hailing company modelled on the stack of the
 # challenge brief (docs/Stack tecnologico.txt). No real company data: people, e-mails (example.test), IPs and names are
 # made up. Readable summary for approval: docs/inventario-prueba.md (local).
-#   make itop-load INVENTORY=inventories/prueba-lyft.yaml                    dry run
-#   make itop-load INVENTORY=inventories/prueba-lyft.yaml APPLY=1 UPDATE=1   write (UPDATE: links the organization to
+#   make itop-load INVENTORY=inventories/lyft-challenge.yaml                 dry run
+#   make itop-load INVENTORY=inventories/lyft-challenge.yaml APPLY=1 UPDATE=1   write (UPDATE: links the organization to
 #                                                                            its delivery model, created by provision)
-#   make itop-map-cpe INVENTORY=inventories/prueba-lyft.yaml                 after the first scan synced the products
+#   make itop-map-cpe INVENTORY=inventories/lyft-challenge.yaml              after the first scan synced the products
 # The organization (Demo-Lab) and the person "Hermes System" come from docker/itop/provision.php.
 # Where the brief gives only major.minor (Next.js 13.5, Go 1.21...) the inventory uses the .0 release.
 # Three CIs are incomplete on purpose (pending screen): svc-reportes-legado, emr-nodo-02 and superset-bi.

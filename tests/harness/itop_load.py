@@ -35,12 +35,14 @@ class identified by a single field, to one already in iTop; nothing is written w
 whose identity key matches an existing one is left alone, or with --update gets only the fields whose value differs
 (a link list differs when the set of linked objects differs). Values are data: names and descriptions are sent as
 they are and never interpreted. Plain http is accepted only for local hosts (the iTop and API containers or this
-machine); anything else needs https.
+machine: localhost or a loopback IP); anything else needs https.
 """
 
 from __future__ import annotations
 
 import argparse
+import datetime
+import html
 import ipaddress
 import json
 import os
@@ -54,13 +56,14 @@ from typing import Any, Final, Literal
 import httpx
 
 from core.itop import oql
+from core.itop.oql import FIRST_PRINTABLE
 
 REST_PATH: Final = "/webservices/rest.php"
 TIMEOUT: Final = httpx.Timeout(15.0, connect=5.0)
 # Identity key per class when the file does not say: two catalogue entries may share a name (one per version).
 DEFAULT_KEYS: Final[dict[str, tuple[str, ...]]] = {"Software": ("name", "version")}
 HTTP_ERROR: Final = 400
-LOCAL_HOSTS: Final = frozenset({"localhost", "itop", "api", "host.docker.internal"})
+LOCAL_HOSTS: Final = frozenset({"localhost"})  # plus loopback IPs: the loader runs on this machine, not in a container
 ITEM_KEYS: Final = frozenset({"class", "name", "key", "ref", "fields"})
 FILE_KEYS: Final = frozenset({"objects", "env", "cpe"})
 _REF: Final = re.compile(r"^@(\w+):(.+)$", re.S)
@@ -208,9 +211,27 @@ class Action:
     changed: list[str] = field(default_factory=list)
 
 
+def _check_values(value: Any, what: str) -> None:
+    """Refuse what YAML turns into something other than text by itself (an unquoted date, yes/no, true/false) and
+    control characters: iTop wants the text the file shows, and a date would not even reach it as JSON."""
+    if isinstance(value, dict):
+        for name, item in value.items():
+            _check_values(item, f"{what}.{name}")
+    elif isinstance(value, list):
+        for item in value:
+            _check_values(item, what)
+    elif isinstance(value, (bool, datetime.date)):
+        raise TypeError(f'{what}: YAML read {value!r} as a {type(value).__name__}: quote it ("{value}")')
+    elif isinstance(value, str) and any(ord(ch) < FIRST_PRINTABLE and ch not in "\t\n" for ch in value):
+        raise ValueError(f"{what}: control characters are not allowed")
+
+
 def _text(value: Any, what: str) -> str:
     if isinstance(value, (dict, list)) or value is None or value == "":
         raise ValueError(f"{what} must be a non-empty text")
+    _check_values(value, what)
+    if "\n" in str(value) or "\t" in str(value):
+        raise ValueError(f"{what}: control characters are not allowed")
     return str(value)
 
 
@@ -236,6 +257,7 @@ def _spec(position: int, item: Any) -> Spec:
         key[oql.require_identifier(name)] = _text(fields.pop(name), f"object #{position}: `{name}`")
     for name in fields:
         oql.require_identifier(name)
+    _check_values(fields, f"object #{position} ({item['name']}) fields")
     ref = _text(item["ref"], f"object #{position}: `ref`") if "ref" in item else " ".join(key.values())
     return Spec(class_name, key, ref, fields)
 
@@ -261,6 +283,10 @@ def parse_inventory(path: Path) -> Inventory:
     duplicated = {label for label in labels if labels.count(label) > 1}
     if duplicated:
         raise ValueError(f"duplicated objects: {sorted(duplicated)} (give them a different `ref` or key)")
+    identities = [(spec.class_name, tuple(spec.key.items())) for spec in specs]
+    twins = sorted({f"{c} {dict(k)}" for c, k in identities if identities.count((c, k)) > 1})
+    if twins:
+        raise ValueError(f"objects with the same identity key: {twins} (iTop would get two of them: change the key)")
     env = data.get("env") or {}
     if not isinstance(env, dict) or not all(
         isinstance(k, str) and _ENV_NAME.match(k) and isinstance(v, str) and _REF.match(v) for k, v in env.items()
@@ -297,8 +323,9 @@ def resolve(value: Any, ids: Mapping[str, str]) -> Any:
 
 def same(current: Any, wanted: Any) -> bool:
     """Whether iTop's value already is the file's: text compared as text (an HTML field comes back wrapped in one
-    paragraph); a link list compared as the set of the file's sub-fields (iTop returns more of them, the link ids, and
-    the links its impact analysis computed, which nobody writes)."""
+    paragraph, with entities; an unset external key comes back as 0); a link list compared as the set of the file's
+    sub-fields (iTop returns more of them, the link ids, and the links its impact analysis computed, which nobody
+    writes)."""
     if isinstance(wanted, list):
         if not isinstance(current, list):
             return False
@@ -315,13 +342,16 @@ def same(current: Any, wanted: Any) -> bool:
     if isinstance(wanted, dict):
         return False
     text, target = ("" if current is None else str(current)), ("" if wanted is None else str(wanted))
-    return text in {target, f"<p>{target}</p>"}
+    if text == "0" and target == "":  # iTop returns an unset external key as 0
+        return True
+    return html.unescape(text) in {target, f"<p>{target}</p>"}
 
 
 class Loader:
     def __init__(self, itop: ItopRest) -> None:
         self.itop = itop
         self.ids: dict[str, str] = {}  # `@Class:ref` -> iTop id, for objects known to exist
+        self.done: list[Action] = []  # what apply() already went through, reported if it stops halfway
 
     def lookup(self, ref: str) -> str | None:
         """The iTop id of a reference to an object not defined in the file (single-field identity only)."""
@@ -373,6 +403,7 @@ class Loader:
         return actions, errors
 
     def apply(self, actions: Sequence[Action]) -> None:
+        self.done.clear()
         for action in actions:
             spec = action.spec
             if action.kind == "create":
@@ -384,6 +415,7 @@ class Loader:
                 fields = resolve(spec.fields, self.ids)
                 if changed:
                     self.itop.update(spec.class_name, action.object_id, {name: fields[name] for name in changed})
+            self.done.append(action)
 
 
 def _report(actions: Sequence[Action], *, applied: bool) -> None:
@@ -477,6 +509,9 @@ def _load(loader: Loader, inventory: Inventory, *, apply: bool, update: bool) ->
             sys.stdout.write("dry run: nothing was written; repeat with --apply\n")
         _report_env(loader, inventory.env)
     except LoaderError as error:
+        if apply and loader.done:
+            sys.stdout.write("written before iTop failed:\n")
+            _report(loader.done, applied=True)
         sys.stderr.write(f"iTop failed: {error}\n(what was written stays; running the file again resumes)\n")
         return 1
     return 0

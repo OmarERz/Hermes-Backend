@@ -278,6 +278,12 @@ def test_unreachable_itop_is_reported(capsys: pytest.CaptureFixture[str]) -> Non
         "env: { ITOP_ORG_ID: '3' }\nobjects:\n  - { class: Server, name: a }\n",
         "cpe: [a]\nobjects:\n  - { class: Server, name: a }\n",
         "cpe: { nginx: 'cpe:2.3:a:f5:nginx' }\nobjects:\n  - { class: Server, name: a }\n",
+        "objects:\n  - { class: Server, name: a, fields: { internet_exposed: no } }\n",  # YAML boolean
+        "objects:\n  - { class: SoftwareLicence, name: l, fields: { start_date: 2024-01-15 } }\n",  # YAML date
+        "objects:\n  - { class: Team, name: t, fields: { persons_list: [ { person_id: true } ] } }\n",
+        'objects:\n  - { class: Server, name: "a\\u0007b" }\n',  # control character in a key value
+        'objects:\n  - { class: Server, name: a, fields: { description: "x\\u0000y" } }\n',
+        "objects:\n  - { class: Person, name: Garcia, ref: a }\n  - { class: Person, name: Garcia, ref: b }\n",
     ],
 )
 def test_invalid_files_are_rejected(tmp_path: Path, text: str, capsys: pytest.CaptureFixture[str]) -> None:
@@ -306,11 +312,16 @@ def test_cli_refuses_plain_http_to_a_remote_host(
     assert "plain http" in capsys.readouterr().err
 
 
-@pytest.mark.parametrize(
-    "url", ["https://itop.example.com", "http://localhost:8080", "http://127.0.0.1:8080", "http://itop:8080"]
-)
-def test_https_and_local_hosts_are_accepted(url: str) -> None:
+@pytest.mark.parametrize("url", ["https://itop.example.com", "http://localhost:8080", "http://127.0.0.1:8080"])
+def test_https_and_this_machine_are_accepted(url: str) -> None:
     itop_load.ItopRest(url, "t")
+
+
+@pytest.mark.parametrize("url", ["http://itop:8080", "http://api:8000", "http://host.docker.internal:8080"])
+def test_container_names_get_no_token_over_plain_http(url: str) -> None:
+    # The loader runs on this machine: there a bare name may resolve through the DNS search domain to another host.
+    with pytest.raises(ValueError, match="plain http"):
+        itop_load.ItopRest(url, "t")
 
 
 def test_a_url_that_is_not_http_is_refused() -> None:
@@ -462,3 +473,60 @@ def test_category_status_licence_description_and_sizing_are_loaded_and_updated(
     assert "~ update    VirtualMachine 'cache-1': ram" in out
     assert "~ update    DBServer 'Redis 7.2.0 @ cache-1': status" in out
     assert (rows(double, "VirtualMachine")[0]["ram"], rows(double, "DBServer")[0]["status"]) == ("64 GB", "inactive")
+
+
+def test_an_apply_that_stops_halfway_reports_what_it_wrote(tmp_path: Path, capsys: pytest.CaptureFixture[str]) -> None:
+    text = (
+        "objects:\n  - { class: Organization, name: Org }\n  - { class: Server, name: s, fields: { status: weird } }\n"
+    )
+    assert itop_load.run([str(write(tmp_path, text)), "--apply"], itop=loader_for(ItopDouble())) == 1
+    captured = capsys.readouterr()
+    assert "written before iTop failed:" in captured.out
+    assert "+ create    Organization 'Org'" in captured.out
+    assert "Server" not in captured.out
+    assert "iTop failed" in captured.err
+
+
+@pytest.mark.parametrize(
+    ("current", "wanted"),
+    [("<p>Tom &amp; Jerry</p>", "Tom & Jerry"), ("0", ""), (0, "")],
+)
+def test_same_ignores_html_entities_and_unset_external_keys(current: Any, wanted: Any) -> None:
+    assert itop_load.same(current, wanted)
+
+
+INVENTORY = ROOT / "inventories" / "lyft-challenge.yaml"
+
+
+def test_the_approved_inventory_loads_and_a_second_run_changes_nothing(capsys: pytest.CaptureFixture[str]) -> None:
+    # D-087: the inventory the user approved, against a double holding what provision.php creates
+    double = provisioned()
+    double.add("Organization", 901, name="Demo-Lab")
+    assert itop_load.run([str(INVENTORY), "--apply", "--update"], itop=loader_for(double)) == 0
+    first = capsys.readouterr().out
+    assert "summary: 124 created, 1 updated, 0 unchanged" in first  # the organization gets its delivery model
+    assert "ITOP_ORG_ID=901\n" in first and "ITOP_CALLER_ID=900\n" in first
+    writes = len(double.writes)
+    assert itop_load.run([str(INVENTORY), "--apply", "--update"], itop=loader_for(double)) == 0
+    assert len(double.writes) == writes
+    assert "summary: 0 created, 0 updated, 125 unchanged" in capsys.readouterr().out
+    cis = {row["name"]: row for table in ("ApplicationSolution", "VirtualMachine") for row in rows(double, table)}
+    assert "internet_exposed" not in cis["svc-reportes-legado"] and "owner_id" not in cis["svc-reportes-legado"]
+    assert "custodian_id" not in cis["emr-nodo-02"] and "owner_id" not in cis["emr-nodo-02"]
+    assert "internet_exposed" not in cis["superset-bi"]
+
+
+def test_the_approved_inventory_maps_the_kernel_cpe_of_one_node_only() -> None:
+    inventory = itop_load.parse_inventory(INVENTORY)
+    assert inventory.cpe["Linux Kernel"] == "cpe:2.3:o:linux:linux_kernel:*:*:*:*:*:*:*:*"
+    assert inventory.cpe["Kernel de Amazon Linux 2023"] is None
+    kernels = {
+        spec.fields["system_id"]: spec.fields["software_id"]
+        for spec in inventory.specs
+        if spec.class_name == "OtherSoftware" and "ernel" in spec.fields["software_id"]
+    }
+    assert [host for host, product in kernels.items() if product == "@Software:Linux Kernel 6.1.0"] == [
+        "@VirtualMachine:eks-nodo-01"
+    ]
+    products = {spec.key["name"] for spec in inventory.specs if spec.class_name == "Software"}
+    assert products == set(inventory.cpe)  # every product has a CPE decision, nothing extra
