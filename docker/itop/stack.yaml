@@ -1,10 +1,16 @@
 # Synthetic stack for the iTop test instance (F0.7): one organization, two teams, two owners, seven devices, four software instances and the
 # software catalogue, with the D-037 extension attributes. Some CIs are deliberately incomplete (no exposure, no
 # classification, no owner or custodian) to exercise the inventory-pending screen (ESC-03c, P-013).
-#   make itop-seed            dry run
+#   make itop-seed            dry run (make itop-load INVENTORY=docker/itop/stack.yaml)
 #   make itop-seed APPLY=1    write
 # iTop requires: status production|implementation|stock|obsolete (devices) and active|inactive (software and
 # solutions); business_criticity high|medium|low; system_id on every software instance.
+# The ids the backend files tickets with (ITOP_ORG_ID, ITOP_CALLER_ID, ITOP_SERVICE_ID), printed after the load.
+env:
+  ITOP_ORG_ID: "@Organization:Demo-Lab"
+  ITOP_CALLER_ID: "@Person:Hermes System"
+  ITOP_SERVICE_ID: "@Service:Vulnerability management"
+
 objects:
   - class: Organization
     name: Demo-Lab
@@ -112,16 +118,16 @@ objects:
   # Installations: what runs where
   - class: WebServer
     name: nginx 1.24.0 @ web-frontend-01
-    fields: { org_id: "@Organization:Demo-Lab", system_id: "@Server:web-frontend-01", software_id: "@Software:nginx", status: active }
+    fields: { org_id: "@Organization:Demo-Lab", system_id: "@Server:web-frontend-01", software_id: "@Software:nginx 1.24.0", status: active }
   - class: WebServer
     name: nginx 1.24.0 @ web-frontend-02
-    fields: { org_id: "@Organization:Demo-Lab", system_id: "@Server:web-frontend-02", software_id: "@Software:nginx", status: active }
+    fields: { org_id: "@Organization:Demo-Lab", system_id: "@Server:web-frontend-02", software_id: "@Software:nginx 1.24.0", status: active }
   - class: DBServer
     name: PostgreSQL 15.4 @ db-host-01
-    fields: { org_id: "@Organization:Demo-Lab", system_id: "@Server:db-host-01", software_id: "@Software:PostgreSQL", status: active }
+    fields: { org_id: "@Organization:Demo-Lab", system_id: "@Server:db-host-01", software_id: "@Software:PostgreSQL 15.4", status: active }
   - class: OtherSoftware
     name: OpenSSL 3.0.2 @ k8s-node-01
-    fields: { org_id: "@Organization:Demo-Lab", system_id: "@Server:k8s-node-01", software_id: "@Software:OpenSSL", status: active }
+    fields: { org_id: "@Organization:Demo-Lab", system_id: "@Server:k8s-node-01", software_id: "@Software:OpenSSL 3.0.2", status: active }
 
   # Service catalogue: a ticket can only be resolved with a service linked, through a customer contract, to the
   # ticket's organization (analysis §5.5)
