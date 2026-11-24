@@ -203,3 +203,130 @@ def test_a_first_login_during_the_assignment_gets_the_new_role(sessions: session
 
     record = directory.change_role("newbie", Role.ANALYST, "boss", firebase_then_first_login)
     assert record is not None and record.role is Role.ANALYST
+
+
+# --- bootstrap_role: the command-line first admin (api.auth.bootstrap, D-087) ---------------------------------------
+
+
+def audit_rows(sessions: sessionmaker[Session], uid: str) -> list[tuple[str, object, object, object]]:
+    with sessions() as session:
+        rows = session.scalars(select(AuditLog).where(AuditLog.entity_id == uid).order_by(AuditLog.id)).all()
+    return [(a.action, a.app_user_id, a.before, a.after) for a in rows]
+
+
+def test_bootstrap_creates_the_copy_of_a_user_who_never_logged_in(sessions: sessionmaker[Session]) -> None:
+    directory = SqlUserDirectory(sessions)
+    applied: list[str] = []
+
+    result = directory.bootstrap_role(identity("b1", Role.ADMIN), lambda: applied.append("b1") is None, False)
+
+    assert applied == ["b1"]
+    assert (result.changed, result.created, result.sessions_revoked) == (True, True, True)
+    assert (result.record.role, result.record.active, result.record.last_login_at) == (Role.ADMIN, True, None)
+    assert audit_rows(sessions, "b1") == [
+        ("role_assignment_requested", None, None, {"role": "admin", "via": "cli"}),
+        ("user_created", None, None, {"role": "admin", "active": True}),
+        ("role_assigned", None, None, {"role": "admin", "via": "cli", "sessions_revoked": True}),
+    ]
+
+
+def test_bootstrap_is_idempotent(sessions: sessionmaker[Session]) -> None:
+    directory = SqlUserDirectory(sessions)
+    directory.bootstrap_role(identity("b2", Role.ADMIN), lambda: True, False)
+    before = audit_rows(sessions, "b2")
+
+    again = directory.bootstrap_role(identity("b2", Role.ADMIN), lambda: pytest.fail("Firebase written again"), True)
+
+    assert (again.changed, again.created, again.record.role) == (False, False, Role.ADMIN)
+    assert audit_rows(sessions, "b2") == before
+
+
+def test_bootstrap_updates_an_existing_copy_and_skips_a_claim_already_set(sessions: sessionmaker[Session]) -> None:
+    directory = SqlUserDirectory(sessions)
+    directory.sync_login(identity("b3", Role.READER))
+
+    # The claim already holds the role: apply (which reads it again under the locks) writes nothing and revokes nothing.
+    result = directory.bootstrap_role(identity("b3", Role.ANALYST), lambda: False, True)
+
+    assert (result.changed, result.created, result.sessions_revoked, result.record.role) == (
+        True,
+        False,
+        False,
+        Role.ANALYST,
+    )
+    assert audit_rows(sessions, "b3")[-1] == (
+        "role_assigned",
+        None,
+        {"role": "reader"},
+        {"role": "analyst", "via": "cli", "sessions_revoked": False},
+    )
+
+
+def test_bootstrap_keeps_an_inactive_user_inactive(sessions: sessionmaker[Session]) -> None:
+    directory = SqlUserDirectory(sessions)
+    directory.sync_login(identity("b4", Role.READER))
+    with sessions.begin() as session:
+        session.execute(update(AppUser).where(AppUser.firebase_uid == "b4").values(active=False))
+
+    result = directory.bootstrap_role(identity("b4", Role.ADMIN), lambda: True, False)
+
+    assert (result.record.role, result.record.active) == (Role.ADMIN, False)
+
+
+def test_bootstrap_never_demotes_the_last_active_admin(sessions: sessionmaker[Session]) -> None:
+    directory = SqlUserDirectory(sessions)
+    directory.bootstrap_role(identity("b5", Role.ADMIN), lambda: True, False)
+
+    with pytest.raises(RoleConflictError) as refused:
+        directory.bootstrap_role(identity("b5", Role.READER), lambda: pytest.fail("Firebase touched"), False)
+
+    assert refused.value.code == "last_admin"
+    assert audit_rows(sessions, "b5")[-1][0] == "role_assignment_failed"
+    with sessions() as session:
+        assert session.scalar(select(AppUser.role).where(AppUser.firebase_uid == "b5")) == "admin"
+    # With another active admin the demotion goes through.
+    directory.bootstrap_role(identity("b6", Role.ADMIN), lambda: True, False)
+    assert directory.bootstrap_role(identity("b5", Role.READER), lambda: True, False).record.role is Role.READER
+
+
+def test_bootstrap_refuses_an_email_owned_by_another_account(sessions: sessionmaker[Session]) -> None:
+    directory = SqlUserDirectory(sessions)
+    directory.sync_login(identity("old", Role.READER, email="same@example.com"))
+
+    with pytest.raises(UserConflictError):
+        directory.bootstrap_role(
+            identity("new", Role.ADMIN, email="same@example.com"), lambda: pytest.fail("Firebase touched"), False
+        )
+
+    assert [row[0] for row in audit_rows(sessions, "new")] == ["role_assignment_requested", "role_assignment_failed"]
+    with sessions() as session:
+        assert session.scalar(select(AppUser).where(AppUser.firebase_uid == "new")) is None
+
+
+def test_a_failed_firebase_write_is_audited_and_creates_no_copy(sessions: sessionmaker[Session]) -> None:
+    directory = SqlUserDirectory(sessions)
+
+    def fail() -> bool:
+        raise RuntimeError("firebase down")
+
+    with pytest.raises(RuntimeError):
+        directory.bootstrap_role(identity("b7", Role.ADMIN), fail, False)
+
+    assert [row[0] for row in audit_rows(sessions, "b7")] == ["role_assignment_requested", "role_assignment_failed"]
+    with sessions() as session:
+        assert session.scalar(select(AppUser).where(AppUser.firebase_uid == "b7")) is None
+
+
+def test_bootstrap_keeps_a_copy_a_first_login_created_meanwhile(sessions: sessionmaker[Session]) -> None:
+    directory = SqlUserDirectory(sessions)
+
+    def first_login_while_firebase_answers() -> bool:
+        directory.sync_login(identity("b8", Role.READER))
+        return True
+
+    result = directory.bootstrap_role(identity("b8", Role.ADMIN), first_login_while_firebase_answers, False)
+
+    assert (result.created, result.record.role, result.record.last_login_at is not None) == (False, Role.ADMIN, True)
+    rows = audit_rows(sessions, "b8")
+    assert [row[0] for row in rows] == ["role_assignment_requested", "user_created", "role_assigned"]  # by the login
+    assert rows[-1][2] == {"role": "reader"}  # the role the login copied, overwritten by the bootstrap
