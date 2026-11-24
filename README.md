@@ -44,18 +44,21 @@ make prepush     # con el árbol limpio, sobre el commit que vas a publicar
    `make bruno` con los tres tokens y `make zap`.
 
 La pila y los secretos temporales siempre se borran (`down -v`), aunque algo falle. Tarda unos 15 minutos en un equipo
-de desarrollo: unos 5 de `make verify`, 7 de Schemathesis, 2 de ZAP y 1 de arrancar la pila. Si todo pasa, guarda el
-árbol del commit (`HEAD^{tree}`) en `.review/prepush.json` y en `.review/prepush.log` del checkout principal (archivos
-locales, no versionados).
+de desarrollo: unos 5 de `make verify`, 7 de Schemathesis, 2 de ZAP y 1 de arrancar la pila. Usa los valores fijados
+en el repositorio aunque tu entorno defina otros (imágenes de los escáneres, opciones de `make` o de pytest, carpeta de
+Bruno). Si todo pasa, guarda el árbol del commit (`HEAD^{tree}`) en `.review/prepush.json` del checkout donde corrió y
+agrega una línea a `.review/prepush.log` del checkout principal, que comparten todos los worktrees (archivos locales,
+no versionados).
 
 - En el equipo de desarrollo, un hook local `pre-push` (no versionado; se instala una vez con
   `bash scripts/hooks/pre-push --install`) rechaza el push de una rama `feat/*` si no hay una corrida en verde para el
-  árbol de ese commit. No tiene forma de saltarlo.
-- El merge a `develop` (`scripts/hooks/merge-pr`, D-081) también exige esa corrida para la cabeza del PR, y que
-  `static`, `tests` y `commit-messages` estén en verde.
+  árbol de ese commit. No tiene ninguna variable ni opción propia para saltarlo, y aunque un push se salte los hooks de
+  git, el merge sigue exigiendo la corrida.
+- El merge a `develop` (`scripts/hooks/merge-pr`, D-081) exige esa corrida para la cabeza del PR, y que `static`,
+  `tests` y `commit-messages` estén en verde.
 - Cualquier commit nuevo, incluido un merge de `develop`, cambia el árbol: hay que volver a correr `make prepush`. Las
-  ramas que ya estaban en curso (por ejemplo, la de `../hermes-f1503`) necesitan su propio `make prepush` después de
-  integrar `develop`; antes de integrarlo no tienen el target, pero pueden correr
+  ramas creadas antes de este cambio (por ejemplo, `feat/f15-3-worker-shutdown`) necesitan su propio `make prepush`
+  después de integrar `develop`; antes de integrarlo no tienen el target, pero pueden correr
   `bash <checkout que lo tenga>/scripts/prepush.sh` desde su propio checkout.
 - Los títulos de los commits los revisan el hook local `commit-msg` y, en el PR, el job `commit-messages`.
 

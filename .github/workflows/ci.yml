@@ -1,7 +1,8 @@
 name: CI
 
-# D-086: lean remote CI until after the delivery (GitHub Actions minutes). `make prepush` runs every job of this
-# workflow, plus Bruno and the ZAP scan, on the developer's machine before a feature branch is pushed. Pull requests to
+# D-086: lean remote CI until after the delivery (GitHub Actions minutes). `make prepush` runs the static and tests
+# jobs, Schemathesis, the adversarial suite, Bruno and the ZAP scan on the developer's machine before a feature branch
+# is pushed (commit titles are checked there by the local commit-msg hook; SonarQube only runs here). Pull requests to
 # develop run static, tests and commit-messages; schemathesis and sonarqube run only for pull requests to main and
 # pushes to main. No push run on develop: its pull request already ran the checks.
 on:

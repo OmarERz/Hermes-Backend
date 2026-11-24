@@ -32,11 +32,14 @@ branch="$(git symbolic-ref --quiet --short HEAD || echo detached)"
 started_at="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
 started="$(date +%s)"
 
-# Knobs that would narrow a step (a Bruno folder, fewer fuzzed paths) or change the stack must not leak in from the
-# caller's environment: every step runs as in CI.
-unset BRUNO_ARGS SCHEMATHESIS_EXCLUDES OPENAPI_SNAPSHOT COMPOSE_PROFILES COMPOSE_ENV_FILES TEST_TOKEN ANALYST_TOKEN \
-  READER_TOKEN API_URL
-export GITLEAKS_BASE="${GITLEAKS_BASE:-origin/develop}"
+# Knobs that would narrow or swap a step must not leak in from the caller's environment, so every step runs with the
+# repository's pinned values, as in CI: make flags (`make -i prepush` would ignore failures in the nested makes) and
+# extra makefiles, the Makefile's overridable scanner images, tool versions, Bruno folder, fuzzed paths and Gitleaks
+# range, pytest options, Compose profiles and env files, and tokens or URLs set by hand.
+unset MAKEFLAGS MFLAGS MAKEFILES SEMGREP_IMAGE KICS_IMAGE GITLEAKS_IMAGE ZAP_IMAGE SCHEMATHESIS_VERSION \
+  BRUNO_CLI_VERSION BRUNO_ARGS SCHEMATHESIS_EXCLUDES OPENAPI_SNAPSHOT GITLEAKS_FULL_HISTORY PYTEST_ADDOPTS \
+  COMPOSE_PROFILES COMPOSE_ENV_FILES TEST_TOKEN ANALYST_TOKEN READER_TOKEN API_URL FIREBASE_AUTH_EMULATOR_HOST
+export GITLEAKS_BASE=origin/develop
 
 current_step="start"
 steps=""
