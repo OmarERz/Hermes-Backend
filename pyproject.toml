@@ -23,6 +23,8 @@ dependencies = [
     "stix2-validator>=3.2.0",
     "trafilatura>=2.3.1",
     "uvicorn>=0.54.0",
+    "slack-bolt>=1.30.0",
+    "slack-sdk>=3.48.0",
 ]
 
 [dependency-groups]
@@ -54,6 +56,7 @@ packages = [
     "src/core",
     "src/notifications_api",
     "src/notifications_slack",
+    "src/slack_app",
     "src/workers",
 ]
 
@@ -84,7 +87,7 @@ ignore = ["TRY003"]
 python_version = "3.12"
 strict = true
 mypy_path = "src"
-packages = ["api", "core", "notifications_api", "notifications_slack", "workers"]
+packages = ["api", "core", "notifications_api", "notifications_slack", "slack_app", "workers"]
 warn_unreachable = true
 plugins = ["pydantic.mypy"]
 
@@ -107,37 +110,44 @@ markers = [
 ]
 
 [tool.importlinter]
-root_packages = ["api", "core", "notifications_api", "notifications_slack", "workers"]
+root_packages = ["api", "core", "notifications_api", "notifications_slack", "slack_app", "workers"]
 
 [[tool.importlinter.contracts]]
 name = "notifications_slack imports only notifications_api"
 type = "forbidden"
 source_modules = ["notifications_slack"]
-forbidden_modules = ["core", "api", "workers"]
+forbidden_modules = ["core", "api", "workers", "slack_app"]
 
 [[tool.importlinter.contracts]]
 name = "notifications_api imports nothing internal"
 type = "forbidden"
 source_modules = ["notifications_api"]
-forbidden_modules = ["api", "core", "workers", "notifications_slack"]
+forbidden_modules = ["api", "core", "workers", "notifications_slack", "slack_app"]
 
 [[tool.importlinter.contracts]]
 name = "core imports only notifications_api"
 type = "forbidden"
 source_modules = ["core"]
-forbidden_modules = ["api", "workers", "notifications_slack"]
+forbidden_modules = ["api", "workers", "notifications_slack", "slack_app"]
 
 [[tool.importlinter.contracts]]
 name = "workers import only core and notifications_api"
 type = "forbidden"
 source_modules = ["workers"]
-forbidden_modules = ["api", "notifications_slack"]
+forbidden_modules = ["api", "notifications_slack", "slack_app"]
 
 [[tool.importlinter.contracts]]
 name = "api imports only core and notifications_api"
 type = "forbidden"
 source_modules = ["api"]
-forbidden_modules = ["workers", "notifications_slack"]
+forbidden_modules = ["workers", "notifications_slack", "slack_app"]
+
+[[tool.importlinter.contracts]]
+# The composition root of the Slack module (D-085): it wires notifications_slack to core; nothing imports it.
+name = "slack_app imports only core, notifications_api and notifications_slack"
+type = "forbidden"
+source_modules = ["slack_app"]
+forbidden_modules = ["api", "workers"]
 
 [tool.coverage.run]
 branch = true
