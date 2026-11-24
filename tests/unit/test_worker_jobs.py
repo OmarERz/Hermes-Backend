@@ -17,12 +17,19 @@ from workers.jobs import (
     ITOP_OUTBOX_SECONDS,
     NIGHTLY_SECONDS,
     TICKET_SYNC_SECONDS,
+    DispatchJob,
     PeriodicJob,
     build_jobs,
     run_jobs,
     run_jobs_in_threads,
 )
-from workers.pipeline_jobs import NEWS_SECONDS, NIGHTLY_RECALC_SECONDS, RECALC_REQUEST_SECONDS, SCAN_REQUEST_SECONDS
+from workers.pipeline_jobs import (
+    NEWS_SECONDS,
+    NIGHTLY_RECALC_SECONDS,
+    RECALC_REQUEST_SECONDS,
+    SCAN_REQUEST_SECONDS,
+    _tickets,
+)
 
 pytestmark = pytest.mark.unit
 SETTINGS = Settings(
@@ -217,3 +224,23 @@ def test_the_pipeline_jobs_receive_the_worker_stop_signal(monkeypatch: pytest.Mo
     assert isinstance(seen[0], StopSignal)
     assert seen[0].event is stop
     assert seen[1] is None
+
+
+def test_links_in_events_and_tickets_use_the_itop_console_url() -> None:
+    # F16.1: on the shared Docker network the backend reaches http://itop:8080; people open the published console.
+    settings = SETTINGS.model_copy(
+        update={
+            "itop_url": "http://itop:8080/",
+            "itop_console_url": "http://127.0.0.1:8080/",
+            "itop_token": SecretStr("tok"),
+            "itop_org_id": "1",
+            "itop_caller_id": "2",
+        }
+    )
+    dispatch = build_jobs(settings, MagicMock())[0]
+    assert dispatch.name == "notification_dispatch"
+    assert isinstance(dispatch.run, DispatchJob)
+    assert dispatch.run.itop_base_url == "http://127.0.0.1:8080/"
+    lifecycle = _tickets(settings)
+    assert lifecycle is not None
+    assert lifecycle.itop_base_url == "http://127.0.0.1:8080/"
