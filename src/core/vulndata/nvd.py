@@ -20,6 +20,7 @@ from pydantic import SecretStr
 from sqlalchemy.orm import Session
 
 from core.cpe.fields import split_cpe_fields, unescape_cpe
+from core.shutdown import StopSignal
 from core.vulndata.http import JsonSource, RateLimiter, SourceUnavailableError
 from core.vulndata.records import (
     CVE_ID,
@@ -191,16 +192,26 @@ class NvdClient:
 
 
 def nvd_client(
-    api_key: SecretStr | None = None, *, http: httpx.Client | None = None, limiter: RateLimiter | None = None
+    api_key: SecretStr | None = None,
+    *,
+    http: httpx.Client | None = None,
+    limiter: RateLimiter | None = None,
+    stop: StopSignal | None = None,
 ) -> NvdClient:
-    """A client with the public rate limit, or the higher one when a key is configured."""
+    """A client with the public rate limit, or the higher one when a key is configured.
+
+    With the worker's `stop` signal the rate-limit pause (up to 30 s without a key) and the backoff sleep on it (#170).
+    """
     calls, period = LIMIT_WITH_KEY if api_key else LIMIT_WITHOUT_KEY
+    if limiter is None:
+        limiter = RateLimiter(calls, period) if stop is None else RateLimiter(calls, period, sleep=stop.sleep)
     # 403 is how NVD answers when the rolling limit is exceeded (⚠️), so it is retried with backoff.
     source = JsonSource(
         http=http,
-        limiter=limiter or RateLimiter(calls, period),
+        limiter=limiter,
         retryable=frozenset({403, 429, 500, 502, 503, 504}),
         backoff_seconds=6.0,
+        stop=stop,
     )
     return NvdClient(source=source, api_key=api_key)
 
