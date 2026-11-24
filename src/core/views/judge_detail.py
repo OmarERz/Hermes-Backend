@@ -17,6 +17,7 @@ from typing import Final
 from sqlalchemy import text
 from sqlalchemy.orm import Session
 
+COMPARED: Final = frozenset({"applied", "suggestion", "partial_review", "judge_disagreement"})
 _ASSESSMENT: Final = text("SELECT id, llm_review_id, judge_adjustment FROM assessment WHERE id = :id")
 _REVIEW: Final = text(
     """
@@ -59,7 +60,7 @@ class Reason:
 
 @dataclass(frozen=True)
 class DoubleReview:
-    agreed: bool
+    agreed: bool | None  # None when the comparison did not decide the outcome
     first_adjustment: int | None
     second_adjustment: int | None
     second_status: str
@@ -131,7 +132,10 @@ def judge_detail(session: Session, assessment_id: uuid.UUID) -> JudgeDetail | No
     reasons = reasons_of(session, [review.id]).get(review.id, [])
     double = (
         DoubleReview(
-            agreed=review.status != "judge_disagreement" and second.proposed_adjustment is not None,
+            # Only these statuses come out of the comparison; a stale review dropped it (RE-3): unknown.
+            agreed=(review.status != "judge_disagreement" and second.proposed_adjustment is not None)
+            if review.status in COMPARED
+            else None,
             first_adjustment=review.proposed_adjustment,
             second_adjustment=second.proposed_adjustment,
             second_status=second.status,

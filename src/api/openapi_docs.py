@@ -1045,7 +1045,8 @@ OVERRIDES: Final[dict[str, str]] = {
     "JudgeDetail.rejected_reasons": "Motivos rechazados o retirados.",
     "JudgeDetail.double_review": "Doble revisión ciega; nula si no la hubo.",
     "JudgeDetail.mitigation_status": "Mitigación redactada por el juez.",
-    "DoubleReviewInfo.agreed": "Si las dos revisiones coincidieron; sin acuerdo, final = base.",
+    "DoubleReviewInfo.agreed": "Si las dos revisiones coincidieron; sin acuerdo, final = base. Nulo si la "
+    "comparación no decidió el resultado (la revisión quedó obsoleta antes de aplicarse).",
     "DoubleReviewInfo.first_adjustment": "Ajuste propuesto por la primera revisión.",
     "DoubleReviewInfo.second_adjustment": "Ajuste propuesto por la segunda revisión; nulo si falló.",
     "DoubleReviewInfo.second_status": "Resultado guardado de la segunda revisión.",

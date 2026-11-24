@@ -93,6 +93,14 @@ def _launcher(run: m.Run, name: str | None) -> str | None:
     return name or UNNAMED
 
 
+def _with_launcher(session: Session, run: m.Run) -> Run:
+    """One run for the API with who launched it, as the list shows it (HI-10)."""
+    if run.triggered_by is None:
+        return to_api(run)
+    name = session.scalar(select(m.AppUser.display_name).where(m.AppUser.id == run.triggered_by))
+    return to_api(run, _launcher(run, name))
+
+
 def _moment(value: str | None) -> datetime | None:
     return datetime.fromisoformat(value.upper()) if value else None
 
@@ -148,12 +156,12 @@ class SqlRunSource:
                 if firebase_uid
                 else None
             )
-            return to_api(queue_scan(session, self.clock(), user_id))
+            return _with_launcher(session, queue_scan(session, self.clock(), user_id))
 
     def _read(self, key: uuid.UUID) -> Run | None:
         with self.session_factory() as session:
             row = session.get(m.Run, key)
-            return to_api(row) if row is not None and row.kind in KINDS else None
+            return to_api(row) if row is not None and row.kind in KINDS else None  # the stream omits the launcher
 
     def progress(self, run_id: str) -> Iterator[Run]:
         try:

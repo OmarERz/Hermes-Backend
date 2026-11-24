@@ -8,6 +8,7 @@ from typing import Any
 import pytest
 from f18data import Front
 from fastapi.testclient import TestClient
+from sqlalchemy import Engine, text
 
 pytestmark = pytest.mark.integration
 Get = Callable[..., Any]
@@ -64,6 +65,20 @@ def test_judge_detail_shows_reasons_quotes_and_the_double_review(get: Get, front
     }
     assert detail["mitigation_status"] == "accepted"
     assert not any(key in detail for key in ("calls", "parameters", "prompt_hash"))
+
+
+def test_a_stale_double_review_has_no_agreement(get: Get, front: Front, database: tuple[str, Engine]) -> None:
+    """A review that went stale is stored as `no_judge_review` without its comparison (RE-3): agreement unknown."""
+    with database[1].begin() as conn:
+        conn.execute(
+            text("UPDATE llm_review SET status = 'no_judge_review' WHERE id = :i"), {"i": front.reviews["first"]}
+        )
+    try:
+        detail = get(f"/api/recommendations/{front.scenario.assessments['A2']}/judge")
+        assert detail["double_review"]["agreed"] is None and detail["double_review"]["second_adjustment"] == 10
+    finally:
+        with database[1].begin() as conn:
+            conn.execute(text("UPDATE llm_review SET status = 'applied' WHERE id = :i"), {"i": front.reviews["first"]})
 
 
 def test_judge_detail_without_a_review_keeps_the_base(get: Get, client: TestClient, front: Front) -> None:

@@ -914,7 +914,7 @@ class JudgeReasonItem(_Model):
 
 
 class DoubleReviewInfo(_Model):
-    agreed: bool
+    agreed: bool | None
     first_adjustment: int | None
     second_adjustment: int | None
     second_status: ReviewStatus

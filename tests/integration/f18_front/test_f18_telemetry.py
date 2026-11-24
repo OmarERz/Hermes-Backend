@@ -9,6 +9,7 @@ from typing import Any
 import pytest
 from f18data import Front
 from fastapi.testclient import TestClient
+from sqlalchemy import Engine, text
 
 pytestmark = pytest.mark.integration
 Get = Callable[..., Any]
@@ -16,6 +17,24 @@ Get = Callable[..., Any]
 
 def _agent(summary: dict[str, Any], name: str) -> dict[str, Any]:
     return next(a for a in summary["agents"] if a["agent"] == name)
+
+
+def test_a_run_still_running_counts_even_if_it_started_before_the_window(
+    get: Get, database: tuple[str, Engine]
+) -> None:
+    before = get("/api/telemetry/summary", window="24h")["runs_running"]
+    with database[1].begin() as conn:
+        stuck = conn.execute(
+            text(
+                "INSERT INTO run (kind, status, progress, trigger_reason, started_at) "
+                "VALUES ('inventory_sync', 'running', 5, 'schedule', now() - interval '2 days') RETURNING id"
+            )
+        ).scalar_one()
+    try:
+        assert get("/api/telemetry/summary", window="24h")["runs_running"] == before + 1  # AG-9: running now
+    finally:
+        with database[1].begin() as conn:
+            conn.execute(text("DELETE FROM run WHERE id = :i"), {"i": stuck})
 
 
 def test_summary_counts_the_window_and_never_reports_a_key(get: Get, front: Front) -> None:

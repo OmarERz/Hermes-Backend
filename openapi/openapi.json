@@ -1487,9 +1487,16 @@
         "additionalProperties": false,
         "properties": {
           "agreed": {
-            "description": "Si las dos revisiones coincidieron; sin acuerdo, final = base.",
-            "title": "Agreed",
-            "type": "boolean"
+            "anyOf": [
+              {
+                "type": "boolean"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Si las dos revisiones coincidieron; sin acuerdo, final = base. Nulo si la comparación no decidió el resultado (la revisión quedó obsoleta antes de aplicarse).",
+            "title": "Agreed"
           },
           "first_adjustment": {
             "anyOf": [

@@ -47,7 +47,7 @@ _RUNS: Final = text(
     """
     SELECT kind, CASE status WHEN 'cancelled' THEN 'failed' ELSE status END AS status, count(*)::integer AS runs
       FROM run
-     WHERE started_at >= :since OR (started_at IS NULL AND status = 'queued')
+     WHERE started_at >= :since OR status IN ('queued', 'running')  -- what runs now counts whatever the window (AG-9)
      GROUP BY 1, 2
     """
 )
