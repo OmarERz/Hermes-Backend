@@ -67,8 +67,8 @@ def arc_overrides(build: Builder, table: str, column: str) -> dict[str, Any]:
 
 
 def test_catalog_counts(catalog: dict[str, Tbl]) -> None:
-    assert len(catalog) == 75
-    assert sum(1 for t in catalog.values() for c in t.cols.values() if c.fk) == 118
+    assert len(catalog) == 76
+    assert sum(1 for t in catalog.values() for c in t.cols.values() if c.fk) == 120
 
 
 def test_every_table_accepts_a_minimal_row(conn: Conn, build: Builder, catalog: dict[str, Tbl]) -> None:
@@ -113,7 +113,7 @@ def test_every_foreign_key_rejects_missing_parent(conn: Conn, build: Builder, ca
         return expect(errors.ForeignKeyViolation, run)
 
     cases = columns(catalog, lambda c: c.fk is not None)
-    assert len(cases) == 118
+    assert len(cases) == 120
     assert run_cases(conn, ((f"{t}.{c.name}", case(t, c)) for t, c in cases)) == []
 
 

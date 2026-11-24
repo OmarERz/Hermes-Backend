@@ -48,7 +48,7 @@ def test_upgrade_builds_model_v1(fresh_db: MigratedDatabase) -> None:
     command.upgrade(alembic_cfg(fresh_db.migrator_url), "head")
     engine = make_engine(fresh_db.superuser_url)
     try:
-        assert counts(engine) == (75, 14, 118)
+        assert counts(engine) == (76, 14, 120)
         with engine.connect() as conn:
             owner = conn.execute(text("SELECT tableowner FROM pg_tables WHERE tablename = 'finding'")).scalar_one()
             can_update = conn.execute(text("SELECT has_table_privilege('app', 'audit_log', 'UPDATE')")).scalar_one()
@@ -78,7 +78,7 @@ def test_downgrade_and_upgrade_again(fresh_db: MigratedDatabase) -> None:
             ).scalar_one()
         assert functions == 0
         command.upgrade(cfg, "head")
-        assert counts(engine) == (75, 14, 118)
+        assert counts(engine) == (76, 14, 120)
     finally:
         engine.dispose()
 
@@ -190,7 +190,7 @@ def test_downgrade_aborts_on_a_dependent_foreign_view(fresh_db: MigratedDatabase
         assert "slack_ticket_scores" in inspect(engine).get_view_names()
         # The whole downgrade rolled back: still at head, and the app keeps its grants and the purge.
         with engine.connect() as conn:
-            assert conn.execute(text("SELECT version_num FROM alembic_version")).scalar_one() == "0003"
+            assert conn.execute(text("SELECT version_num FROM alembic_version")).scalar_one() == "0004"
             assert conn.execute(text("SELECT has_table_privilege('app', 'ticket', 'SELECT')")).scalar_one()
             assert conn.execute(text("SELECT to_regprocedure('purge_retention()') IS NOT NULL")).scalar_one()
     finally:
