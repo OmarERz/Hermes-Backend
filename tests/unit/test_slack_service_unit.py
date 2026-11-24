@@ -72,6 +72,25 @@ def test_build_needs_the_slack_database() -> None:
         service.build(SETTINGS, slack, threading.Event())
 
 
+def test_links_in_slack_events_use_the_itop_console_url(monkeypatch: pytest.MonkeyPatch) -> None:
+    """F16.1: on the shared Docker network the backend reaches http://itop:8080; people open the published console."""
+    monkeypatch.setattr(service, "SqlSlackStore", lambda _engine: MagicMock())
+    monkeypatch.setattr(service, "make_engine", lambda _url: MagicMock())
+    monkeypatch.setattr(service, "make_session_factory", lambda _settings: MagicMock())
+    monkeypatch.setattr(service, "build_module", lambda *_args: MagicMock())
+    slack = SlackSettings(  # type: ignore[call-arg]
+        _env_file=None, _secrets_dir=None, database_url="postgresql://slack_module@db/hermes", db_password=FAKE_PASSWORD
+    )
+    settings = SETTINGS.model_copy(
+        update={"itop_url": "http://itop:8080/", "itop_console_url": "http://127.0.0.1:8080/"}
+    )
+    _, dispatch = service.build(settings, slack, threading.Event())
+    assert dispatch.itop_base_url == "http://127.0.0.1:8080/"
+    internal_only = SETTINGS.model_copy(update={"itop_url": "http://itop:8080/"})
+    _, without_console = service.build(internal_only, slack, threading.Event())
+    assert without_console.itop_base_url == "http://itop:8080/"  # no console URL: the REST base, as before
+
+
 def test_a_configured_service_connects_socket_mode_runs_its_lanes_and_stops(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr(service, "configure_logging", lambda *_: None)
     handler = MagicMock()

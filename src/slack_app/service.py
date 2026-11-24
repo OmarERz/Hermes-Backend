@@ -91,8 +91,8 @@ def build(settings: Settings, slack: SlackSettings, stop: threading.Event) -> tu
     store.check()  # the slack_module role logs in and reaches its tables, before anything else connects
     session_factory = make_session_factory(settings)
     module = build_module(slack, SqlFeedbackService(session_factory), store)
-    itop_url = str(settings.itop_url) if settings.itop_url is not None else None
-    return module, SlackDispatchJob(session_factory, module.consumer, itop_url, stop)
+    # Links in the events: the iTop console people open, like the worker's (F16.1), not the internal REST name.
+    return module, SlackDispatchJob(session_factory, module.consumer, settings.itop_link_url, stop)
 
 
 def run(stop: threading.Event, settings: Settings | None = None, slack: SlackSettings | None = None) -> int:
