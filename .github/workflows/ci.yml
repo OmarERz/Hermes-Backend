@@ -1,8 +1,13 @@
 name: CI
 
+# D-086: lean remote CI until after the delivery (GitHub Actions minutes). `make prepush` runs the static and tests
+# jobs, Schemathesis, the adversarial suite, Bruno and the ZAP scan on the developer's machine before a feature branch
+# is pushed (commit titles are checked there by the local commit-msg hook; SonarQube only runs here). Pull requests to
+# develop run static, tests and commit-messages; schemathesis and sonarqube run only for pull requests to main and
+# pushes to main. No push run on develop: its pull request already ran the checks.
 on:
   push:
-    branches: [develop, main]
+    branches: [main]
   pull_request:
     branches: [develop, main]
 
@@ -82,6 +87,8 @@ jobs:
   schemathesis:
     name: schemathesis
     needs: [static, tests]
+    # D-086: only towards main; on pull requests to develop the job is skipped (make prepush runs it locally).
+    if: github.event_name == 'push' || github.base_ref == 'main'
     runs-on: ubuntu-latest
     timeout-minutes: 20
     env:
@@ -202,6 +209,8 @@ jobs:
   sonarqube:
     name: sonarqube
     needs: [static, tests]
+    # D-086: only towards main; on pull requests to develop the job is skipped.
+    if: github.event_name == 'push' || github.base_ref == 'main'
     runs-on: ubuntu-latest
     timeout-minutes: 15
     # The repository variable SONAR_ENABLED=true switches the analysis on once SonarQube Cloud is configured.
