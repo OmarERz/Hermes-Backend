@@ -190,6 +190,8 @@ EXAMPLE_EXTRAS = {
     "EMBEDDINGS_PORT",  # compose.host.yaml and make worker-host
     "MIGRATION_DATABASE_URL",  # core.devtools.admin (make seed)
     "FORWARDED_ALLOW_IPS",  # read by uvicorn (trusted proxies for X-Forwarded-For)
+    "COMPOSE_FILE",  # read by docker compose: the real Firebase project mode (compose.firebase.yaml, D-087)
+    "FIREBASE_SERVICE_ACCOUNT_FILE",  # compose.firebase.yaml: host path of the service account secret
 }
 NOT_IN_EXAMPLE = {"PGPASSWORD"}  # the app role's password reaches Settings as the pgpassword secret file only
 

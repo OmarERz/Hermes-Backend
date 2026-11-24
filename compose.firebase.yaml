@@ -1,0 +1,25 @@
+# Real Firebase project (D-087): the API verifies the ID tokens of the real project instead of the Auth emulator.
+# Turn it on with COMPOSE_FILE=compose.yaml:compose.firebase.yaml (in .env or the environment) plus FIREBASE_PROJECT_ID
+# and FIREBASE_SERVICE_ACCOUNT_FILE; README "Firebase real". Without this file the stack keeps the emulator and the
+# demo-hermes project, which is what development, the tests, CI and `make prepush` use.
+# The service account JSON is the most sensitive secret (SEG-20): it lives outside every repository and is mounted as a
+# Docker secret into the API only (the workers never call Firebase). Compose bind-mounts a file secret with the host
+# owner and mode (`uid`, `gid` and `mode` only apply in Swarm), so the file must be readable by the API's group 10001:
+# `chgrp 10001` and `chmod 640` (README).
+secrets:
+  firebase_service_account:
+    file: ${FIREBASE_SERVICE_ACCOUNT_FILE:?set FIREBASE_SERVICE_ACCOUNT_FILE to the service account JSON, outside the repository}
+
+services:
+  api:
+    environment:
+      FIREBASE_PROJECT_ID: ${FIREBASE_PROJECT_ID:?set FIREBASE_PROJECT_ID to the real Firebase project}
+      FIREBASE_CREDENTIALS_FILE: /run/secrets/firebase_service_account
+      # Empty = no emulator: the SDK checks Google's signatures (the API refuses a real project with an emulator set).
+      FIREBASE_AUTH_EMULATOR_HOST: ""
+    secrets:
+      - firebase_service_account
+  workers:
+    environment:
+      # The workers do not use Firebase; they only stop pointing at the emulator.
+      FIREBASE_AUTH_EMULATOR_HOST: ""
