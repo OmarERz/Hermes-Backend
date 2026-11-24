@@ -1,6 +1,8 @@
 """Weight proposals from the human feedback of the last 30 days, tested before they are proposed (docs/07 §10).
 
-Humans say what a finding should have scored (`wrong_priority` feedback with `proposed_score`). The engine is
+Humans say what a finding should have scored (`wrong_priority` feedback with `proposed_score`); a proposal equal to
+the recommendation's base on an assessment the judge adjusted is «accept the original score» (RE-9), a verdict on the
+judge and not on the weights, so it is left out (the same rule as the `original_score_accepted` metric). The engine is
 deterministic, so every candidate weight change can be replayed over the stored factors: the score a ticket got is
 the highest final among its CIs (EVA-07). A change is proposed only when it brings the scores closer to the humans'
 by more than the noise, over at least 30 cases; one weight at a time, at most +/- the weekly limit, the others
@@ -60,7 +62,10 @@ _CASES = text(
     "a.factor_s, a.factor_p, a.factor_t, s.factor_a, s.factor_d, s.version_factor, s.ci_adjustment, s.snap_exposed "
     "FROM feedback f JOIN assessment a ON a.id = f.assessment_id JOIN asset_score s ON s.assessment_id = a.id "
     "WHERE f.verdict = 'wrong_priority' AND f.proposed_score IS NOT NULL AND f.superseded_at IS NULL "
-    "AND f.created_at >= :since ORDER BY f.id, s.asset_id"
+    "AND f.created_at >= :since AND (COALESCE(a.judge_adjustment, 0) = 0 OR f.proposed_score IS DISTINCT FROM "
+    "(SELECT o.base FROM asset_score o JOIN asset x ON x.id = o.asset_id WHERE o.assessment_id = a.id "
+    "ORDER BY (x.decommissioned_at IS NOT NULL), o.final DESC, x.name, o.asset_id LIMIT 1)) "
+    "ORDER BY f.id, s.asset_id"
 )
 
 
