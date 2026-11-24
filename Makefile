@@ -4,12 +4,17 @@
 SHELL := /bin/bash
 .SHELLFLAGS := -eu -o pipefail -c
 
-.PHONY: up demo worker-host backup compose-secrets help openapi verify lint typecheck boundaries test coverage semgrep kics secrets audit verify-full schemathesis adversarial dynamic zap bruno ci-lint seed events emulator-token itop-up itop-install itop-seed itop-token itop-down review
+.PHONY: up demo worker-host backup compose-secrets help openapi verify prepush lint typecheck boundaries test coverage semgrep kics secrets audit verify-full schemathesis adversarial dynamic zap bruno ci-lint seed events emulator-token itop-up itop-install itop-seed itop-token itop-down review
 
 help: ## List the available targets
 	@grep -E '^[a-z-]+:.*## ' $(MAKEFILE_LIST) | awk 'BEGIN {FS = ":.*## "}; {printf "  %-12s %s\n", $$1, $$2}'
 
 verify: lint typecheck boundaries test coverage semgrep kics secrets audit ## Run the quality gate (same command locally and in CI)
+
+# D-086: the remote CI is lean, so everything it would run happens here before a feature branch is pushed. The local
+# pre-push hook and the merge helper require a green run recorded for the tree being pushed or merged.
+prepush: ## Pre-push gate: verify + isolated stack + Schemathesis, adversarial, Bruno (3 roles) and ZAP; records the tree
+	bash scripts/prepush.sh
 
 lint: ## Formatting and lint (ruff)
 	uv run --locked ruff format --check .
