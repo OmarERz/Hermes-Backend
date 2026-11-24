@@ -49,12 +49,26 @@ class Front:
     ana: uuid.UUID
     runs: dict[str, uuid.UUID] = field(default_factory=dict)
     reviews: dict[str, uuid.UUID] = field(default_factory=dict)
+    updates: dict[str, uuid.UUID] = field(default_factory=dict)
+    event: uuid.UUID | None = None
 
 
-def _review(session: Session, agent: str, status: str, latency: int, at: datetime) -> uuid.UUID:
+@dataclass(frozen=True)
+class ReviewSpec:
+    agent: str
+    status: str
+    latency: int
+    at: datetime
+    second_of: uuid.UUID | None = None
+    proposed: int | None = None
+
+
+def _review(session: Session, spec: ReviewSpec) -> uuid.UUID:
+    agent, status, latency, at = spec.agent, spec.status, spec.latency, spec.at
     review = m.LlmReview(
         agent=agent,
         mode="scoring" if agent == "judge" else None,
+        second_review_of_id=spec.second_of,
         model="deepseek-v4-pro",
         response_model={},
         prompt_version="v1",
@@ -66,7 +80,7 @@ def _review(session: Session, agent: str, status: str, latency: int, at: datetim
         calls=[],
         status=status,
         attempts=2 if status == "no_judge_review" else 1,
-        proposed_adjustment=None,
+        proposed_adjustment=spec.proposed,
         tokens_input=1000,
         tokens_cached=100,
         tokens_output=200,
@@ -109,9 +123,9 @@ def build_front(session: Session) -> Front:
     )
     front.runs["news"] = _run(session, "news", "failed", (NOW - 2 * hour, NOW - 2 * hour + timedelta(minutes=1)), None)
     front.runs["nightly"] = _run(session, "nightly", "running", (NOW - timedelta(minutes=10), None), None)
-    front.reviews["applied"] = _review(session, "judge", "applied", 1000, NOW - hour)
-    front.reviews["fallback"] = _review(session, "judge", "no_judge_review", 3000, NOW - hour)
-    front.reviews["cve"] = _review(session, "cve_analyst", "applied", 500, NOW - hour)
+    front.reviews["applied"] = _review(session, ReviewSpec("judge", "applied", 1000, NOW - hour))
+    front.reviews["fallback"] = _review(session, ReviewSpec("judge", "no_judge_review", 3000, NOW - hour))
+    front.reviews["cve"] = _review(session, ReviewSpec("cve_analyst", "applied", 500, NOW - hour))
     session.add(
         m.AuditLog(
             app_user_id=ana,
@@ -136,4 +150,72 @@ def build_front(session: Session) -> Front:
         )
     )
     session.flush()
+    add_ticket_activity(session, front)
     return front
+
+
+def add_ticket_activity(session: Session, front: Front) -> None:
+    """Ticket R-000777 (G1): created (A2) and urgency raised; its iTop writes done and failed. Ticket 778 (G2):
+    resolved 6 h after its creation in iTop and changed by a person. A second blind review of A2's review that
+    agreed (+10). The error queue: a failed event, the failed iTop write and an LLM item that did not validate."""
+    sc = front.scenario
+    t777 = session.scalars(select(m.Ticket).where(m.Ticket.itop_ticket_id == "777")).one()
+    t778 = session.scalars(select(m.Ticket).where(m.Ticket.itop_ticket_id == "778")).one()
+    t778.resolved_at = t778.itop_created_at + timedelta(hours=6)  # type: ignore[operator]
+    t778.last_human_change_at = NOW - timedelta(hours=5)
+    t778.last_human_change_by = "agente.itop"
+    hour = timedelta(hours=1)
+    created = m.TicketUpdate(
+        ticket_id=t777.id, action="create", assessment_id=sc.assessments["A2"], created_at=NOW - 4 * hour
+    )
+    raised = m.TicketUpdate(ticket_id=t777.id, action="raise_urgency", assessment_id=None, created_at=NOW - 3 * hour)
+    session.add_all([created, raised])
+    session.flush()
+    front.updates["create"], front.updates["raise"] = created.id, raised.id
+    for update, status in ((created, "done"), (raised, "failed")):
+        session.add(
+            m.ItopOutbox(
+                ticket_update_id=update.id,
+                idempotency_key=f"key-{update.id}",
+                operation="create" if update is created else "update",
+                payload={},
+                status=status,
+                attempts=1 if status == "done" else 5,
+                last_error=None if status == "done" else "iTop respondió 500",
+                created_at=update.created_at,
+                done_at=update.created_at if status == "done" else None,
+            )
+        )
+    event = m.NotificationEvent(
+        contract_version="1.0",
+        event_type="new_ticket",
+        priority="immediate",
+        ticket_id=t777.id,
+        assessment_id=sc.assessments["A2"],
+        payload={},
+        status="failed",
+        attempts=6,
+        last_error="Slack no respondió",
+        created_at=NOW - 2 * hour,
+    )
+    session.add(event)
+    session.add(
+        m.ErrorQueue(
+            component="cve_analyst",
+            cve_id="CVE-2026-10002",
+            reason="L7: la salida no cumple el esquema",
+            attempts=2,
+            next_attempt_at=NOW + hour,
+            status="pending",
+            created_at=NOW - 90 * timedelta(minutes=1),
+        )
+    )
+    session.flush()
+    front.event = event.id
+    first_review = session.scalars(
+        select(m.Assessment.llm_review_id).where(m.Assessment.id == sc.assessments["A2"])
+    ).one()
+    front.reviews["first"] = first_review
+    # Stored right after the first review (T1), so it stays out of the 24 h window of the telemetry tests.
+    second = ReviewSpec("judge", "applied", 800, f10data.T1 + timedelta(minutes=1), second_of=first_review, proposed=10)
+    front.reviews["second"] = _review(session, second)

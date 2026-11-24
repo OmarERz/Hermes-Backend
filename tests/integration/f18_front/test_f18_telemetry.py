@@ -81,8 +81,10 @@ def test_review_log_filters_pages_and_links_the_assessment(get: Get, front: Fron
     second = get("/api/telemetry/reviews", limit=1, cursor=first["next_cursor"])
     assert second["items"][0]["id"] != first["items"][0]["id"]
     every = get("/api/telemetry/reviews", agent="judge", limit=50)["items"]
-    linked = [r for r in every if r["assessment_id"] == str(front.scenario.assessments["A2"])]
-    assert linked and linked[0]["reasons_accepted"] == 1 and linked[0]["reasons_rejected"] == 1
+    linked = {r["id"]: r for r in every if r["assessment_id"] == str(front.scenario.assessments["A2"])}
+    first, second = linked[str(front.reviews["first"])], linked[str(front.reviews["second"])]
+    assert first["reasons_accepted"] == 1 and first["reasons_rejected"] == 1 and first["second_review"] is False
+    assert second["second_review"] is True  # the blind review links to the assessment of the first
     assert not any(field in every[0] for field in ("calls", "parameters", "response_model", "input_ref"))
 
 

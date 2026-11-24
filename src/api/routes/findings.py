@@ -23,6 +23,7 @@ from api.routes._config_support import CurrentUserDep
 from api.routes._db import SessionDep
 from api.routes._paths import CiId, UuidId
 from api.routes.models import (
+    AcceptedReason,
     AffectedAsset,
     Alert,
     AssetDetail,
@@ -31,14 +32,22 @@ from api.routes.models import (
     Classification,
     ComparisonRow,
     ComparisonSummary,
+    DoubleReviewInfo,
     FeedbackEntry,
     FeedbackRequest,
     FindingStatus,
+    JudgeDetail,
+    JudgeReasonItem,
     Level,
     Recommendation,
     RecommendationFilters,
+    ReviewStatus,
     ScoreHistoryPoint,
     Ticket,
+    TicketAction,
+    TicketSummary,
+    TicketUpdateEntry,
+    TicketUpdateFilters,
     VulnerabilityBand,
     VulnerabilityDetail,
     VulnerabilityFilters,
@@ -46,7 +55,7 @@ from api.routes.models import (
     VulnerabilityList,
 )
 from core.feedback.service import FeedbackRejectedError, SqlFeedbackService
-from core.views import comparison, history
+from core.views import comparison, history, judge_detail, ticket_log
 from core.views import groups as views
 from core.views import recommendations as recs
 from core.views import tickets_alerts as ta
@@ -328,6 +337,13 @@ def _recommendation_model(r: recs.Recommendation) -> Recommendation:
         ),
         ticket_url=r.ticket_url,
         feedback_count=r.feedback_count,
+        accepted_reasons=[
+            AcceptedReason(code=x.code, label=x.label, points=x.points, quote=x.quote, ci_id=x.ci_id)
+            for x in r.accepted_reasons
+        ],
+        judge_summary=r.judge_summary,
+        judge_status=cast(ReviewStatus | None, r.judge_status),
+        ticket_itop_id=r.ticket_itop_id,
     )
 
 
@@ -339,10 +355,12 @@ def list_recommendations(
     itop_url: ItopUrl,
     filters: Annotated[RecommendationFilters, Query()],
 ) -> Page[Recommendation]:
-    """Recommendation feed, newest first (FRO-12); `group_id` or `ci_id` narrow it to one timeline.
+    """Recommendation feed, newest first (FRO-12); `group_id` or `ci_id` narrow it to one timeline, and the F18.1
+    filters to a ticket's group, a level, a verdict or the ones without feedback (RE-1, RE-2).
 
     The score is the assessment's highest final (EVA-07); the CI shown is the most restrictive one at evaluation
-    time, with its classification, owner and custodian of that moment (FRO-13).
+    time, with its classification, owner and custodian of that moment (FRO-13), and the accepted judge reasons come
+    with their quotes.
     """
     key = decode_key(params, "recommendations", ("time", "uuid"))
     group_id, ci_id = filters.group_id, filters.ci_id
@@ -351,7 +369,14 @@ def list_recommendations(
         return Page[Recommendation](items=[], next_cursor=None)  # no group has that id, no CI has that text
     found, next_key = recs.list_recommendations(
         session,
-        recs.Query(group_id=parsed_group, ci_id=ci_id),
+        recs.Query(
+            group_id=parsed_group,
+            ci_id=ci_id,
+            ticket=filters.ticket_itop_id,
+            level=filters.level,
+            verdict=filters.verdict,
+            without_feedback=filters.without_feedback,
+        ),
         itop_url,
         after=None if key is None else (key[0], key[1]),
         limit=params.limit,
@@ -368,6 +393,57 @@ def get_recommendation(assessment_id: UuidId, session: SessionDep, itop_url: Ito
     if found is None:
         raise _not_found("La recomendación")
     return _recommendation_model(found)
+
+
+def _reason_item(r: judge_detail.Reason) -> JudgeReasonItem:
+    return JudgeReasonItem(
+        seq=r.seq,
+        code=r.code,
+        label=r.label,
+        points=r.points,
+        quote=r.quote,
+        element_id=r.element_id,
+        ci_id=r.ci_id,
+        status=cast(Literal["accepted", "rejected", "withdrawn"], r.status),
+        rejection_rule=r.rejection_rule,
+    )
+
+
+@router.get(
+    "/api/recommendations/{assessment_id}/judge",
+    dependencies=[guard("GET", "/api/recommendations/{assessment_id}/judge")],
+)
+def recommendation_judge(assessment_id: UuidId, session: SessionDep) -> JudgeDetail:
+    """The judge behind one assessment (FRO-13, RE-3, RE-5, RE-6): status, summary, proposed and applied adjustment,
+    accepted and rejected reasons with their quotes, and the blind second review. Metadata and validated reasons
+    only: never the prompt, the package or the raw calls (X-2)."""
+    parsed = parse_uuid(assessment_id)
+    found = judge_detail.judge_detail(session, parsed) if parsed is not None else None
+    if found is None:
+        raise _not_found("La recomendación")
+    double = found.double_review
+    return JudgeDetail(
+        assessment_id=str(found.assessment_id),
+        review_id=str(found.review_id) if found.review_id else None,
+        status=cast(ReviewStatus | None, found.status),
+        summary=found.summary,
+        model=found.model,
+        reviewed_at=iso(found.reviewed_at) if found.reviewed_at else None,
+        proposed_adjustment=found.proposed_adjustment,
+        applied_adjustment=found.applied_adjustment,
+        dead_zone_applied=found.dead_zone_applied,
+        accepted_reasons=[_reason_item(r) for r in found.accepted_reasons],
+        rejected_reasons=[_reason_item(r) for r in found.rejected_reasons],
+        double_review=None
+        if double is None
+        else DoubleReviewInfo(
+            agreed=double.agreed,
+            first_adjustment=double.first_adjustment,
+            second_adjustment=double.second_adjustment,
+            second_status=cast(ReviewStatus, double.second_status),
+        ),
+        mitigation_status=cast(Literal["accepted", "discarded", "absent"] | None, found.mitigation_status),
+    )
 
 
 FEEDBACK_ERRORS: Final = {
@@ -460,6 +536,61 @@ def list_tickets(
             for t in found
         ],
         next_cursor=encode_key(signer, "tickets", next_key),
+    )
+
+
+@router.get("/api/tickets/summary", dependencies=[guard("GET", "/api/tickets/summary")])
+def ticket_summary(session: SessionDep) -> TicketSummary:
+    """Every ticket by status (the ones Hermes keeps in step with iTop), the iTop ones by urgency, those whose urgency
+    a person changed (D-007), the resolved share and the average resolution time (IN-3, AG-13, AG-15, AG-16)."""
+    found = ticket_log.summary(session)
+    return TicketSummary(
+        total=found.total,
+        by_status=found.by_status,
+        by_urgency=found.by_urgency,
+        changed_by_person=found.changed_by_person,
+        resolved=found.resolved,
+        resolved_percent=found.resolved_percent,
+        avg_resolution_hours=found.avg_resolution_hours,
+    )
+
+
+@router.get("/api/tickets/updates", dependencies=[guard("GET", "/api/tickets/updates")], responses=PAGINATED_RESPONSES)
+def ticket_updates(
+    params: PageQuery,
+    signer: Signer,
+    session: SessionDep,
+    itop_url: ItopUrl,
+    filters: Annotated[TicketUpdateFilters, Query()],
+) -> Page[TicketUpdateEntry]:
+    """What Hermes did in each ticket and why, newest first (HI-4): creation, CIs added, urgency raised or lowered,
+    comments and verified fixes, with the assessment behind each one and the state of its write to iTop."""
+    key = decode_key(params, "ticket_updates", ("time", "uuid"))
+    found, next_key = ticket_log.updates(
+        session,
+        itop_url,
+        ticket_log.UpdateQuery(ticket=filters.ticket_itop_id, action=filters.action),
+        after=None if key is None else (key[0], key[1]),
+        limit=params.limit,
+    )
+    return Page[TicketUpdateEntry](
+        items=[
+            TicketUpdateEntry(
+                id=str(u.id),
+                created_at=iso(u.created_at),
+                action=cast(TicketAction, u.action),
+                label=u.label,
+                assessment_id=str(u.assessment_id) if u.assessment_id else None,
+                ticket_itop_id=u.ticket_itop_id,
+                ticket_ref=u.ticket_ref,
+                ticket_url=u.ticket_url,
+                cve=u.cve,
+                custodian=u.custodian,
+                itop_status=cast(Literal["pending", "in_progress", "done", "failed"] | None, u.itop_status),
+            )
+            for u in found
+        ],
+        next_cursor=encode_key(signer, "ticket_updates", next_key),
     )
 
 

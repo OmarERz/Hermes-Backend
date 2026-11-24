@@ -11,6 +11,10 @@ from notifications_api.models import DateTimeString
 Level = Literal["critical", "high", "medium", "low"]
 Classification = Literal["public", "classified", "highly_classified", "unclassified"]
 FindingStatus = Literal["new", "persistent", "reopened", "fixed", "no_data"]
+ReviewStatus = Literal[
+    "applied", "suggestion", "partial_review", "judge_disagreement", "no_judge_review", "rejected", "queued"
+]
+Verdict = Literal["relevant", "false_positive", "wrong_priority", "investigating", "stop_suggestions"]
 
 
 def _whole_number(value: Any) -> Any:
@@ -323,6 +327,16 @@ class Breakdown(_Model):
 
 
 # --- recommendations, feedback, tickets, alerts -----------------------------------------------------------------
+class AcceptedReason(_Model):
+    """A judge reason that reached the score (FRO-13): its points and the quote it cites, shown as data (SEG-02)."""
+
+    code: str
+    label: str
+    points: int
+    quote: str
+    ci_id: str | None
+
+
 class Recommendation(_Model):
     assessment_id: str
     created_at: str
@@ -339,6 +353,10 @@ class Recommendation(_Model):
     asset: AffectedAsset | None
     ticket_url: str | None
     feedback_count: int
+    accepted_reasons: list[AcceptedReason] = Field(default_factory=list)
+    judge_summary: str | None = None
+    judge_status: ReviewStatus | None = None
+    ticket_itop_id: str | None = None
 
 
 class FeedbackRequest(_Model):
@@ -566,15 +584,22 @@ class RecommendationFilters(_Model):
 
     group_id: str | None = Field(default=None, max_length=100, description="Timeline of one vulnerability group")
     ci_id: str | None = Field(default=None, max_length=100, description="Timeline of one CI (iTop id)")
+    ticket_itop_id: str | None = Field(
+        default=None, pattern=r"^[0-9]{1,12}$", description="Solo las evaluaciones del grupo de ese ticket de iTop."
+    )
+    level: Level | None = Field(default=None, description="Solo las recomendaciones de ese nivel.")
+    verdict: Verdict | None = Field(
+        default=None, description="Solo las que tienen un feedback vigente con ese veredicto."
+    )
+    without_feedback: bool | None = Field(
+        default=None, description="Solo las que no tienen (`true`) o sí tienen (`false`) feedback vigente."
+    )
 
 
 # --- agent telemetry (D-088, F18.1) ------------------------------------------------------------------------------
 AgentName = Literal["news_analyst", "cve_analyst", "judge"]
 TelemetryWindow = Literal["24h", "7d", "30d"]
 RunKindAny = Literal["scan", "ingestion", "recalculation", "nightly", "inventory_sync", "calibration"]
-ReviewStatus = Literal[
-    "applied", "suggestion", "partial_review", "judge_disagreement", "no_judge_review", "rejected", "queued"
-]
 
 
 class RunCounts(_Model):
@@ -823,3 +848,89 @@ class InstalledSoftwareItem(_Model):
     has_cpe: bool
     open_vulnerabilities: int
     worst_level: Level | None
+
+
+# --- ticket summary and log, judge detail (D-088, F18.1) ---------------------------------------------------------
+TicketAction = Literal[
+    "create",
+    "add_ci",
+    "add_owner",
+    "comment",
+    "raise_urgency",
+    "lower_urgency",
+    "suggest",
+    "partial_fix",
+    "fix_comment",
+    "reopen",
+]
+
+
+class TicketSummary(_Model):
+    total: int
+    by_status: dict[str, int]
+    by_urgency: dict[str, int]
+    changed_by_person: int
+    resolved: int
+    resolved_percent: str | None
+    avg_resolution_hours: str | None
+
+
+class TicketUpdateFilters(_Model):
+    """Optional filters of the ticket log (HI-4)."""
+
+    # The same query string also carries `cursor` and `limit`, read by other parameters.
+    model_config = ConfigDict(extra="ignore", strict=False)
+
+    ticket_itop_id: str | None = Field(
+        default=None, pattern=r"^[0-9]{1,12}$", description="Id numérico del ticket en iTop."
+    )
+    action: TicketAction | None = Field(default=None, description="Acción registrada.")
+
+
+class TicketUpdateEntry(_Model):
+    id: str
+    created_at: str
+    action: TicketAction
+    label: str
+    assessment_id: str | None
+    ticket_itop_id: str | None
+    ticket_ref: str | None
+    ticket_url: str | None
+    cve: str
+    custodian: str
+    itop_status: Literal["pending", "in_progress", "done", "failed"] | None
+
+
+class JudgeReasonItem(_Model):
+    seq: int
+    code: str
+    label: str
+    points: int
+    quote: str
+    element_id: str
+    ci_id: str | None
+    status: Literal["accepted", "rejected", "withdrawn"]
+    rejection_rule: str | None
+
+
+class DoubleReviewInfo(_Model):
+    agreed: bool
+    first_adjustment: int | None
+    second_adjustment: int | None
+    second_status: ReviewStatus
+
+
+class JudgeDetail(_Model):
+    assessment_id: str
+    review_id: str | None
+    status: ReviewStatus | None
+    summary: str | None
+    model: str | None
+    reviewed_at: str | None
+    proposed_adjustment: int | None
+    applied_adjustment: int
+    dead_zone_applied: bool
+    accepted_reasons: list[JudgeReasonItem]
+    rejected_reasons: list[JudgeReasonItem]
+    double_review: DoubleReviewInfo | None
+    mitigation_status: Literal["accepted", "discarded", "absent"] | None

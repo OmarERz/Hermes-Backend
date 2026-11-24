@@ -1,6 +1,53 @@
 {
   "components": {
     "schemas": {
+      "AcceptedReason": {
+        "additionalProperties": false,
+        "description": "A judge reason that reached the score (FRO-13): its points and the quote it cites, shown as data (SEG-02).",
+        "properties": {
+          "ci_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "CI al que se suma el motivo (`more_critical_asset`); nulo si es del grupo.",
+            "title": "Ci Id"
+          },
+          "code": {
+            "description": "Código del motivo, por ejemplo `mass_exploitation`.",
+            "title": "Code",
+            "type": "string"
+          },
+          "label": {
+            "description": "Descripción del motivo, en español.",
+            "title": "Label",
+            "type": "string"
+          },
+          "points": {
+            "description": "Puntos aplicados (con el perfil de sensibilidad de ese momento).",
+            "title": "Points",
+            "type": "integer"
+          },
+          "quote": {
+            "description": "Cita textual de la evidencia; es texto externo: muéstrala como dato, escapada.",
+            "title": "Quote",
+            "type": "string"
+          }
+        },
+        "required": [
+          "code",
+          "label",
+          "points",
+          "quote",
+          "ci_id"
+        ],
+        "title": "AcceptedReason",
+        "type": "object"
+      },
       "AffectedAsset": {
         "additionalProperties": false,
         "properties": {
@@ -1436,6 +1483,62 @@
         "title": "CurrentUser",
         "type": "object"
       },
+      "DoubleReviewInfo": {
+        "additionalProperties": false,
+        "properties": {
+          "agreed": {
+            "description": "Si las dos revisiones coincidieron; sin acuerdo, final = base.",
+            "title": "Agreed",
+            "type": "boolean"
+          },
+          "first_adjustment": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Ajuste propuesto por la primera revisión.",
+            "title": "First Adjustment"
+          },
+          "second_adjustment": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Ajuste propuesto por la segunda revisión; nulo si falló.",
+            "title": "Second Adjustment"
+          },
+          "second_status": {
+            "description": "Resultado guardado de la segunda revisión. Valores: `applied`: Aplicada: su ajuste llegó a la puntuación; `suggestion`: Solo sugerencia (ticket que cambió una persona); `partial_review`: Revisión parcial: se aplicó lo validado; `judge_disagreement`: Desacuerdo en la doble revisión: final = base; `no_judge_review`: Sin juez (respaldo): final = base; `rejected`: Rechazada por la validación; `queued`: En cola para la siguiente corrida.",
+            "enum": [
+              "applied",
+              "suggestion",
+              "partial_review",
+              "judge_disagreement",
+              "no_judge_review",
+              "rejected",
+              "queued"
+            ],
+            "title": "Second Status",
+            "type": "string"
+          }
+        },
+        "required": [
+          "agreed",
+          "first_adjustment",
+          "second_adjustment",
+          "second_status"
+        ],
+        "title": "DoubleReviewInfo",
+        "type": "object"
+      },
       "ErrorBody": {
         "properties": {
           "code": {
@@ -2436,6 +2539,291 @@
         "title": "ItopWebhookCall",
         "type": "object"
       },
+      "JudgeDetail": {
+        "additionalProperties": false,
+        "examples": [
+          {
+            "accepted_reasons": [
+              {
+                "ci_id": null,
+                "code": "mass_exploitation",
+                "element_id": "news-1",
+                "label": "Explotación masiva",
+                "points": 12,
+                "quote": "se observa explotación masiva desde el 20 de noviembre",
+                "rejection_rule": null,
+                "seq": 1,
+                "status": "accepted"
+              }
+            ],
+            "applied_adjustment": 12,
+            "assessment_id": "0192f3a4-7b1e-7c2d-8a5f-3e4d5c6b7a89",
+            "dead_zone_applied": false,
+            "double_review": null,
+            "mitigation_status": "accepted",
+            "model": "deepseek-v4-pro",
+            "proposed_adjustment": 12,
+            "rejected_reasons": [
+              {
+                "ci_id": null,
+                "code": "requires_authentication",
+                "element_id": "news-2",
+                "label": "Requiere autenticación",
+                "points": -8,
+                "quote": "requiere una cuenta válida",
+                "rejection_rule": "L6",
+                "seq": 2,
+                "status": "rejected"
+              }
+            ],
+            "review_id": "0192f3a8-4f50-7162-8d7e-8f9a0b1c2d3e",
+            "reviewed_at": "2026-11-23T10:34:12Z",
+            "status": "applied",
+            "summary": "Explotación masiva reportada por dos fuentes; el servidor está expuesto."
+          }
+        ],
+        "properties": {
+          "accepted_reasons": {
+            "description": "Motivos aceptados.",
+            "items": {
+              "$ref": "#/components/schemas/JudgeReasonItem"
+            },
+            "title": "Accepted Reasons",
+            "type": "array"
+          },
+          "applied_adjustment": {
+            "description": "Ajuste del grupo que llegó a la puntuación (ya con la zona muerta).",
+            "title": "Applied Adjustment",
+            "type": "integer"
+          },
+          "assessment_id": {
+            "description": "Id de la evaluación.",
+            "title": "Assessment Id",
+            "type": "string"
+          },
+          "dead_zone_applied": {
+            "description": "Si el ajuste propuesto cayó dentro de la zona muerta y no se aplicó.",
+            "title": "Dead Zone Applied",
+            "type": "boolean"
+          },
+          "double_review": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/DoubleReviewInfo"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Doble revisión ciega; nula si no la hubo."
+          },
+          "mitigation_status": {
+            "anyOf": [
+              {
+                "enum": [
+                  "accepted",
+                  "discarded",
+                  "absent"
+                ],
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Mitigación redactada por el juez. Valores: `accepted`: Aceptada: se muestra como «redactado por IA»; `discarded`: Descartada por una regla; `absent`: El juez no la redactó.",
+            "title": "Mitigation Status"
+          },
+          "model": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Modelo de IA.",
+            "title": "Model"
+          },
+          "proposed_adjustment": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Suma de los motivos aceptados del grupo, antes de la zona muerta.",
+            "title": "Proposed Adjustment"
+          },
+          "rejected_reasons": {
+            "description": "Motivos rechazados o retirados.",
+            "items": {
+              "$ref": "#/components/schemas/JudgeReasonItem"
+            },
+            "title": "Rejected Reasons",
+            "type": "array"
+          },
+          "review_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Id de la revisión; nulo si la evaluación no tuvo juez.",
+            "title": "Review Id"
+          },
+          "reviewed_at": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Cuándo revisó el juez (UTC).",
+            "title": "Reviewed At"
+          },
+          "status": {
+            "anyOf": [
+              {
+                "enum": [
+                  "applied",
+                  "suggestion",
+                  "partial_review",
+                  "judge_disagreement",
+                  "no_judge_review",
+                  "rejected",
+                  "queued"
+                ],
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Resultado de la revisión; nulo sin revisión. Valores: `applied`: Aplicada: su ajuste llegó a la puntuación; `suggestion`: Solo sugerencia (ticket que cambió una persona); `partial_review`: Revisión parcial: se aplicó lo validado; `judge_disagreement`: Desacuerdo en la doble revisión: final = base; `no_judge_review`: Sin juez (respaldo): final = base; `rejected`: Rechazada por la validación; `queued`: En cola para la siguiente corrida.",
+            "title": "Status"
+          },
+          "summary": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Resumen del juez.",
+            "title": "Summary"
+          }
+        },
+        "required": [
+          "assessment_id",
+          "review_id",
+          "status",
+          "summary",
+          "model",
+          "reviewed_at",
+          "proposed_adjustment",
+          "applied_adjustment",
+          "dead_zone_applied",
+          "accepted_reasons",
+          "rejected_reasons",
+          "double_review",
+          "mitigation_status"
+        ],
+        "title": "JudgeDetail",
+        "type": "object"
+      },
+      "JudgeReasonItem": {
+        "additionalProperties": false,
+        "properties": {
+          "ci_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "CI al que se suma el motivo (`more_critical_asset`); nulo si es del grupo.",
+            "title": "Ci Id"
+          },
+          "code": {
+            "description": "Código del motivo.",
+            "title": "Code",
+            "type": "string"
+          },
+          "element_id": {
+            "description": "Elemento del paquete que cita (noticia, CVE o CI).",
+            "title": "Element Id",
+            "type": "string"
+          },
+          "label": {
+            "description": "Descripción del motivo, en español.",
+            "title": "Label",
+            "type": "string"
+          },
+          "points": {
+            "description": "Puntos: los aplicados si se aceptó, los propuestos si no.",
+            "title": "Points",
+            "type": "integer"
+          },
+          "quote": {
+            "description": "Cita textual de la evidencia; es texto externo: muéstrala como dato, escapada.",
+            "title": "Quote",
+            "type": "string"
+          },
+          "rejection_rule": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Regla que lo rechazó (por ejemplo `L5.quote` o `L6`); nula si se aceptó.",
+            "title": "Rejection Rule"
+          },
+          "seq": {
+            "description": "Orden en que el juez propuso el motivo.",
+            "title": "Seq",
+            "type": "integer"
+          },
+          "status": {
+            "description": "Qué decidió la validación. Valores: `accepted`: Aceptado por la validación; `rejected`: Rechazado por una regla; `withdrawn`: Retirado por el juez.",
+            "enum": [
+              "accepted",
+              "rejected",
+              "withdrawn"
+            ],
+            "title": "Status",
+            "type": "string"
+          }
+        },
+        "required": [
+          "seq",
+          "code",
+          "label",
+          "points",
+          "quote",
+          "element_id",
+          "ci_id",
+          "status",
+          "rejection_rule"
+        ],
+        "title": "JudgeReasonItem",
+        "type": "object"
+      },
       "LlmReviewEntry": {
         "additionalProperties": false,
         "examples": [
@@ -3179,6 +3567,35 @@
         "title": "Page[Source]",
         "type": "object"
       },
+      "Page_TicketUpdateEntry_": {
+        "properties": {
+          "items": {
+            "description": "Elementos de la página.",
+            "items": {
+              "$ref": "#/components/schemas/TicketUpdateEntry"
+            },
+            "title": "Items",
+            "type": "array"
+          },
+          "next_cursor": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Opaque cursor for the next page; null if none",
+            "title": "Next Cursor"
+          }
+        },
+        "required": [
+          "items"
+        ],
+        "title": "Page[TicketUpdateEntry]",
+        "type": "object"
+      },
       "Page_Ticket_": {
         "properties": {
           "items": {
@@ -3455,6 +3872,14 @@
           }
         ],
         "properties": {
+          "accepted_reasons": {
+            "description": "Motivos del juez que llegaron a la puntuación, con su cita (FRO-13); vacío sin juez, con respaldo o con desacuerdo.",
+            "items": {
+              "$ref": "#/components/schemas/AcceptedReason"
+            },
+            "title": "Accepted Reasons",
+            "type": "array"
+          },
           "assessment_id": {
             "description": "Id de la evaluación.",
             "title": "Assessment Id",
@@ -3507,6 +3932,39 @@
             "description": "Ajuste del juez en puntos (puede ser negativo).",
             "title": "Judge Adjustment",
             "type": "integer"
+          },
+          "judge_status": {
+            "anyOf": [
+              {
+                "enum": [
+                  "applied",
+                  "suggestion",
+                  "partial_review",
+                  "judge_disagreement",
+                  "no_judge_review",
+                  "rejected",
+                  "queued"
+                ],
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Resultado de la revisión del juez; nulo sin revisión. Valores: `applied`: Aplicada: su ajuste llegó a la puntuación; `suggestion`: Solo sugerencia (ticket que cambió una persona); `partial_review`: Revisión parcial: se aplicó lo validado; `judge_disagreement`: Desacuerdo en la doble revisión: final = base; `no_judge_review`: Sin juez (respaldo): final = base; `rejected`: Rechazada por la validación; `queued`: En cola para la siguiente corrida.",
+            "title": "Judge Status"
+          },
+          "judge_summary": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Resumen del juez, si hubo revisión.",
+            "title": "Judge Summary"
           },
           "justification": {
             "description": "Por qué tiene esta prioridad, en español.",
@@ -3574,6 +4032,18 @@
             ],
             "description": "Producto afectado; nulo en alertas inferidas.",
             "title": "Product"
+          },
+          "ticket_itop_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Id del ticket de iTop que se muestra (el del custodio del CI mostrado).",
+            "title": "Ticket Itop Id"
           },
           "ticket_url": {
             "anyOf": [
@@ -4822,6 +5292,205 @@
           "total_cis"
         ],
         "title": "Ticket",
+        "type": "object"
+      },
+      "TicketSummary": {
+        "additionalProperties": false,
+        "properties": {
+          "avg_resolution_hours": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Horas promedio desde la creación en iTop hasta la resolución, como texto.",
+            "title": "Avg Resolution Hours"
+          },
+          "by_status": {
+            "additionalProperties": {
+              "type": "integer"
+            },
+            "description": "Tickets por estado: `pending_creation`, `open`, `resolved` y `closed`.",
+            "title": "By Status",
+            "type": "object"
+          },
+          "by_urgency": {
+            "additionalProperties": {
+              "type": "integer"
+            },
+            "description": "Tickets ya en iTop por urgencia (`1` crítica a `4` baja).",
+            "title": "By Urgency",
+            "type": "object"
+          },
+          "changed_by_person": {
+            "description": "Tickets cuya urgencia cambió una persona en iTop (D-007).",
+            "title": "Changed By Person",
+            "type": "integer"
+          },
+          "resolved": {
+            "description": "Tickets resueltos o cerrados.",
+            "title": "Resolved",
+            "type": "integer"
+          },
+          "resolved_percent": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Resueltos o cerrados sobre los que están en iTop, en %, como texto.",
+            "title": "Resolved Percent"
+          },
+          "total": {
+            "description": "Todos los tickets, también los que esperan crearse en iTop.",
+            "title": "Total",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "total",
+          "by_status",
+          "by_urgency",
+          "changed_by_person",
+          "resolved",
+          "resolved_percent",
+          "avg_resolution_hours"
+        ],
+        "title": "TicketSummary",
+        "type": "object"
+      },
+      "TicketUpdateEntry": {
+        "additionalProperties": false,
+        "properties": {
+          "action": {
+            "description": "Qué hizo Hermes en el ticket. Valores: `create`: Ticket creado; `add_ci`: CI agregado al ticket; `add_owner`: Dueño agregado; `comment`: Comentario; `raise_urgency`: Urgencia subida; `lower_urgency`: Urgencia bajada; `suggest`: Sugerencia de urgencia (ticket que cambió una persona); `partial_fix`: Corrección parcial; `fix_comment`: Corrección verificada; `reopen`: Reabierto.",
+            "enum": [
+              "create",
+              "add_ci",
+              "add_owner",
+              "comment",
+              "raise_urgency",
+              "lower_urgency",
+              "suggest",
+              "partial_fix",
+              "fix_comment",
+              "reopen"
+            ],
+            "title": "Action",
+            "type": "string"
+          },
+          "assessment_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Evaluación que lo motivó, si la hay.",
+            "title": "Assessment Id"
+          },
+          "created_at": {
+            "description": "Fecha y hora de creación (UTC).",
+            "title": "Created At",
+            "type": "string"
+          },
+          "custodian": {
+            "description": "Equipo custodio del activo.",
+            "title": "Custodian",
+            "type": "string"
+          },
+          "cve": {
+            "description": "Identificador CVE.",
+            "title": "Cve",
+            "type": "string"
+          },
+          "id": {
+            "description": "Id del registro.",
+            "title": "Id",
+            "type": "string"
+          },
+          "itop_status": {
+            "anyOf": [
+              {
+                "enum": [
+                  "pending",
+                  "in_progress",
+                  "done",
+                  "failed"
+                ],
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Estado de la escritura en iTop; nulo si ya se purgó (90 días). Valores: `pending`: Espera su envío a iTop; `in_progress`: Enviándose a iTop; `done`: Escrito en iTop; `failed`: Falló; está en la cola de error.",
+            "title": "Itop Status"
+          },
+          "label": {
+            "description": "La acción, en español.",
+            "title": "Label",
+            "type": "string"
+          },
+          "ticket_itop_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Id numérico del ticket en iTop; nulo mientras no se crea.",
+            "title": "Ticket Itop Id"
+          },
+          "ticket_ref": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Referencia del ticket en iTop (por ejemplo `R-000123`).",
+            "title": "Ticket Ref"
+          },
+          "ticket_url": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Enlace al ticket de iTop, si existe.",
+            "title": "Ticket Url"
+          }
+        },
+        "required": [
+          "id",
+          "created_at",
+          "action",
+          "label",
+          "assessment_id",
+          "ticket_itop_id",
+          "ticket_ref",
+          "ticket_url",
+          "cve",
+          "custodian",
+          "itop_status"
+        ],
+        "title": "TicketUpdateEntry",
         "type": "object"
       },
       "VulnerabilityBand": {
@@ -11120,6 +11789,92 @@
             }
           },
           {
+            "description": "Solo las evaluaciones del grupo de ese ticket de iTop.",
+            "in": "query",
+            "name": "ticket_itop_id",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "pattern": "^[0-9]{1,12}$",
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Solo las evaluaciones del grupo de ese ticket de iTop.",
+              "title": "Ticket Itop Id"
+            }
+          },
+          {
+            "description": "Solo las recomendaciones de ese nivel. Valores: `critical`: Crítica (urgencia 1); `high`: Alta (urgencia 2); `medium`: Media (urgencia 3); `low`: Baja (urgencia 4).",
+            "in": "query",
+            "name": "level",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "enum": [
+                    "critical",
+                    "high",
+                    "medium",
+                    "low"
+                  ],
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Solo las recomendaciones de ese nivel.",
+              "title": "Level"
+            }
+          },
+          {
+            "description": "Solo las que tienen un feedback vigente con ese veredicto. Valores: `relevant`: La recomendación es útil; `false_positive`: No aplica: suprime los hallazgos evaluados hasta que cambien; `wrong_priority`: Prioridad incorrecta; exige `proposed_level`; `investigating`: Se está investigando; `stop_suggestions`: No sugerir más en el ticket.",
+            "in": "query",
+            "name": "verdict",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "enum": [
+                    "relevant",
+                    "false_positive",
+                    "wrong_priority",
+                    "investigating",
+                    "stop_suggestions"
+                  ],
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Solo las que tienen un feedback vigente con ese veredicto.",
+              "title": "Verdict"
+            }
+          },
+          {
+            "description": "Solo las que no tienen (`true`) o sí tienen (`false`) feedback vigente.",
+            "in": "query",
+            "name": "without_feedback",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "boolean"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Solo las que no tienen (`true`) o sí tienen (`false`) feedback vigente.",
+              "title": "Without Feedback"
+            }
+          },
+          {
             "description": "Opaque cursor from `next_cursor`: base64url(payload).base64url(signature). A cursor that is not ours or was altered is answered with 400 `invalid_cursor`.",
             "in": "query",
             "name": "cursor",
@@ -11396,6 +12151,140 @@
           }
         ],
         "summary": "Detalle de una recomendación",
+        "tags": [
+          "recommendations"
+        ]
+      }
+    },
+    "/api/recommendations/{assessment_id}/judge": {
+      "get": {
+        "description": "La revisión del juez que usó una evaluación: estado, resumen, ajuste propuesto y aplicado (y si cayó en la zona muerta), motivos aceptados y rechazados con sus puntos, su cita y la regla que los rechazó, y la doble revisión ciega (si coincidieron y el ajuste de cada una). Las citas son texto externo: muéstralas como datos, escapadas. Nunca trae el prompt ni las llamadas crudas. Rol mínimo: `reader`.",
+        "operationId": "get_recommendation_judge",
+        "parameters": [
+          {
+            "description": "Id (UUID) de la evaluación.",
+            "in": "path",
+            "name": "assessment_id",
+            "required": true,
+            "schema": {
+              "examples": [
+                "0196a6f0-0000-7000-8000-000000000001"
+              ],
+              "maxLength": 36,
+              "pattern": "^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$",
+              "title": "Assessment Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/JudgeDetail"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "La solicitud no es válida."
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Se requiere autenticación válida."
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "No tienes permiso para realizar esta acción."
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "El recurso solicitado no existe."
+          },
+          "405": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Método no permitido para esta ruta."
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "La solicitud entra en conflicto con el estado actual del recurso."
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Los datos enviados no son válidos."
+          },
+          "429": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Demasiadas solicitudes; intenta de nuevo más tarde."
+          },
+          "500": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Error interno del servidor."
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "Detalle del juez",
         "tags": [
           "recommendations"
         ]
@@ -13541,6 +14430,325 @@
           }
         ],
         "summary": "Listar tickets",
+        "tags": [
+          "tickets"
+        ]
+      }
+    },
+    "/api/tickets/summary": {
+      "get": {
+        "description": "Todos los tickets por estado (`pending_creation`, `open`, `resolved`, `closed`, los que Hermes mantiene al día con iTop), los de iTop por urgencia, cuántos cambió una persona en iTop, el % resuelto y el tiempo promedio de resolución en horas. Rol mínimo: `reader`.",
+        "operationId": "get_ticket_summary",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TicketSummary"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "La solicitud no es válida."
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Se requiere autenticación válida."
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "No tienes permiso para realizar esta acción."
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "El recurso solicitado no existe."
+          },
+          "405": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Método no permitido para esta ruta."
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "La solicitud entra en conflicto con el estado actual del recurso."
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Los datos enviados no son válidos."
+          },
+          "429": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Demasiadas solicitudes; intenta de nuevo más tarde."
+          },
+          "500": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Error interno del servidor."
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "Resumen de tickets",
+        "tags": [
+          "tickets"
+        ]
+      }
+    },
+    "/api/tickets/updates": {
+      "get": {
+        "description": "Lo que Hermes hizo en cada ticket y por qué, de lo más reciente a lo más antiguo: creación, CIs agregados, urgencia subida o bajada, comentarios y correcciones verificadas, con la evaluación que lo motivó y el estado de la escritura en iTop. Filtros por ticket y acción. Pagina por cursor. Rol mínimo: `reader`.",
+        "operationId": "list_ticket_updates",
+        "parameters": [
+          {
+            "description": "Id numérico del ticket en iTop.",
+            "in": "query",
+            "name": "ticket_itop_id",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "pattern": "^[0-9]{1,12}$",
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Id numérico del ticket en iTop.",
+              "title": "Ticket Itop Id"
+            }
+          },
+          {
+            "description": "Acción registrada. Valores: `create`: Ticket creado; `add_ci`: CI agregado al ticket; `add_owner`: Dueño agregado; `comment`: Comentario; `raise_urgency`: Urgencia subida; `lower_urgency`: Urgencia bajada; `suggest`: Sugerencia de urgencia (ticket que cambió una persona); `partial_fix`: Corrección parcial; `fix_comment`: Corrección verificada; `reopen`: Reabierto.",
+            "in": "query",
+            "name": "action",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "enum": [
+                    "create",
+                    "add_ci",
+                    "add_owner",
+                    "comment",
+                    "raise_urgency",
+                    "lower_urgency",
+                    "suggest",
+                    "partial_fix",
+                    "fix_comment",
+                    "reopen"
+                  ],
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Acción registrada.",
+              "title": "Action"
+            }
+          },
+          {
+            "description": "Opaque cursor from `next_cursor`: base64url(payload).base64url(signature). A cursor that is not ours or was altered is answered with 400 `invalid_cursor`.",
+            "in": "query",
+            "name": "cursor",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "maxLength": 1024,
+                  "pattern": "^[A-Za-z0-9_-]+\\.[A-Za-z0-9_-]+$",
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Opaque cursor from `next_cursor`: base64url(payload).base64url(signature). A cursor that is not ours or was altered is answered with 400 `invalid_cursor`.",
+              "title": "Cursor"
+            }
+          },
+          {
+            "description": "Page size",
+            "in": "query",
+            "name": "limit",
+            "required": false,
+            "schema": {
+              "default": 50,
+              "description": "Page size",
+              "maximum": 200,
+              "minimum": 1,
+              "title": "Limit",
+              "type": "integer"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Page_TicketUpdateEntry_"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Cursor inválido o alterado (code: invalid_cursor)"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Se requiere autenticación válida."
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "No tienes permiso para realizar esta acción."
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "El recurso solicitado no existe."
+          },
+          "405": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Método no permitido para esta ruta."
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "La solicitud entra en conflicto con el estado actual del recurso."
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Los datos enviados no son válidos."
+          },
+          "429": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Demasiadas solicitudes; intenta de nuevo más tarde."
+          },
+          "500": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Error interno del servidor."
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "Bitácora de tickets",
         "tags": [
           "tickets"
         ]

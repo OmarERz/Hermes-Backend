@@ -1,0 +1,26 @@
+meta {
+  name: recommendation-judge-unknown
+  type: http
+  seq: 17
+}
+
+get {
+  url: {{baseUrl}}/api/recommendations/0196a6f0-0000-7000-8000-000000000999/judge
+  body: none
+  auth: bearer
+}
+
+auth:bearer {
+  token: {{token}}
+}
+
+assert {
+  res.status: eq 404
+  res.body.error.code: eq not_found
+}
+
+docs {
+  An assessment that does not exist is a 404.
+
+  operationId: get_recommendation_judge
+}

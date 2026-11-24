@@ -8,7 +8,7 @@ from __future__ import annotations
 
 import uuid
 from collections.abc import Sequence
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from datetime import datetime
 from typing import Any, Final
 
@@ -23,6 +23,9 @@ from core.views.common import CLASSIFICATION_ORDER, ci_url
 
 TimeKey = tuple[datetime, uuid.UUID]  # (assessed_at, id) of the last row of a page, newest first
 MAX_FEEDBACK: Final = 500
+# Reviews whose accepted reasons reached the score, or were suggested in a ticket a person changed (D-007); after a
+# fallback or a disagreement the reasons were never used, so none is shown (FRO-13).
+USED_REVIEW_STATUSES: Final = frozenset({"applied", "partial_review", "suggestion"})
 
 # One row per CI score of each assessment in the page; `:after_at`/`:after_id` resume after the last row seen.
 _PAGE: Final = text(
@@ -36,6 +39,18 @@ _PAGE: Final = text(
          AND (CAST(:ci_id AS text) IS NULL OR EXISTS (
                SELECT 1 FROM asset_score s JOIN asset x ON x.id = s.asset_id
                 WHERE s.assessment_id = a.id AND x.itop_ci_id = CAST(:ci_id AS text)))
+         AND (CAST(:ticket AS text) IS NULL OR EXISTS (
+               SELECT 1 FROM ticket tk
+                WHERE tk.finding_group_id = a.finding_group_id AND tk.itop_ticket_id = CAST(:ticket AS text)))
+         AND (CAST(:verdict AS text) IS NULL OR EXISTS (
+               SELECT 1 FROM feedback fb
+                WHERE fb.assessment_id = a.id AND fb.superseded_at IS NULL AND fb.verdict = CAST(:verdict AS text)))
+         AND (CAST(:without_feedback AS boolean) IS NULL OR CAST(:without_feedback AS boolean) = NOT EXISTS (
+               SELECT 1 FROM feedback fb WHERE fb.assessment_id = a.id AND fb.superseded_at IS NULL))
+         AND (CAST(:level AS text) IS NULL OR CAST(:level AS text) = (
+               SELECT d.level FROM asset_score_detail d JOIN asset x ON x.id = d.asset_id
+                WHERE d.assessment_id = a.id
+                ORDER BY (x.decommissioned_at IS NOT NULL), d.final DESC LIMIT 1))
          AND (CAST(:after_at AS timestamptz) IS NULL OR (a.assessed_at, a.id)
                < (CAST(:after_at AS timestamptz), CAST(:after_id AS uuid)))
        ORDER BY a.assessed_at DESC, a.id DESC
@@ -44,7 +59,7 @@ _PAGE: Final = text(
     SELECT a.id AS assessment_id, a.assessed_at, a.finding_group_id, a.alert_id, a.llm_review_id,
            a.judge_adjustment, a.raw_cvss_score, a.raw_in_kev, g.cve_id AS cve, sp.itop_name AS product,
            (a.llm_review_id IS NULL OR r.status = 'no_judge_review') AS no_judge_review,
-           r.mitigation_status,
+           r.mitigation_status, r.status AS judge_status, r.summary AS judge_summary,
            s.asset_id, s.base, s.ci_adjustment, s.final, d.level, d.floor_applied,
            s.snap_criticality, s.snap_exposed, s.snap_confidentiality, s.snap_personal_data,
            ast.itop_ci_id AS ci_id, ast.itop_class, ast.name AS asset_name, ast.confidentiality AS classification,
@@ -80,8 +95,9 @@ _PAGE: Final = text(
 )
 _REASONS: Final = text(
     """
-    SELECT jr.llm_review_id, t.description, jr.points
+    SELECT jr.llm_review_id, jr.reason_code AS code, t.description, jr.points, jr.quote, x.itop_ci_id AS ci_id
       FROM judge_reason jr JOIN judge_reason_type t ON t.code = jr.reason_code
+      LEFT JOIN asset x ON x.id = jr.asset_id
      WHERE jr.llm_review_id = ANY(CAST(:reviews AS uuid[])) AND jr.status = 'accepted'
      ORDER BY jr.llm_review_id, jr.seq
     """
@@ -140,6 +156,15 @@ class AffectedAsset:
 
 
 @dataclass(frozen=True)
+class AcceptedReason:
+    code: str
+    label: str
+    points: int
+    quote: str
+    ci_id: str | None
+
+
+@dataclass(frozen=True)
 class Recommendation:
     assessment_id: uuid.UUID
     created_at: datetime
@@ -156,6 +181,10 @@ class Recommendation:
     asset: AffectedAsset | None
     ticket_url: str | None
     feedback_count: int
+    accepted_reasons: list[AcceptedReason] = field(default_factory=list)
+    judge_summary: str | None = None
+    judge_status: str | None = None
+    ticket_itop_id: str | None = None
 
 
 @dataclass(frozen=True)
@@ -178,6 +207,10 @@ class Query:
     assessment_id: uuid.UUID | None = None
     group_id: uuid.UUID | None = None
     ci_id: str | None = None  # iTop CI id
+    ticket: str | None = None  # iTop ticket id: the assessments of its group (RE-1)
+    level: str | None = None  # level of the recommendation, i.e. of its highest final (RE-2)
+    verdict: str | None = None  # with a current feedback of that verdict
+    without_feedback: bool | None = None  # without (True) or with (False) a current feedback
 
 
 @dataclass
@@ -185,6 +218,7 @@ class _Parts:
     """What a page needs beyond its score rows, loaded once per page."""
 
     reasons: dict[uuid.UUID, list[JudgeReason]]
+    accepted: dict[uuid.UUID, list[AcceptedReason]]
     drafts: dict[uuid.UUID, list[str]]
     tickets: dict[uuid.UUID, list[tuple[uuid.UUID, str]]]  # group -> (custodian team, iTop id)
 
@@ -192,10 +226,13 @@ class _Parts:
 def _parts(session: Session, rows: Sequence[Any]) -> _Parts:
     reviews = list({r.llm_review_id for r in rows if r.llm_review_id is not None})
     groups = list({r.finding_group_id for r in rows if r.finding_group_id is not None})
-    parts = _Parts({}, {}, {})
+    parts = _Parts({}, {}, {}, {})
     if reviews:
         for row in session.execute(_REASONS, {"reviews": reviews}):
             parts.reasons.setdefault(row.llm_review_id, []).append(JudgeReason(f"{row.description} ({row.points:+d})"))
+            parts.accepted.setdefault(row.llm_review_id, []).append(
+                AcceptedReason(row.code, row.description, int(row.points), row.quote, row.ci_id)
+            )
         for row in session.execute(_DRAFT, {"reviews": reviews}):
             parts.drafts.setdefault(row.llm_review_id, []).append(row.action)
     if groups:
@@ -284,6 +321,12 @@ def _recommendation(
         ),
         ticket_url=ticket_url(itop_base_url, itop_id) or None,
         feedback_count=first.feedback_count,
+        accepted_reasons=list(parts.accepted.get(first.llm_review_id, ()))
+        if first.judge_status in USED_REVIEW_STATUSES
+        else [],
+        judge_summary=first.judge_summary,
+        judge_status=first.judge_status,
+        ticket_itop_id=itop_id,
     )
 
 
@@ -297,6 +340,10 @@ def list_recommendations(
             "assessment_id": query.assessment_id,
             "group_id": query.group_id,
             "ci_id": query.ci_id,
+            "ticket": query.ticket,
+            "level": query.level,
+            "verdict": query.verdict,
+            "without_feedback": query.without_feedback,
             "after_at": after[0] if after else None,
             "after_id": after[1] if after else None,
             "limit": limit + 1,

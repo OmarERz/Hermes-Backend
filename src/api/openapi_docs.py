@@ -418,6 +418,31 @@ OPERATIONS: Final[dict[tuple[str, str], Op]] = {
         "El software de un CI vigente con su versión, su CPE y el peor nivel de sus vulnerabilidades abiertas en ese "
         "CI; 404 si el CI no está en el inventario vigente. Rol mínimo: `reader`.",
     ),
+    ("GET", "/api/tickets/summary"): Op(
+        "get_ticket_summary",
+        "tickets",
+        "Resumen de tickets",
+        "Todos los tickets por estado (`pending_creation`, `open`, `resolved`, `closed`, los que Hermes mantiene al "
+        "día con iTop), los de iTop por urgencia, cuántos cambió una persona en iTop, el % resuelto y el tiempo "
+        "promedio de resolución en horas. Rol mínimo: `reader`.",
+    ),
+    ("GET", "/api/tickets/updates"): Op(
+        "list_ticket_updates",
+        "tickets",
+        "Bitácora de tickets",
+        "Lo que Hermes hizo en cada ticket y por qué, de lo más reciente a lo más antiguo: creación, CIs agregados, "
+        "urgencia subida o bajada, comentarios y correcciones verificadas, con la evaluación que lo motivó y el "
+        "estado de la escritura en iTop. Filtros por ticket y acción. Pagina por cursor. Rol mínimo: `reader`.",
+    ),
+    ("GET", "/api/recommendations/{assessment_id}/judge"): Op(
+        "get_recommendation_judge",
+        "recommendations",
+        "Detalle del juez",
+        "La revisión del juez que usó una evaluación: estado, resumen, ajuste propuesto y aplicado (y si cayó en la "
+        "zona muerta), motivos aceptados y rechazados con sus puntos, su cita y la regla que los rechazó, y la doble "
+        "revisión ciega (si coincidieron y el ajuste de cada una). Las citas son texto externo: muéstralas como "
+        "datos, escapadas. Nunca trae el prompt ni las llamadas crudas. Rol mínimo: `reader`.",
+    ),
 }
 
 PARAMS: Final[dict[str, str]] = {
@@ -446,6 +471,7 @@ PARAMS: Final[dict[str, str]] = {
     "type": "Tipo de evento.",
     "itop_class": "Clase de iTop exacta, por ejemplo `Server`.",
     "with_findings": "Solo CIs con (`true`) o sin (`false`) hallazgos abiertos.",
+    "ticket_itop_id": "Id numérico del ticket en iTop.",
 }
 
 ENUMS: Final[dict[tuple[str, ...], dict[str, str]]] = {
@@ -603,6 +629,45 @@ ENUMS: Final[dict[tuple[str, ...], dict[str, str]]] = {
         "medium": "Media",
         "low": "Baja",
         "unknown": "Sin dato en iTop",
+    },
+    (
+        "create",
+        "add_ci",
+        "add_owner",
+        "comment",
+        "raise_urgency",
+        "lower_urgency",
+        "suggest",
+        "partial_fix",
+        "fix_comment",
+        "reopen",
+    ): {
+        "create": "Ticket creado",
+        "add_ci": "CI agregado al ticket",
+        "add_owner": "Dueño agregado",
+        "comment": "Comentario",
+        "raise_urgency": "Urgencia subida",
+        "lower_urgency": "Urgencia bajada",
+        "suggest": "Sugerencia de urgencia (ticket que cambió una persona)",
+        "partial_fix": "Corrección parcial",
+        "fix_comment": "Corrección verificada",
+        "reopen": "Reabierto",
+    },
+    ("pending", "in_progress", "done", "failed"): {
+        "pending": "Espera su envío a iTop",
+        "in_progress": "Enviándose a iTop",
+        "done": "Escrito en iTop",
+        "failed": "Falló; está en la cola de error",
+    },
+    ("accepted", "rejected", "withdrawn"): {
+        "accepted": "Aceptado por la validación",
+        "rejected": "Rechazado por una regla",
+        "withdrawn": "Retirado por el juez",
+    },
+    ("accepted", "discarded", "absent"): {
+        "accepted": "Aceptada: se muestra como «redactado por IA»",
+        "discarded": "Descartada por una regla",
+        "absent": "El juez no la redactó",
     },
     ("deepseek", "claude-code"): {"deepseek": "API de DeepSeek", "claude-code": "Claude por la CLI de Claude Code"},
     ("decimal", "integer", "boolean", "string", "enum"): {
@@ -950,6 +1015,54 @@ OVERRIDES: Final[dict[str, str]] = {
     "SoftwareHealth.total": "Software instalado en CIs vigentes.",
     "Source.description": "Qué es la fuente; nulo en los feeds propios.",
     "Source.provider": "Quién la publica; nulo en los feeds propios.",
+    "AcceptedReason.code": "Código del motivo, por ejemplo `mass_exploitation`.",
+    "AcceptedReason.label": "Descripción del motivo, en español.",
+    "AcceptedReason.points": "Puntos aplicados (con el perfil de sensibilidad de ese momento).",
+    "AcceptedReason.quote": "Cita textual de la evidencia; es texto externo: muéstrala como dato, escapada.",
+    "AcceptedReason.ci_id": "CI al que se suma el motivo (`more_critical_asset`); nulo si es del grupo.",
+    "Recommendation.accepted_reasons": "Motivos del juez que llegaron a la puntuación, con su cita (FRO-13); vacío "
+    "sin juez, con respaldo o con desacuerdo.",
+    "Recommendation.judge_summary": "Resumen del juez, si hubo revisión.",
+    "Recommendation.judge_status": "Resultado de la revisión del juez; nulo sin revisión.",
+    "Recommendation.ticket_itop_id": "Id del ticket de iTop que se muestra (el del custodio del CI mostrado).",
+    "JudgeReasonItem.seq": "Orden en que el juez propuso el motivo.",
+    "JudgeReasonItem.code": "Código del motivo.",
+    "JudgeReasonItem.label": "Descripción del motivo, en español.",
+    "JudgeReasonItem.points": "Puntos: los aplicados si se aceptó, los propuestos si no.",
+    "JudgeReasonItem.quote": "Cita textual de la evidencia; es texto externo: muéstrala como dato, escapada.",
+    "JudgeReasonItem.element_id": "Elemento del paquete que cita (noticia, CVE o CI).",
+    "JudgeReasonItem.ci_id": "CI al que se suma el motivo (`more_critical_asset`); nulo si es del grupo.",
+    "JudgeReasonItem.status": "Qué decidió la validación.",
+    "JudgeReasonItem.rejection_rule": "Regla que lo rechazó (por ejemplo `L5.quote` o `L6`); nula si se aceptó.",
+    "JudgeDetail.review_id": "Id de la revisión; nulo si la evaluación no tuvo juez.",
+    "JudgeDetail.status": "Resultado de la revisión; nulo sin revisión.",
+    "JudgeDetail.summary": "Resumen del juez.",
+    "JudgeDetail.reviewed_at": "Cuándo revisó el juez (UTC).",
+    "JudgeDetail.proposed_adjustment": "Suma de los motivos aceptados del grupo, antes de la zona muerta.",
+    "JudgeDetail.applied_adjustment": "Ajuste del grupo que llegó a la puntuación (ya con la zona muerta).",
+    "JudgeDetail.dead_zone_applied": "Si el ajuste propuesto cayó dentro de la zona muerta y no se aplicó.",
+    "JudgeDetail.accepted_reasons": "Motivos aceptados.",
+    "JudgeDetail.rejected_reasons": "Motivos rechazados o retirados.",
+    "JudgeDetail.double_review": "Doble revisión ciega; nula si no la hubo.",
+    "JudgeDetail.mitigation_status": "Mitigación redactada por el juez.",
+    "DoubleReviewInfo.agreed": "Si las dos revisiones coincidieron; sin acuerdo, final = base.",
+    "DoubleReviewInfo.first_adjustment": "Ajuste propuesto por la primera revisión.",
+    "DoubleReviewInfo.second_adjustment": "Ajuste propuesto por la segunda revisión; nulo si falló.",
+    "DoubleReviewInfo.second_status": "Resultado guardado de la segunda revisión.",
+    "TicketSummary.total": "Todos los tickets, también los que esperan crearse en iTop.",
+    "TicketSummary.by_status": "Tickets por estado: `pending_creation`, `open`, `resolved` y `closed`.",
+    "TicketSummary.by_urgency": "Tickets ya en iTop por urgencia (`1` crítica a `4` baja).",
+    "TicketSummary.changed_by_person": "Tickets cuya urgencia cambió una persona en iTop (D-007).",
+    "TicketSummary.resolved": "Tickets resueltos o cerrados.",
+    "TicketSummary.resolved_percent": "Resueltos o cerrados sobre los que están en iTop, en %, como texto.",
+    "TicketSummary.avg_resolution_hours": "Horas promedio desde la creación en iTop hasta la resolución, como texto.",
+    "TicketUpdateEntry.id": "Id del registro.",
+    "TicketUpdateEntry.action": "Qué hizo Hermes en el ticket.",
+    "TicketUpdateEntry.label": "La acción, en español.",
+    "TicketUpdateEntry.assessment_id": "Evaluación que lo motivó, si la hay.",
+    "TicketUpdateEntry.ticket_itop_id": "Id numérico del ticket en iTop; nulo mientras no se crea.",
+    "TicketUpdateEntry.ticket_ref": "Referencia del ticket en iTop (por ejemplo `R-000123`).",
+    "TicketUpdateEntry.itop_status": "Estado de la escritura en iTop; nulo si ya se purgó (90 días).",
     "Run.trigger_reason": "Por qué se lanzó la corrida.",
     "Run.triggered_by": "Nombre de quien la lanzó; nulo si la lanzó la agenda.",
     "HistoryEvent.id": "Id del evento (el de la corrida, la revisión o el registro del cambio).",
@@ -1170,6 +1283,47 @@ EXAMPLES: Final[dict[str, list[dict[str, Any]]]] = {
             "has_cpe": True,
             "open_vulnerabilities": 2,
             "worst_level": "critical",
+        }
+    ],
+    "JudgeDetail": [
+        {
+            "assessment_id": "0192f3a4-7b1e-7c2d-8a5f-3e4d5c6b7a89",
+            "review_id": "0192f3a8-4f50-7162-8d7e-8f9a0b1c2d3e",
+            "status": "applied",
+            "summary": "Explotación masiva reportada por dos fuentes; el servidor está expuesto.",
+            "model": "deepseek-v4-pro",
+            "reviewed_at": "2026-11-23T10:34:12Z",
+            "proposed_adjustment": 12,
+            "applied_adjustment": 12,
+            "dead_zone_applied": False,
+            "accepted_reasons": [
+                {
+                    "seq": 1,
+                    "code": "mass_exploitation",
+                    "label": "Explotación masiva",
+                    "points": 12,
+                    "quote": "se observa explotación masiva desde el 20 de noviembre",
+                    "element_id": "news-1",
+                    "ci_id": None,
+                    "status": "accepted",
+                    "rejection_rule": None,
+                }
+            ],
+            "rejected_reasons": [
+                {
+                    "seq": 2,
+                    "code": "requires_authentication",
+                    "label": "Requiere autenticación",
+                    "points": -8,
+                    "quote": "requiere una cuenta válida",
+                    "element_id": "news-2",
+                    "ci_id": None,
+                    "status": "rejected",
+                    "rejection_rule": "L6",
+                }
+            ],
+            "double_review": None,
+            "mitigation_status": "accepted",
         }
     ],
     "HistoryEvent": [

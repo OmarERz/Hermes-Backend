@@ -1,0 +1,26 @@
+meta {
+  name: ticket-updates-bad-id
+  type: http
+  seq: 15
+}
+
+get {
+  url: {{baseUrl}}/api/tickets/updates?ticket_itop_id=R-000123
+  body: none
+  auth: bearer
+}
+
+auth:bearer {
+  token: {{token}}
+}
+
+assert {
+  res.status: eq 422
+  res.body.error.code: eq validation_error
+}
+
+docs {
+  The ticket filter takes the numeric iTop id, not the reference.
+
+  operationId: list_ticket_updates
+}
