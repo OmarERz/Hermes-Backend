@@ -67,6 +67,7 @@ x-backend: &backend
     CORS_ALLOWED_ORIGINS: ${CORS_ALLOWED_ORIGINS:-}
     # Non-secret connection settings of docs/11 §2 (blank means not configured)
     ITOP_URL: ${ITOP_URL:-}
+    ITOP_CONSOLE_URL: ${ITOP_CONSOLE_URL:-}
     ITOP_SYSTEM_USER: ${ITOP_SYSTEM_USER:-}
     ITOP_ORG_ID: ${ITOP_ORG_ID:-}
     ITOP_CALLER_ID: ${ITOP_CALLER_ID:-}

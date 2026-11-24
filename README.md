@@ -21,6 +21,47 @@ make up          # local stack: writes the Docker secret files from your env fil
 Copy `.env.example` to `.env` and set at least `POSTGRES_PASSWORD`, `MIGRATOR_DB_PASSWORD`, `APP_DB_PASSWORD` and
 `RETENTION_DB_PASSWORD` before `make up`.
 
+### Puerta antes del push (D-086)
+
+Hasta después de la entrega, el CI remoto es mínimo para ahorrar minutos de GitHub Actions: en un PR a `develop` solo
+corren `static`, `tests` y `commit-messages`; Schemathesis y SonarQube corren solo en PR y push a `main`; ya no hay
+corrida en push a `develop` (su PR ya pasó los checks); el flujo de seguridad (`security-weekly.yml`) solo se lanza a
+mano, y Dependabot no abre PR de versiones (las de seguridad siguen). Lo demás corre en tu equipo antes del push:
+
+```bash
+make prepush     # con el árbol limpio, sobre el commit que vas a publicar
+```
+
+`make prepush` (`scripts/prepush.sh`) reproduce el CI en este orden:
+
+1. `make verify`: formato, tipos, fronteras, pruebas con la puerta de cobertura, Semgrep, KICS, Gitleaks (historia desde
+   `origin/develop`, como en un PR) y pip-audit.
+2. Una pila de Compose aislada, como la de los jobs de Schemathesis y ZAP: nombre de proyecto y puertos (20000–39999)
+   propios de la corrida, contraseñas desechables en un directorio temporal fuera del repositorio, sin archivo de
+   entorno (ninguna llave real llega a la pila), el falso de embeddings (`compose.ci.yaml`) y la documentación de la API
+   activa.
+3. Tokens del emulador para admin, analista y lector; `make dynamic` (Schemathesis y la suite adversarial),
+   `make bruno` con los tres tokens y `make zap`.
+
+La pila y los secretos temporales siempre se borran (`down -v`), aunque algo falle. Tarda unos 15 minutos en un equipo
+de desarrollo: unos 5 de `make verify`, 7 de Schemathesis, 2 de ZAP y 1 de arrancar la pila. Usa los valores fijados
+en el repositorio aunque tu entorno defina otros (imágenes de los escáneres, opciones de `make` o de pytest, carpeta de
+Bruno). Si todo pasa, guarda el árbol del commit (`HEAD^{tree}`) en `.review/prepush.json` del checkout donde corrió y
+agrega una línea a `.review/prepush.log` del checkout principal, que comparten todos los worktrees (archivos locales,
+no versionados).
+
+- En el equipo de desarrollo, un hook local `pre-push` (no versionado; se instala una vez con
+  `bash scripts/hooks/pre-push --install`) rechaza el push de una rama `feat/*` si no hay una corrida en verde para el
+  árbol de ese commit. No tiene ninguna variable ni opción propia para saltarlo, y aunque un push se salte los hooks de
+  git, el merge sigue exigiendo la corrida.
+- El merge a `develop` (`scripts/hooks/merge-pr`, D-081) exige esa corrida para la cabeza del PR, y que `static`,
+  `tests` y `commit-messages` estén en verde.
+- Cualquier commit nuevo, incluido un merge de `develop`, cambia el árbol: hay que volver a correr `make prepush`. Las
+  ramas creadas antes de este cambio (por ejemplo, `feat/f15-3-worker-shutdown`) necesitan su propio `make prepush`
+  después de integrar `develop`; antes de integrarlo no tienen el target, pero pueden correr
+  `bash <checkout que lo tenga>/scripts/prepush.sh` desde su propio checkout.
+- Los títulos de los commits los revisan el hook local `commit-msg` y, en el PR, el job `commit-messages`.
+
 ## Front de personalización
 
 El front (React) lo construye otro equipo. Todo lo que necesita del backend está en [`FRONTEND.md`](FRONTEND.md).
@@ -53,6 +94,7 @@ devuelve y los registros las enmascaran.
 | Variable | Para qué |
 |---|---|
 | `ITOP_URL`, `ITOP_TOKEN`, `ITOP_SYSTEM_USER`, `ITOP_WEBHOOK_TOKEN` | Leer el CMDB y crear tickets en iTop; sin ellas no corren los trabajos de iTop |
+| `ITOP_CONSOLE_URL` | La consola de iTop que abren las personas desde los enlaces del front y de las notificaciones; vacío = `ITOP_URL`. Hace falta cuando `ITOP_URL` es un nombre que solo resuelven los contenedores (sección 9) |
 | `NVD_API_KEY` | Más cuota en NVD y consulta al diccionario CPE (sin llave solo hay candidatos locales). Sin llave, la primera carga de 90 días de NVD al arrancar tarda varios minutos y un escaneo pedido mientras tanto espera en cola |
 | `DEEPSEEK_API_KEY`, `LLM_BASE_URL_JUDGE`, `LLM_BASE_URL_ANALYSTS` | Juez y analistas de IA; **la demo nunca las usa** |
 | `LLM_PROVIDER`, `CLAUDE_CODE_MODEL_JUDGE`, `CLAUDE_CODE_MODEL_ANALYSTS`, `CLAUDE_CODE_EFFORT`, `CLAUDE_CODE_TIMEOUT_SECONDS` | Proveedor del juez y los analistas: `deepseek` (por defecto) o `claude-code`, la CLI de Claude Code con tu suscripción, solo en tu equipo (ver la sección 8) |
@@ -278,6 +320,8 @@ la API como `http://api:8000`. En `.env`:
 ```
 COMPOSE_FILE=compose.yaml:compose.itop-link.yaml
 ITOP_URL=http://itop:8080
+# los enlaces que abren las personas: http://itop:8080 solo lo resuelven los contenedores
+ITOP_CONSOLE_URL=http://127.0.0.1:8080
 ITOP_WEBHOOK_URL=http://api:8000/api/itop/webhook
 ITOP_TOKEN=<lo que imprime make itop-token>
 ITOP_WEBHOOK_TOKEN=<un valor largo al azar>

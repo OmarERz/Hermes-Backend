@@ -1,9 +1,13 @@
+# D-086: version updates are paused until after the delivery (open-pull-requests-limit: 0 on every ecosystem) to
+# save GitHub Actions minutes; restore the default limit afterwards. Security updates are a repository setting with
+# their own limit and keep opening pull requests.
 version: 2
 updates:
   - package-ecosystem: "uv"
     # The backend and the embeddings service image (docker/embeddings has its own uv.lock, CPU-only torch).
     directories: ["/", "/docker/embeddings"]
     target-branch: "develop"
+    open-pull-requests-limit: 0 # D-086: version updates paused until after the delivery
     commit-message:
       prefix: "build(deps)"
     schedule:
@@ -15,6 +19,7 @@ updates:
   - package-ecosystem: "docker"
     directories: ["/", "/docker/auth-emulator", "/docker/db", "/docker/embeddings", "/docker/embeddings-fake"]
     target-branch: "develop"
+    open-pull-requests-limit: 0 # D-086: version updates paused until after the delivery
     commit-message:
       prefix: "build(deps)"
     schedule:
@@ -36,6 +41,7 @@ updates:
   - package-ecosystem: "npm"
     directory: "/docker/auth-emulator"
     target-branch: "develop"
+    open-pull-requests-limit: 0 # D-086: version updates paused until after the delivery
     commit-message:
       prefix: "build(deps)"
     schedule:
@@ -47,6 +53,7 @@ updates:
   - package-ecosystem: "docker-compose"
     directory: "/"
     target-branch: "develop"
+    open-pull-requests-limit: 0 # D-086: version updates paused until after the delivery
     commit-message:
       prefix: "build(deps)"
     schedule:
@@ -62,6 +69,7 @@ updates:
   - package-ecosystem: "github-actions"
     directory: "/"
     target-branch: "develop"
+    open-pull-requests-limit: 0 # D-086: version updates paused until after the delivery
     commit-message:
       prefix: "ci(deps)"
     schedule:
