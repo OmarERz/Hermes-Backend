@@ -144,12 +144,22 @@ def test_app_can_write_licences_like_the_rest_of_the_inventory(fresh_db: Migrate
         ("UPDATE asset SET cpu = :v", {"v": "   "}),
         ("UPDATE asset SET ram = :v", {"v": ""}),
         ("UPDATE asset SET cpu = :v", {"v": "x" * 256}),
+        ("UPDATE asset SET ram = :v", {"v": "x" * 256}),
         ("UPDATE installed_software SET itop_class = :v", {"v": "SoftwareInstance"}),
         ("UPDATE installed_software SET status = :v", {"v": "production"}),
         ("UPDATE installed_software SET software_licence_id = :v", {"v": uuid.uuid4()}),
         (
             "INSERT INTO software_licence (itop_licence_id, name, perpetual, synced_at) VALUES ('1', :v, false, now())",
             {"v": " "},
+        ),
+        (
+            "INSERT INTO software_licence (itop_licence_id, name, perpetual, synced_at) VALUES ('1', :v, false, now())",
+            {"v": "x" * 256},
+        ),
+        (
+            "INSERT INTO software_licence (itop_licence_id, name, usage_limit, perpetual, synced_at) "
+            "VALUES ('1', 'n', :v, false, now())",
+            {"v": "  "},
         ),
         (
             "INSERT INTO software_licence (itop_licence_id, name, usage_limit, perpetual, synced_at) "
@@ -166,10 +176,13 @@ def test_app_can_write_licences_like_the_rest_of_the_inventory(fresh_db: Migrate
         "blank cpu",
         "empty ram",
         "cpu over 255",
+        "ram over 255",
         "abstract class",
         "device status",
         "unknown licence",
         "blank licence name",
+        "licence name over 255",
+        "blank usage limit",
         "usage limit over 255",
         "unknown product",
     ],

@@ -294,6 +294,8 @@ def _inventory(session: Session, *, edge: bool) -> None:
         personal_data=True,
         owner_person_id=owner.id,
         custodian_team_id=infra.id,
+        cpu="16 vCPU",
+        ram="64 GB",
         synced_at=NOW,
     )
     intranet = m.Asset(
@@ -307,6 +309,8 @@ def _inventory(session: Session, *, edge: bool) -> None:
         personal_data=False,
         owner_person_id=owner.id,
         custodian_team_id=infra.id,
+        cpu="4 vCPU",
+        ram="8 GB",
         synced_at=NOW,
     )
     session.add_all([payments, intranet])
@@ -325,9 +329,12 @@ def _inventory(session: Session, *, edge: bool) -> None:
             asset_id=asset.id,
             software_product_id=product.id,
             version="3.0.7",
+            itop_class="OtherSoftware",  # F18.3: category, status and description as iTop gives them
+            status=status,
+            description="Biblioteca TLS del sistema",
             synced_at=NOW,
         )
-        for i, asset in enumerate([payments, intranet], start=1)
+        for i, (asset, status) in enumerate([(payments, "active"), (intranet, "inactive")], start=1)
     ]
     session.add_all(installs)
     cve = m.Cve(

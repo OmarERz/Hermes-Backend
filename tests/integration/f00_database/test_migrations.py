@@ -8,6 +8,7 @@ from pathlib import Path
 import pytest
 from alembic import command
 from alembic.config import Config
+from alembic.script import ScriptDirectory
 from dbprovision import MigratedDatabase, provisioned_database
 from sqlalchemy import Engine, inspect, text
 from sqlalchemy.engine import make_url
@@ -189,8 +190,9 @@ def test_downgrade_aborts_on_a_dependent_foreign_view(fresh_db: MigratedDatabase
             command.downgrade(cfg, "base")
         assert "slack_ticket_scores" in inspect(engine).get_view_names()
         # The whole downgrade rolled back: still at head, and the app keeps its grants and the purge.
+        head = ScriptDirectory.from_config(cfg).get_current_head()
         with engine.connect() as conn:
-            assert conn.execute(text("SELECT version_num FROM alembic_version")).scalar_one() == "0004"
+            assert conn.execute(text("SELECT version_num FROM alembic_version")).scalar_one() == head
             assert conn.execute(text("SELECT has_table_privilege('app', 'ticket', 'SELECT')")).scalar_one()
             assert conn.execute(text("SELECT to_regprocedure('purge_retention()') IS NOT NULL")).scalar_one()
     finally:
