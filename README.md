@@ -21,6 +21,44 @@ make up          # local stack: writes the Docker secret files from your env fil
 Copy `.env.example` to `.env` and set at least `POSTGRES_PASSWORD`, `MIGRATOR_DB_PASSWORD`, `APP_DB_PASSWORD` and
 `RETENTION_DB_PASSWORD` before `make up`.
 
+### Puerta antes del push (D-086)
+
+Hasta después de la entrega, el CI remoto es mínimo para ahorrar minutos de GitHub Actions: en un PR a `develop` solo
+corren `static`, `tests` y `commit-messages`; Schemathesis y SonarQube corren solo en PR y push a `main`; ya no hay
+corrida en push a `develop` (su PR ya pasó los checks); el flujo de seguridad (`security-weekly.yml`) solo se lanza a
+mano, y Dependabot no abre PR de versiones (las de seguridad siguen). Lo demás corre en tu equipo antes del push:
+
+```bash
+make prepush     # con el árbol limpio, sobre el commit que vas a publicar
+```
+
+`make prepush` (`scripts/prepush.sh`) reproduce el CI en este orden:
+
+1. `make verify`: formato, tipos, fronteras, pruebas con la puerta de cobertura, Semgrep, KICS, Gitleaks (historia desde
+   `origin/develop`, como en un PR) y pip-audit.
+2. Una pila de Compose aislada, como la de los jobs de Schemathesis y ZAP: nombre de proyecto y puertos (20000–39999)
+   propios de la corrida, contraseñas desechables en un directorio temporal fuera del repositorio, sin archivo de
+   entorno (ninguna llave real llega a la pila), el falso de embeddings (`compose.ci.yaml`) y la documentación de la API
+   activa.
+3. Tokens del emulador para admin, analista y lector; `make dynamic` (Schemathesis y la suite adversarial),
+   `make bruno` con los tres tokens y `make zap`.
+
+La pila y los secretos temporales siempre se borran (`down -v`), aunque algo falle. Tarda unos 15 minutos en un equipo
+de desarrollo: unos 5 de `make verify`, 7 de Schemathesis, 2 de ZAP y 1 de arrancar la pila. Si todo pasa, guarda el
+árbol del commit (`HEAD^{tree}`) en `.review/prepush.json` y en `.review/prepush.log` del checkout principal (archivos
+locales, no versionados).
+
+- En el equipo de desarrollo, un hook local `pre-push` (no versionado; se instala una vez con
+  `bash scripts/hooks/pre-push --install`) rechaza el push de una rama `feat/*` si no hay una corrida en verde para el
+  árbol de ese commit. No tiene forma de saltarlo.
+- El merge a `develop` (`scripts/hooks/merge-pr`, D-081) también exige esa corrida para la cabeza del PR, y que
+  `static`, `tests` y `commit-messages` estén en verde.
+- Cualquier commit nuevo, incluido un merge de `develop`, cambia el árbol: hay que volver a correr `make prepush`. Las
+  ramas que ya estaban en curso (por ejemplo, la de `../hermes-f1503`) necesitan su propio `make prepush` después de
+  integrar `develop`; antes de integrarlo no tienen el target, pero pueden correr
+  `bash <checkout que lo tenga>/scripts/prepush.sh` desde su propio checkout.
+- Los títulos de los commits los revisan el hook local `commit-msg` y, en el PR, el job `commit-messages`.
+
 ## Front de personalización
 
 El front (React) lo construye otro equipo. Todo lo que necesita del backend está en [`FRONTEND.md`](FRONTEND.md).
