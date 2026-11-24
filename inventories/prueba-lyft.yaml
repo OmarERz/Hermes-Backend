@@ -1,0 +1,315 @@
+# Test inventory for the M6 challenge (D-085, D-087): a FICTIONAL ride-hailing company modelled on the stack of the
+# challenge brief (docs/Stack tecnologico.txt). No real company data: people, e-mails (example.test), IPs and names are
+# made up. Readable summary for approval: docs/inventario-prueba.md (local).
+#   make itop-load INVENTORY=inventories/prueba-lyft.yaml                    dry run
+#   make itop-load INVENTORY=inventories/prueba-lyft.yaml APPLY=1 UPDATE=1   write (UPDATE: links the organization to
+#                                                                            its delivery model, created by provision)
+#   make itop-map-cpe INVENTORY=inventories/prueba-lyft.yaml                 after the first scan synced the products
+# The organization (Demo-Lab) and the person "Hermes System" come from docker/itop/provision.php.
+# Where the brief gives only major.minor (Next.js 13.5, Go 1.21...) the inventory uses the .0 release.
+# Three CIs are incomplete on purpose (pending screen): svc-reportes-legado, emr-nodo-02 and superset-bi.
+# The iTop fields of F18.3 are all used: cpu/ram on servers, VMs and the PC; each installation with its real
+# subclass (one PCSoftware), its status (one inactive), licence and description; Software.type = that subclass;
+# SoftwareLicence with usage limit and dates (one about to expire, one expired), never a licence key.
+
+env:
+  ITOP_ORG_ID: "@Organization:Demo-Lab"
+  ITOP_CALLER_ID: "@Person:Hermes System"
+  ITOP_SERVICE_ID: "@Service:Gestión de vulnerabilidades"
+
+# CPE vendor:product checked against the NVD CPE dictionary (23 nov 2026). null = no CPE on purpose.
+cpe:
+  # User decision (24 nov 2026): the kernel CPE on ONE node only, to show the real kernel risk without flooding iTop.
+  # eks-nodo-01 runs the upstream kernel (product "Linux Kernel", mapped); the other nodes run Amazon's maintained
+  # kernel package (product "Kernel de Amazon Linux 2023"), left without a CPE: NVD's upstream ranges do not describe
+  # a vendor-patched kernel, so it stays in the pending screen.
+  Linux Kernel: "cpe:2.3:o:linux:linux_kernel:*:*:*:*:*:*:*:*"
+  Kernel de Amazon Linux 2023: null
+  Kubernetes: "cpe:2.3:a:kubernetes:kubernetes:*:*:*:*:*:*:*:*"
+  Envoy: "cpe:2.3:a:envoyproxy:envoy:*:*:*:*:*:*:*:*"
+  Go: "cpe:2.3:a:golang:go:*:*:*:*:*:*:*:*"
+  Gin: "cpe:2.3:a:gin-gonic:gin:*:*:*:*:*:*:*:*"
+  Python: "cpe:2.3:a:python:python:*:*:*:*:*:*:*:*"
+  FastAPI: "cpe:2.3:a:tiangolo:fastapi:*:*:*:*:*:*:*:*"
+  Flask: "cpe:2.3:a:palletsprojects:flask:*:*:*:*:*:*:*:*"
+  PostgreSQL: "cpe:2.3:a:postgresql:postgresql:*:*:*:*:*:*:*:*"
+  PostGIS: "cpe:2.3:a:postgis:postgis:*:*:*:*:*:*:*:*"
+  Redis: "cpe:2.3:a:redis:redis:*:*:*:*:*:*:*:*"
+  MongoDB: "cpe:2.3:a:mongodb:mongodb:*:*:*:*:*:*:*:*"
+  Apache Kafka: "cpe:2.3:a:apache:kafka:*:*:*:*:*:*:*:*"
+  Apache Spark: "cpe:2.3:a:apache:spark:*:*:*:*:*:*:*:*"
+  Apache Superset: "cpe:2.3:a:apache:superset:*:*:*:*:*:*:*:*"
+  Next.js: "cpe:2.3:a:vercel:next.js:*:*:*:*:*:*:*:*"
+  React: "cpe:2.3:a:facebook:react:*:*:*:*:*:*:*:*"
+  React Native: "cpe:2.3:a:facebook:react-native:*:*:*:*:*:*:*:*"
+  Vite: "cpe:2.3:a:vitejs:vite:*:*:*:*:*:*:*:*"
+
+objects:
+  # --- People: two per layer (the lead owns the CIs) and the security team ------------------------------------------
+  - class: Person
+    name: López
+    fields: { first_name: Mariana, org_id: "@Organization:Demo-Lab", email: mariana.lopez@example.test, function: Líder de Front y Móvil }
+  - class: Person
+    name: Hernández
+    fields: { first_name: Diego, org_id: "@Organization:Demo-Lab", email: diego.hernandez@example.test, function: Ingeniero móvil }
+  - class: Person
+    name: Méndez
+    fields: { first_name: Carlos, org_id: "@Organization:Demo-Lab", email: carlos.mendez@example.test, function: Líder de Ingress y Malla }
+  - class: Person
+    name: Ramírez
+    fields: { first_name: Sofía, org_id: "@Organization:Demo-Lab", email: sofia.ramirez@example.test, function: Ingeniera de redes }
+  - class: Person
+    name: Castillo
+    fields: { first_name: Laura, org_id: "@Organization:Demo-Lab", email: laura.castillo@example.test, function: Líder de Backend }
+  - class: Person
+    name: Torres
+    fields: { first_name: Andrés, org_id: "@Organization:Demo-Lab", email: andres.torres@example.test, function: Ingeniero de plataforma }
+  - class: Person
+    name: Ortiz
+    fields: { first_name: Valeria, org_id: "@Organization:Demo-Lab", email: valeria.ortiz@example.test, function: Líder de Datos }
+  - class: Person
+    name: Navarro
+    fields: { first_name: Jorge, org_id: "@Organization:Demo-Lab", email: jorge.navarro@example.test, function: Administrador de bases de datos }
+  - class: Person
+    name: Reyes
+    fields: { first_name: Paula, org_id: "@Organization:Demo-Lab", email: paula.reyes@example.test, function: Líder de Analítica }
+  - class: Person
+    name: Flores
+    fields: { first_name: Ricardo, org_id: "@Organization:Demo-Lab", email: ricardo.flores@example.test, function: Ingeniero de datos }
+  - class: Person
+    name: Vargas
+    fields: { first_name: Elena, org_id: "@Organization:Demo-Lab", email: elena.vargas@example.test, function: Analista de seguridad }
+
+  # --- Custodian teams, one per layer, plus Seguridad (the default team of P-020) -----------------------------------
+  - class: Team
+    name: Front y Móvil
+    fields: { org_id: "@Organization:Demo-Lab", email: front-movil@example.test, persons_list: [ { person_id: "@Person:López" }, { person_id: "@Person:Hernández" } ] }
+  - class: Team
+    name: Ingress y Malla
+    fields: { org_id: "@Organization:Demo-Lab", email: ingress@example.test, persons_list: [ { person_id: "@Person:Méndez" }, { person_id: "@Person:Ramírez" } ] }
+  - class: Team
+    name: Backend
+    fields: { org_id: "@Organization:Demo-Lab", email: backend@example.test, persons_list: [ { person_id: "@Person:Castillo" }, { person_id: "@Person:Torres" } ] }
+  - class: Team
+    name: Datos
+    fields: { org_id: "@Organization:Demo-Lab", email: datos@example.test, persons_list: [ { person_id: "@Person:Ortiz" }, { person_id: "@Person:Navarro" } ] }
+  - class: Team
+    name: Analítica
+    fields: { org_id: "@Organization:Demo-Lab", email: analitica@example.test, persons_list: [ { person_id: "@Person:Reyes" }, { person_id: "@Person:Flores" } ] }
+  - class: Team
+    name: Seguridad
+    fields: { org_id: "@Organization:Demo-Lab", email: seguridad@example.test, persons_list: [ { person_id: "@Person:Vargas" } ] }
+
+  # Delivery model: the teams the console offers when people assign a ticket of the organization
+  - class: DeliveryModel
+    name: Modelo de entrega Demo-Lab
+    fields:
+      org_id: "@Organization:Demo-Lab"
+      contacts_list:
+        - contact_id: "@Team:Front y Móvil"
+        - contact_id: "@Team:Ingress y Malla"
+        - contact_id: "@Team:Backend"
+        - contact_id: "@Team:Datos"
+        - contact_id: "@Team:Analítica"
+        - contact_id: "@Team:Seguridad"
+  - class: Organization
+    name: Demo-Lab
+    fields: { deliverymodel_id: "@DeliveryModel:Modelo de entrega Demo-Lab" }
+
+  # Service catalogue: a ticket is resolved against a service the organization has a contract for
+  - class: ServiceFamily
+    name: Seguridad de la información
+  - class: Service
+    name: Gestión de vulnerabilidades
+    fields: { org_id: "@Organization:Demo-Lab", servicefamily_id: "@ServiceFamily:Seguridad de la información", status: production, description: Atención de las vulnerabilidades que detecta Hermes }
+  - class: CustomerContract
+    name: Contrato de seguridad Demo-Lab
+    fields: { org_id: "@Organization:Demo-Lab", provider_id: "@Organization:Demo-Lab", status: production, services_list: [ { service_id: "@Service:Gestión de vulnerabilidades" } ] }
+
+  # --- Operating system of the nodes -------------------------------------------------------------------------------
+  - class: OSFamily
+    name: Amazon Linux
+  - class: OSVersion
+    name: "2023"
+    fields: { osfamily_id: "@OSFamily:Amazon Linux" }
+
+  # --- Software catalogue: product + version + category (type) -------------------------------------------------------
+  - { class: Software, name: Linux Kernel, fields: { vendor: Linux, version: "6.1.0", type: OtherSoftware } }
+  - { class: Software, name: Kernel de Amazon Linux 2023, fields: { vendor: Amazon, version: "6.1.0", type: OtherSoftware } }
+  - { class: Software, name: Kubernetes, fields: { vendor: CNCF, version: "1.28.0", type: OtherSoftware } }
+  - { class: Software, name: Envoy, fields: { vendor: Envoy Proxy, version: "1.28.0", type: Middleware } }
+  - { class: Software, name: Go, fields: { vendor: Google, version: "1.21.0", type: OtherSoftware } }
+  - { class: Software, name: Gin, fields: { vendor: gin-gonic, version: "1.9.1", type: OtherSoftware } }
+  - { class: Software, name: Python, fields: { vendor: Python Software Foundation, version: "3.11.0", type: OtherSoftware } }
+  - { class: Software, name: FastAPI, fields: { vendor: Sebastián Ramírez, version: "0.109.0", type: OtherSoftware } }
+  - { class: Software, name: Flask, fields: { vendor: Pallets, version: "3.0.0", type: OtherSoftware } }
+  - { class: Software, name: PostgreSQL, fields: { vendor: PostgreSQL Global Development Group, version: "15.4", type: DBServer } }
+  - { class: Software, name: PostGIS, fields: { vendor: OSGeo, version: "3.3.0", type: OtherSoftware } }
+  - { class: Software, name: Redis, fields: { vendor: Redis, version: "7.2.0", type: DBServer } }
+  - { class: Software, name: MongoDB, fields: { vendor: MongoDB, version: "6.0.0", type: DBServer } }
+  - { class: Software, name: Apache Kafka, fields: { vendor: Apache Software Foundation, version: "3.5.0", type: Middleware } }
+  - { class: Software, name: Apache Spark, fields: { vendor: Apache Software Foundation, version: "3.4.1", type: OtherSoftware } }
+  - { class: Software, name: Apache Superset, fields: { vendor: Apache Software Foundation, version: "3.0.0", type: OtherSoftware } }
+  - { class: Software, name: Next.js, fields: { vendor: Vercel, version: "13.5.0", type: OtherSoftware } }
+  - { class: Software, name: React, fields: { vendor: Meta, version: "18.2.0", type: OtherSoftware } }
+  - { class: Software, name: React Native, fields: { vendor: Meta, version: "0.72.0", type: OtherSoftware } }
+  - { class: Software, name: Vite, fields: { vendor: VoidZero, version: "4.5.0", type: PCSoftware } }
+
+  # Licences: the open-source licence of each product (perpetual, no limit) and two commercial subscriptions, one about
+  # to expire and one expired (licence management in the console, F18.3). No licence key is ever recorded.
+  - { class: SoftwareLicence, name: GPL-2.0 · Kernel de Amazon Linux 2023 6.1.0, fields: { org_id: "@Organization:Demo-Lab", software_id: "@Software:Kernel de Amazon Linux 2023 6.1.0", perpetual: "yes", usage_limit: Sin límite, start_date: "2024-01-15", description: Licencia de código abierto GPL-2.0 } }
+  - { class: SoftwareLicence, name: GPL-2.0 · Linux Kernel 6.1.0, fields: { org_id: "@Organization:Demo-Lab", software_id: "@Software:Linux Kernel 6.1.0", perpetual: "yes", usage_limit: Sin límite, start_date: "2024-01-15", description: Licencia de código abierto GPL-2.0 } }
+  - { class: SoftwareLicence, name: Apache-2.0 · Kubernetes 1.28.0, fields: { org_id: "@Organization:Demo-Lab", software_id: "@Software:Kubernetes 1.28.0", perpetual: "yes", usage_limit: Sin límite, start_date: "2024-01-15", description: Licencia de código abierto Apache-2.0 } }
+  - { class: SoftwareLicence, name: Apache-2.0 · Envoy 1.28.0, fields: { org_id: "@Organization:Demo-Lab", software_id: "@Software:Envoy 1.28.0", perpetual: "yes", usage_limit: Sin límite, start_date: "2024-01-15", description: Licencia de código abierto Apache-2.0 } }
+  - { class: SoftwareLicence, name: BSD-3-Clause · Go 1.21.0, fields: { org_id: "@Organization:Demo-Lab", software_id: "@Software:Go 1.21.0", perpetual: "yes", usage_limit: Sin límite, start_date: "2024-01-15", description: Licencia de código abierto BSD-3-Clause } }
+  - { class: SoftwareLicence, name: MIT · Gin 1.9.1, fields: { org_id: "@Organization:Demo-Lab", software_id: "@Software:Gin 1.9.1", perpetual: "yes", usage_limit: Sin límite, start_date: "2024-01-15", description: Licencia de código abierto MIT } }
+  - { class: SoftwareLicence, name: PSF-2.0 · Python 3.11.0, fields: { org_id: "@Organization:Demo-Lab", software_id: "@Software:Python 3.11.0", perpetual: "yes", usage_limit: Sin límite, start_date: "2024-01-15", description: Licencia de código abierto PSF-2.0 } }
+  - { class: SoftwareLicence, name: MIT · FastAPI 0.109.0, fields: { org_id: "@Organization:Demo-Lab", software_id: "@Software:FastAPI 0.109.0", perpetual: "yes", usage_limit: Sin límite, start_date: "2024-01-15", description: Licencia de código abierto MIT } }
+  - { class: SoftwareLicence, name: BSD-3-Clause · Flask 3.0.0, fields: { org_id: "@Organization:Demo-Lab", software_id: "@Software:Flask 3.0.0", perpetual: "yes", usage_limit: Sin límite, start_date: "2024-01-15", description: Licencia de código abierto BSD-3-Clause } }
+  - { class: SoftwareLicence, name: PostgreSQL · PostgreSQL 15.4, fields: { org_id: "@Organization:Demo-Lab", software_id: "@Software:PostgreSQL 15.4", perpetual: "yes", usage_limit: Sin límite, start_date: "2024-01-15", description: Licencia de código abierto PostgreSQL } }
+  - { class: SoftwareLicence, name: GPL-2.0 · PostGIS 3.3.0, fields: { org_id: "@Organization:Demo-Lab", software_id: "@Software:PostGIS 3.3.0", perpetual: "yes", usage_limit: Sin límite, start_date: "2024-01-15", description: Licencia de código abierto GPL-2.0 } }
+  - { class: SoftwareLicence, name: BSD-3-Clause · Redis 7.2.0, fields: { org_id: "@Organization:Demo-Lab", software_id: "@Software:Redis 7.2.0", perpetual: "yes", usage_limit: Sin límite, start_date: "2024-01-15", description: Licencia de código abierto BSD-3-Clause (antes del cambio de licencia de Redis 7.4) } }
+  - { class: SoftwareLicence, name: Apache-2.0 · Apache Kafka 3.5.0, fields: { org_id: "@Organization:Demo-Lab", software_id: "@Software:Apache Kafka 3.5.0", perpetual: "yes", usage_limit: Sin límite, start_date: "2024-01-15", description: Licencia de código abierto Apache-2.0 } }
+  - { class: SoftwareLicence, name: Apache-2.0 · Apache Spark 3.4.1, fields: { org_id: "@Organization:Demo-Lab", software_id: "@Software:Apache Spark 3.4.1", perpetual: "yes", usage_limit: Sin límite, start_date: "2024-01-15", description: Licencia de código abierto Apache-2.0 } }
+  - { class: SoftwareLicence, name: Apache-2.0 · Apache Superset 3.0.0, fields: { org_id: "@Organization:Demo-Lab", software_id: "@Software:Apache Superset 3.0.0", perpetual: "yes", usage_limit: Sin límite, start_date: "2024-01-15", description: Licencia de código abierto Apache-2.0 } }
+  - { class: SoftwareLicence, name: MIT · Next.js 13.5.0, fields: { org_id: "@Organization:Demo-Lab", software_id: "@Software:Next.js 13.5.0", perpetual: "yes", usage_limit: Sin límite, start_date: "2024-01-15", description: Licencia de código abierto MIT } }
+  - { class: SoftwareLicence, name: MIT · React 18.2.0, fields: { org_id: "@Organization:Demo-Lab", software_id: "@Software:React 18.2.0", perpetual: "yes", usage_limit: Sin límite, start_date: "2024-01-15", description: Licencia de código abierto MIT } }
+  - { class: SoftwareLicence, name: MIT · React Native 0.72.0, fields: { org_id: "@Organization:Demo-Lab", software_id: "@Software:React Native 0.72.0", perpetual: "yes", usage_limit: Sin límite, start_date: "2024-01-15", description: Licencia de código abierto MIT } }
+  - { class: SoftwareLicence, name: MIT · Vite 4.5.0, fields: { org_id: "@Organization:Demo-Lab", software_id: "@Software:Vite 4.5.0", perpetual: "yes", usage_limit: Sin límite, start_date: "2024-01-15", description: Licencia de código abierto MIT } }
+  - { class: SoftwareLicence, name: MongoDB Enterprise Advanced · suscripción 2026, fields: { org_id: "@Organization:Demo-Lab", software_id: "@Software:MongoDB 6.0.0", perpetual: "no", usage_limit: 3 servidores, start_date: "2025-12-01", end_date: "2026-11-30", description: Suscripción comercial anual de MongoDB (vence el 30 nov 2026) } }
+  - { class: SoftwareLicence, name: Soporte comercial Apache Superset · 2025-2026, fields: { org_id: "@Organization:Demo-Lab", software_id: "@Software:Apache Superset 3.0.0", perpetual: "no", usage_limit: 1 instancia, start_date: "2025-11-01", end_date: "2026-10-31", description: Suscripción de soporte de Superset; venció el 31 oct 2026 } }
+
+  # --- 1. Front y Móvil -----------------------------------------------------------------------------------------------
+  - class: ApplicationSolution
+    name: web-dashboard-operaciones
+    fields: { org_id: "@Organization:Demo-Lab", status: active, business_criticity: medium, description: "Dashboard web de operaciones (Next.js 13.5, React 18.2, Tailwind CSS)", internet_exposed: "yes", confidentiality: classified, personal_data: "yes", owner_id: "@Person:López", custodian_id: "@Team:Front y Móvil" }
+  - class: ApplicationSolution
+    name: app-movil-pasajeros
+    fields: { org_id: "@Organization:Demo-Lab", status: active, business_criticity: high, description: "App móvil de pasajeros (React Native 0.72)", internet_exposed: "yes", confidentiality: classified, personal_data: "yes", owner_id: "@Person:López", custodian_id: "@Team:Front y Móvil" }
+  - class: ApplicationSolution
+    name: app-movil-conductores
+    fields: { org_id: "@Organization:Demo-Lab", status: active, business_criticity: high, description: "App móvil de conductores (React Native 0.72)", internet_exposed: "yes", confidentiality: classified, personal_data: "yes", owner_id: "@Person:Hernández", custodian_id: "@Team:Front y Móvil" }
+
+  # The workstation that builds the web front and the mobile apps: a PC, where Vite runs (PC software)
+  - class: PC
+    name: pc-build-movil-01
+    fields: { org_id: "@Organization:Demo-Lab", status: production, business_criticity: medium, description: "Estación de compilación del front y de las apps móviles", cpu: "12", ram: "32 GB", internet_exposed: "no", confidentiality: classified, personal_data: "no", owner_id: "@Person:Hernández", custodian_id: "@Team:Front y Móvil" }
+
+  # --- 2. Ingress y Malla ---------------------------------------------------------------------------------------------
+  - class: ApplicationSolution
+    name: alb-publico
+    fields: { org_id: "@Organization:Demo-Lab", status: active, business_criticity: high, description: "AWS Application Load Balancer en la subred pública (servicio administrado, sin versión)", internet_exposed: "yes", confidentiality: classified, personal_data: "yes", owner_id: "@Person:Méndez", custodian_id: "@Team:Ingress y Malla" }
+  - class: ApplicationSolution
+    name: iot-core-flota
+    fields: { org_id: "@Organization:Demo-Lab", status: active, business_criticity: high, description: "AWS IoT Core: registro de vehículos y autenticación con certificados X.509 (servicio administrado, sin versión)", internet_exposed: "yes", confidentiality: classified, personal_data: "yes", owner_id: "@Person:Méndez", custodian_id: "@Team:Ingress y Malla" }
+  - class: ApplicationSolution
+    name: envoy-borde
+    fields: { org_id: "@Organization:Demo-Lab", status: active, business_criticity: high, description: "Proxy Envoy de borde detrás del ALB (enrutamiento L7)", internet_exposed: "yes", confidentiality: classified, personal_data: "yes", owner_id: "@Person:Ramírez", custodian_id: "@Team:Ingress y Malla" }
+  - class: ApplicationSolution
+    name: envoy-malla
+    fields: { org_id: "@Organization:Demo-Lab", status: active, business_criticity: high, description: "Malla de servicios: sidecars Envoy entre microservicios", internet_exposed: "no", confidentiality: classified, personal_data: "yes", owner_id: "@Person:Ramírez", custodian_id: "@Team:Ingress y Malla" }
+
+  # --- 3. Backend: EKS (Kubernetes 1.28) on Amazon Linux 2023 nodes and the microservices -------------------------
+  - class: Farm
+    name: eks-produccion
+    fields: { org_id: "@Organization:Demo-Lab", status: production, business_criticity: high, description: "Clúster AWS EKS de producción (Kubernetes 1.28)", internet_exposed: "no", confidentiality: classified, personal_data: "yes", owner_id: "@Person:Castillo", custodian_id: "@Team:Backend" }
+  - class: VirtualMachine
+    name: eks-nodo-01
+    fields: &eks_node { org_id: "@Organization:Demo-Lab", virtualhost_id: "@Farm:eks-produccion", status: production, business_criticity: high, description: "Nodo de trabajo de EKS heredado: AMI propia con el kernel upstream 6.1.0, pendiente de reemplazo", osfamily_id: "@OSFamily:Amazon Linux", osversion_id: "@OSVersion:2023", cpu: "8", ram: "32 GB", managementip: 10.20.1.11, internet_exposed: "no", confidentiality: classified, personal_data: "yes", owner_id: "@Person:Torres", custodian_id: "@Team:Backend" }
+  - class: VirtualMachine
+    name: eks-nodo-02
+    fields: { <<: *eks_node, managementip: 10.20.1.12, description: "Nodo de trabajo de EKS (Amazon Linux 2023, kernel 6.1 de Amazon)" }
+  - class: VirtualMachine
+    name: eks-nodo-03
+    fields: { <<: *eks_node, managementip: 10.20.1.13, description: "Nodo de trabajo de EKS (Amazon Linux 2023, kernel 6.1 de Amazon)" }
+  - class: ApplicationSolution
+    name: svc-desbloqueo
+    fields: { org_id: "@Organization:Demo-Lab", status: active, business_criticity: high, description: "Microservicio crítico de desbloqueo de vehículos (Go 1.21, Gin 1.9.1)", internet_exposed: "no", confidentiality: classified, personal_data: "yes", owner_id: "@Person:Castillo", custodian_id: "@Team:Backend" }
+  - class: ApplicationSolution
+    name: svc-viajes
+    fields: { org_id: "@Organization:Demo-Lab", status: active, business_criticity: high, description: "Microservicio de viajes y despacho (Go 1.21, Gin 1.9.1)", internet_exposed: "no", confidentiality: classified, personal_data: "yes", owner_id: "@Person:Castillo", custodian_id: "@Team:Backend" }
+  - class: ApplicationSolution
+    name: svc-flotas
+    fields: { org_id: "@Organization:Demo-Lab", status: active, business_criticity: medium, description: "Microservicio de gestión de flotas (Python 3.11, FastAPI 0.109)", internet_exposed: "no", confidentiality: classified, personal_data: "no", owner_id: "@Person:Torres", custodian_id: "@Team:Backend" }
+  - class: ApplicationSolution
+    name: svc-pagos
+    fields: { org_id: "@Organization:Demo-Lab", status: active, business_criticity: high, description: "Microservicio de pagos (Python 3.11, Flask 3.0)", internet_exposed: "no", confidentiality: highly_classified, personal_data: "yes", owner_id: "@Person:Castillo", custodian_id: "@Team:Backend" }
+  # Incomplete on purpose: no exposure, no classification, no owner (pending screen)
+  - class: ApplicationSolution
+    name: svc-reportes-legado
+    fields: { org_id: "@Organization:Demo-Lab", status: active, business_criticity: low, description: "Servicio heredado de reportes (Python 3.11, Flask 3.0); datos de inventario incompletos", personal_data: unknown, custodian_id: "@Team:Backend" }
+
+  # --- 4. Datos: RDS PostgreSQL + PostGIS, ElastiCache Redis, MongoDB -----------------------------------------------
+  - class: ApplicationSolution
+    name: rds-pagos
+    fields: { org_id: "@Organization:Demo-Lab", status: active, business_criticity: high, description: "Base de datos de pagos y tarjetas (AWS RDS PostgreSQL 15.4)", internet_exposed: "no", confidentiality: highly_classified, personal_data: "yes", owner_id: "@Person:Ortiz", custodian_id: "@Team:Datos" }
+  - class: ApplicationSolution
+    name: rds-viajes-geo
+    fields: { org_id: "@Organization:Demo-Lab", status: active, business_criticity: high, description: "Base de datos de viajes y geolocalización (AWS RDS PostgreSQL 15.4 + PostGIS 3.3)", internet_exposed: "no", confidentiality: classified, personal_data: "yes", owner_id: "@Person:Ortiz", custodian_id: "@Team:Datos" }
+  - class: ApplicationSolution
+    name: elasticache-sesiones
+    fields: { org_id: "@Organization:Demo-Lab", status: active, business_criticity: high, description: "Caché de sesiones (AWS ElastiCache Redis 7.2)", internet_exposed: "no", confidentiality: classified, personal_data: "yes", owner_id: "@Person:Navarro", custodian_id: "@Team:Datos" }
+  # Self-managed on an EC2 instance: a server, with its OS, CPU and RAM
+  - class: Server
+    name: mongodb-telemetria
+    fields: { org_id: "@Organization:Demo-Lab", status: production, business_criticity: medium, description: "MongoDB 6.0 de telemetría de vehículos en EC2 (elegida en lugar de DynamoDB)", osfamily_id: "@OSFamily:Amazon Linux", osversion_id: "@OSVersion:2023", cpu: "8", ram: "64 GB", managementip: 10.40.1.21, internet_exposed: "no", confidentiality: classified, personal_data: "yes", owner_id: "@Person:Navarro", custodian_id: "@Team:Datos" }
+
+  # --- 5. Analítica: MSK Kafka, EMR Spark on Amazon Linux 2023, S3, Redshift, Superset --------------------------------
+  - class: ApplicationSolution
+    name: msk-eventos
+    fields: { org_id: "@Organization:Demo-Lab", status: active, business_criticity: high, description: "Streaming de eventos en tiempo real (AWS MSK, Apache Kafka 3.5.0)", internet_exposed: "no", confidentiality: classified, personal_data: "yes", owner_id: "@Person:Reyes", custodian_id: "@Team:Analítica" }
+  - class: Farm
+    name: emr-analitica
+    fields: { org_id: "@Organization:Demo-Lab", status: production, business_criticity: medium, description: "Clúster AWS EMR de procesamiento (Apache Spark 3.4.1)", internet_exposed: "no", confidentiality: classified, personal_data: "yes", owner_id: "@Person:Reyes", custodian_id: "@Team:Analítica" }
+  - class: VirtualMachine
+    name: emr-nodo-01
+    fields: { org_id: "@Organization:Demo-Lab", virtualhost_id: "@Farm:emr-analitica", status: production, business_criticity: medium, description: "Nodo de EMR (Amazon Linux 2023, kernel 6.1, Spark 3.4.1)", osfamily_id: "@OSFamily:Amazon Linux", osversion_id: "@OSVersion:2023", cpu: "8", ram: "64 GB", managementip: 10.30.1.11, internet_exposed: "no", confidentiality: classified, personal_data: "yes", owner_id: "@Person:Flores", custodian_id: "@Team:Analítica" }
+  # Incomplete on purpose: no owner and no custodian team (its findings wait for a default team, P-020)
+  - class: VirtualMachine
+    name: emr-nodo-02
+    fields: { org_id: "@Organization:Demo-Lab", virtualhost_id: "@Farm:emr-analitica", status: production, business_criticity: medium, description: "Nodo de EMR (Amazon Linux 2023, kernel 6.1, Spark 3.4.1); sin responsables registrados", osfamily_id: "@OSFamily:Amazon Linux", osversion_id: "@OSVersion:2023", cpu: "8", ram: "64 GB", managementip: 10.30.1.12, internet_exposed: "no", confidentiality: classified, personal_data: "yes" }
+  - class: ApplicationSolution
+    name: s3-datalake
+    fields: { org_id: "@Organization:Demo-Lab", status: active, business_criticity: high, description: "Data lake en AWS S3 con archivos Apache Parquet (servicio administrado, sin versión)", internet_exposed: "no", confidentiality: classified, personal_data: "yes", owner_id: "@Person:Reyes", custodian_id: "@Team:Analítica" }
+  - class: ApplicationSolution
+    name: redshift-dwh
+    fields: { org_id: "@Organization:Demo-Lab", status: active, business_criticity: medium, description: "Data warehouse histórico en AWS Redshift (servicio administrado, sin versión)", internet_exposed: "no", confidentiality: classified, personal_data: "yes", owner_id: "@Person:Flores", custodian_id: "@Team:Analítica" }
+  # Incomplete on purpose: no exposure data (pending screen)
+  - class: ApplicationSolution
+    name: superset-bi
+    fields: { org_id: "@Organization:Demo-Lab", status: active, business_criticity: medium, description: "Visualización y BI (Apache Superset 3.0.0); falta el dato de exposición", confidentiality: classified, personal_data: unknown, owner_id: "@Person:Flores", custodian_id: "@Team:Analítica" }
+
+  # --- Installations: what runs where, with the subclass of its product's category (type), its status, licence and
+  # description. Flask on svc-reportes-legado is inactive (the service is being retired).
+  - { class: OtherSoftware, name: Next.js 13.5.0 @ web-dashboard-operaciones, fields: { org_id: "@Organization:Demo-Lab", system_id: "@ApplicationSolution:web-dashboard-operaciones", software_id: "@Software:Next.js 13.5.0", softwarelicence_id: "@SoftwareLicence:MIT · Next.js 13.5.0", status: active, description: Framework web del dashboard } }
+  - { class: OtherSoftware, name: React 18.2.0 @ web-dashboard-operaciones, fields: { org_id: "@Organization:Demo-Lab", system_id: "@ApplicationSolution:web-dashboard-operaciones", software_id: "@Software:React 18.2.0", softwarelicence_id: "@SoftwareLicence:MIT · React 18.2.0", status: active, description: Biblioteca de interfaz del dashboard } }
+  - { class: OtherSoftware, name: React Native 0.72.0 @ app-movil-pasajeros, fields: { org_id: "@Organization:Demo-Lab", system_id: "@ApplicationSolution:app-movil-pasajeros", software_id: "@Software:React Native 0.72.0", softwarelicence_id: "@SoftwareLicence:MIT · React Native 0.72.0", status: active, description: Framework de la app de pasajeros } }
+  - { class: OtherSoftware, name: React Native 0.72.0 @ app-movil-conductores, fields: { org_id: "@Organization:Demo-Lab", system_id: "@ApplicationSolution:app-movil-conductores", software_id: "@Software:React Native 0.72.0", softwarelicence_id: "@SoftwareLicence:MIT · React Native 0.72.0", status: active, description: Framework de la app de conductores } }
+  - { class: PCSoftware, name: Vite 4.5.0 @ pc-build-movil-01, fields: { org_id: "@Organization:Demo-Lab", system_id: "@PC:pc-build-movil-01", software_id: "@Software:Vite 4.5.0", softwarelicence_id: "@SoftwareLicence:MIT · Vite 4.5.0", status: active, description: Herramienta de construcción del front en la estación de compilación } }
+  - { class: Middleware, name: Envoy 1.28.0 @ envoy-borde, fields: { org_id: "@Organization:Demo-Lab", system_id: "@ApplicationSolution:envoy-borde", software_id: "@Software:Envoy 1.28.0", softwarelicence_id: "@SoftwareLicence:Apache-2.0 · Envoy 1.28.0", status: active, description: Proxy de borde L7 } }
+  - { class: Middleware, name: Envoy 1.28.0 @ envoy-malla, fields: { org_id: "@Organization:Demo-Lab", system_id: "@ApplicationSolution:envoy-malla", software_id: "@Software:Envoy 1.28.0", softwarelicence_id: "@SoftwareLicence:Apache-2.0 · Envoy 1.28.0", status: active, description: Sidecars de la malla de servicios } }
+  - { class: OtherSoftware, name: Kubernetes 1.28.0 @ eks-produccion, fields: { org_id: "@Organization:Demo-Lab", system_id: "@Farm:eks-produccion", software_id: "@Software:Kubernetes 1.28.0", softwarelicence_id: "@SoftwareLicence:Apache-2.0 · Kubernetes 1.28.0", status: active, description: Plano de control administrado de EKS } }
+  - { class: OtherSoftware, name: Linux Kernel 6.1.0 @ eks-nodo-01, fields: { org_id: "@Organization:Demo-Lab", system_id: "@VirtualMachine:eks-nodo-01", software_id: "@Software:Linux Kernel 6.1.0", softwarelicence_id: "@SoftwareLicence:GPL-2.0 · Linux Kernel 6.1.0", status: active, description: Kernel upstream 6.1.0 en una AMI propia (nodo heredado pendiente de reemplazo) } }
+  - { class: OtherSoftware, name: Kernel de Amazon Linux 2023 6.1.0 @ eks-nodo-02, fields: { org_id: "@Organization:Demo-Lab", system_id: "@VirtualMachine:eks-nodo-02", software_id: "@Software:Kernel de Amazon Linux 2023 6.1.0", softwarelicence_id: "@SoftwareLicence:GPL-2.0 · Kernel de Amazon Linux 2023 6.1.0", status: active, description: Paquete kernel mantenido por Amazon para Amazon Linux 2023 } }
+  - { class: OtherSoftware, name: Kernel de Amazon Linux 2023 6.1.0 @ eks-nodo-03, fields: { org_id: "@Organization:Demo-Lab", system_id: "@VirtualMachine:eks-nodo-03", software_id: "@Software:Kernel de Amazon Linux 2023 6.1.0", softwarelicence_id: "@SoftwareLicence:GPL-2.0 · Kernel de Amazon Linux 2023 6.1.0", status: active, description: Paquete kernel mantenido por Amazon para Amazon Linux 2023 } }
+  - { class: OtherSoftware, name: Go 1.21.0 @ svc-desbloqueo, fields: { org_id: "@Organization:Demo-Lab", system_id: "@ApplicationSolution:svc-desbloqueo", software_id: "@Software:Go 1.21.0", softwarelicence_id: "@SoftwareLicence:BSD-3-Clause · Go 1.21.0", status: active, description: Runtime del microservicio } }
+  - { class: OtherSoftware, name: Gin 1.9.1 @ svc-desbloqueo, fields: { org_id: "@Organization:Demo-Lab", system_id: "@ApplicationSolution:svc-desbloqueo", software_id: "@Software:Gin 1.9.1", softwarelicence_id: "@SoftwareLicence:MIT · Gin 1.9.1", status: active, description: Framework HTTP del microservicio } }
+  - { class: OtherSoftware, name: Go 1.21.0 @ svc-viajes, fields: { org_id: "@Organization:Demo-Lab", system_id: "@ApplicationSolution:svc-viajes", software_id: "@Software:Go 1.21.0", softwarelicence_id: "@SoftwareLicence:BSD-3-Clause · Go 1.21.0", status: active, description: Runtime del microservicio } }
+  - { class: OtherSoftware, name: Gin 1.9.1 @ svc-viajes, fields: { org_id: "@Organization:Demo-Lab", system_id: "@ApplicationSolution:svc-viajes", software_id: "@Software:Gin 1.9.1", softwarelicence_id: "@SoftwareLicence:MIT · Gin 1.9.1", status: active, description: Framework HTTP del microservicio } }
+  - { class: OtherSoftware, name: Python 3.11.0 @ svc-flotas, fields: { org_id: "@Organization:Demo-Lab", system_id: "@ApplicationSolution:svc-flotas", software_id: "@Software:Python 3.11.0", softwarelicence_id: "@SoftwareLicence:PSF-2.0 · Python 3.11.0", status: active, description: Runtime del microservicio } }
+  - { class: OtherSoftware, name: FastAPI 0.109.0 @ svc-flotas, fields: { org_id: "@Organization:Demo-Lab", system_id: "@ApplicationSolution:svc-flotas", software_id: "@Software:FastAPI 0.109.0", softwarelicence_id: "@SoftwareLicence:MIT · FastAPI 0.109.0", status: active, description: Framework HTTP del microservicio } }
+  - { class: OtherSoftware, name: Python 3.11.0 @ svc-pagos, fields: { org_id: "@Organization:Demo-Lab", system_id: "@ApplicationSolution:svc-pagos", software_id: "@Software:Python 3.11.0", softwarelicence_id: "@SoftwareLicence:PSF-2.0 · Python 3.11.0", status: active, description: Runtime del microservicio } }
+  - { class: OtherSoftware, name: Flask 3.0.0 @ svc-pagos, fields: { org_id: "@Organization:Demo-Lab", system_id: "@ApplicationSolution:svc-pagos", software_id: "@Software:Flask 3.0.0", softwarelicence_id: "@SoftwareLicence:BSD-3-Clause · Flask 3.0.0", status: active, description: Framework HTTP del microservicio } }
+  - { class: OtherSoftware, name: Python 3.11.0 @ svc-reportes-legado, fields: { org_id: "@Organization:Demo-Lab", system_id: "@ApplicationSolution:svc-reportes-legado", software_id: "@Software:Python 3.11.0", softwarelicence_id: "@SoftwareLicence:PSF-2.0 · Python 3.11.0", status: active, description: Runtime del servicio heredado } }
+  - { class: OtherSoftware, name: Flask 3.0.0 @ svc-reportes-legado, fields: { org_id: "@Organization:Demo-Lab", system_id: "@ApplicationSolution:svc-reportes-legado", software_id: "@Software:Flask 3.0.0", softwarelicence_id: "@SoftwareLicence:BSD-3-Clause · Flask 3.0.0", status: inactive, description: Framework HTTP del servicio heredado; detenido mientras se retira } }
+  - { class: DBServer, name: PostgreSQL 15.4 @ rds-pagos, fields: { org_id: "@Organization:Demo-Lab", system_id: "@ApplicationSolution:rds-pagos", software_id: "@Software:PostgreSQL 15.4", softwarelicence_id: "@SoftwareLicence:PostgreSQL · PostgreSQL 15.4", status: active, description: Motor de la base de pagos (RDS) } }
+  - { class: DBServer, name: PostgreSQL 15.4 @ rds-viajes-geo, fields: { org_id: "@Organization:Demo-Lab", system_id: "@ApplicationSolution:rds-viajes-geo", software_id: "@Software:PostgreSQL 15.4", softwarelicence_id: "@SoftwareLicence:PostgreSQL · PostgreSQL 15.4", status: active, description: Motor de la base de viajes (RDS) } }
+  - { class: OtherSoftware, name: PostGIS 3.3.0 @ rds-viajes-geo, fields: { org_id: "@Organization:Demo-Lab", system_id: "@ApplicationSolution:rds-viajes-geo", software_id: "@Software:PostGIS 3.3.0", softwarelicence_id: "@SoftwareLicence:GPL-2.0 · PostGIS 3.3.0", status: active, description: Extensión geoespacial de PostgreSQL } }
+  - { class: DBServer, name: Redis 7.2.0 @ elasticache-sesiones, fields: { org_id: "@Organization:Demo-Lab", system_id: "@ApplicationSolution:elasticache-sesiones", software_id: "@Software:Redis 7.2.0", softwarelicence_id: "@SoftwareLicence:BSD-3-Clause · Redis 7.2.0", status: active, description: Motor de la caché de sesiones (ElastiCache) } }
+  - { class: DBServer, name: MongoDB 6.0.0 @ mongodb-telemetria, fields: { org_id: "@Organization:Demo-Lab", system_id: "@Server:mongodb-telemetria", software_id: "@Software:MongoDB 6.0.0", softwarelicence_id: "@SoftwareLicence:MongoDB Enterprise Advanced · suscripción 2026", status: active, description: Base de telemetría autogestionada en EC2 } }
+  - { class: Middleware, name: Apache Kafka 3.5.0 @ msk-eventos, fields: { org_id: "@Organization:Demo-Lab", system_id: "@ApplicationSolution:msk-eventos", software_id: "@Software:Apache Kafka 3.5.0", softwarelicence_id: "@SoftwareLicence:Apache-2.0 · Apache Kafka 3.5.0", status: active, description: Brokers de Kafka (MSK) } }
+  - { class: OtherSoftware, name: Kernel de Amazon Linux 2023 6.1.0 @ emr-nodo-01, fields: { org_id: "@Organization:Demo-Lab", system_id: "@VirtualMachine:emr-nodo-01", software_id: "@Software:Kernel de Amazon Linux 2023 6.1.0", softwarelicence_id: "@SoftwareLicence:GPL-2.0 · Kernel de Amazon Linux 2023 6.1.0", status: active, description: Paquete kernel mantenido por Amazon para Amazon Linux 2023 } }
+  - { class: OtherSoftware, name: Apache Spark 3.4.1 @ emr-nodo-01, fields: { org_id: "@Organization:Demo-Lab", system_id: "@VirtualMachine:emr-nodo-01", software_id: "@Software:Apache Spark 3.4.1", softwarelicence_id: "@SoftwareLicence:Apache-2.0 · Apache Spark 3.4.1", status: active, description: Motor de procesamiento de EMR } }
+  - { class: OtherSoftware, name: Kernel de Amazon Linux 2023 6.1.0 @ emr-nodo-02, fields: { org_id: "@Organization:Demo-Lab", system_id: "@VirtualMachine:emr-nodo-02", software_id: "@Software:Kernel de Amazon Linux 2023 6.1.0", softwarelicence_id: "@SoftwareLicence:GPL-2.0 · Kernel de Amazon Linux 2023 6.1.0", status: active, description: Paquete kernel mantenido por Amazon para Amazon Linux 2023 } }
+  - { class: OtherSoftware, name: Apache Spark 3.4.1 @ emr-nodo-02, fields: { org_id: "@Organization:Demo-Lab", system_id: "@VirtualMachine:emr-nodo-02", software_id: "@Software:Apache Spark 3.4.1", softwarelicence_id: "@SoftwareLicence:Apache-2.0 · Apache Spark 3.4.1", status: active, description: Motor de procesamiento de EMR } }
+  - { class: OtherSoftware, name: Apache Superset 3.0.0 @ superset-bi, fields: { org_id: "@Organization:Demo-Lab", system_id: "@ApplicationSolution:superset-bi", software_id: "@Software:Apache Superset 3.0.0", softwarelicence_id: "@SoftwareLicence:Soporte comercial Apache Superset · 2025-2026", status: active, description: Servidor de BI } }
