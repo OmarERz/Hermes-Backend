@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import pytest
 
-from core.notifications.dispatcher import EXTERNAL_CONSUMERS, consumer_for
+from core.notifications.dispatcher import EXTERNAL_CONSUMERS, consumer_for, delivered_by
 from notifications_api import LogConsumer
 
 pytestmark = pytest.mark.unit
@@ -23,3 +23,9 @@ def test_slack_runs_in_its_own_service() -> None:
 def test_an_unknown_consumer_is_refused() -> None:
     with pytest.raises(ValueError, match="unknown notification consumer"):
         consumer_for("pager")
+
+
+def test_one_rule_says_who_delivers() -> None:
+    """The worker and the Slack service decide with the same function, so they never split the events."""
+    assert delivered_by("log") == "worker"
+    assert delivered_by("slack") == "slack"

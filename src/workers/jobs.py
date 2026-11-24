@@ -22,10 +22,11 @@ from core.itop.outbox import ItopOutboxWorker, writer_from_settings
 from core.metrics.ladder import evaluate
 from core.metrics.nightly import NightlyMetrics
 from core.notifications.dispatcher import (
-    EXTERNAL_CONSUMERS,
     NotificationDispatcher,
     configured_consumer_name,
     consumer_for,
+    delivered_by,
+    waiting_immediate_events,
 )
 from core.tickets.sync import TicketStateSync
 from notifications_api import NotificationConsumer
@@ -37,6 +38,10 @@ ITOP_OUTBOX_SECONDS = 10.0
 TICKET_SYNC_SECONDS = 15 * 60.0  # ARQ-02
 DISPATCH_SECONDS = 5.0  # NOT-02: an immediate event must not wait
 NIGHTLY_SECONDS = 24 * 3600.0  # docs/10 §1: once a day (and once at worker start; the job is idempotent)
+# While another service delivers (notifications.consumer = slack), warn when immediate events wait longer than this, at
+# most once per WAITING_WARN_EVERY: a stopped Slack service must not leave them waiting unseen (NOT-03).
+WAITING_WARN_AFTER = timedelta(minutes=5)
+WAITING_WARN_EVERY = timedelta(minutes=10)
 
 
 @dataclass(frozen=True)
@@ -109,22 +114,40 @@ class DispatchJob:
     itop_base_url: str | None = None
     consumers: dict[str, NotificationConsumer] = field(default_factory=dict)
     stop: threading.Event | None = None  # the worker's shutdown signal, checked between events
+    clock: Callable[[], datetime] = field(default=lambda: datetime.now(UTC))
     _left_to: str | None = field(default=None, init=False, repr=False)  # logs the hand-over once, not every cycle
+    _checked_at: datetime | None = field(default=None, init=False, repr=False)
 
     def __call__(self) -> int:
         with self.session_factory() as session:
             name = configured_consumer_name(session)
         consumer = self.consumers.get(name)
-        if consumer is None and name in EXTERNAL_CONSUMERS:
+        if consumer is None and delivered_by(name) != "worker":
             # Delivered by its own service (python -m slack_app): the events stay pending for it.
             if self._left_to != name:
                 log.info("notification events are delivered by the %s service; this worker leaves them", name)
             self._left_to = name
+            self._warn_if_waiting(name)
             return 0
         self._left_to = None
         consumer = consumer or self.consumers.setdefault(name, consumer_for(name))
         dispatcher = NotificationDispatcher(self.session_factory, consumer, itop_base_url=self.itop_base_url)
         return dispatcher.drain(stop=self.stop)
+
+    def _warn_if_waiting(self, name: str) -> None:
+        now = self.clock()
+        if self._checked_at is not None and now - self._checked_at < WAITING_WARN_EVERY:
+            return
+        self._checked_at = now
+        with self.session_factory() as session:
+            waiting = waiting_immediate_events(session, now - WAITING_WARN_AFTER)
+        if waiting:
+            log.warning(
+                "%d immediate notification event(s) have waited over %d minutes for the %s service; is it running?",
+                waiting,
+                WAITING_WARN_AFTER.seconds // 60,
+                name,
+            )
 
 
 def run_jobs_in_threads(stop: threading.Event, jobs: Sequence[PeriodicJob], *, tick: float = 1.0) -> None:

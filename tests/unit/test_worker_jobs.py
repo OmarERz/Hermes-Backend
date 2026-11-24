@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import logging
 import threading
+from datetime import UTC, datetime, timedelta
 from unittest.mock import MagicMock
 
 import pytest
@@ -151,10 +152,13 @@ def test_registered_consumers_are_used_by_name() -> None:
 
 
 def _factory_with_consumer_setting(value: str) -> MagicMock:
+    """Sessions answering the `notifications.consumer` query with `factory.state["consumer"]`, any count with 0."""
+    state = {"consumer": value}
     session = MagicMock()
-    session.scalar.return_value = value
+    session.scalar.side_effect = lambda statement, *_: 0 if "count(*)" in str(statement) else state["consumer"]
     factory = MagicMock()
     factory.return_value.__enter__.return_value = session
+    factory.state = state
     return factory
 
 
@@ -192,6 +196,26 @@ def test_switching_back_to_log_delivers_again(monkeypatch: pytest.MonkeyPatch) -
     factory = _factory_with_consumer_setting("slack")
     job = DispatchJob(factory)
     assert job() == 0
-    factory.return_value.__enter__.return_value.scalar.return_value = "log"
+    factory.state["consumer"] = "log"
     assert job() == 2
     assert isinstance(job.consumers["log"], LogConsumer)
+
+
+def test_events_waiting_for_the_slack_service_raise_a_warning(caplog: pytest.LogCaptureFixture) -> None:
+    """A stopped Slack service must not leave events waiting unseen (NOT-03): a WARNING, at most every 10 minutes."""
+    session = MagicMock()
+    session.scalar.side_effect = ["slack", 3, "slack", "slack", 0]  # setting, waiting count, setting, ...
+    factory = MagicMock()
+    factory.return_value.__enter__.return_value = session
+    now = [datetime(2026, 11, 23, 10, 0, tzinfo=UTC)]
+    job = DispatchJob(factory, clock=lambda: now[0])
+    with caplog.at_level(logging.WARNING, logger="workers.jobs"):
+        assert job() == 0
+        now[0] += timedelta(minutes=1)
+        assert job() == 0  # checked again only after 10 minutes
+        now[0] += timedelta(minutes=10)
+        assert job() == 0  # nothing waiting now: no warning
+    warnings = [r.getMessage() for r in caplog.records if r.levelno == logging.WARNING]
+    assert warnings == [
+        "3 immediate notification event(s) have waited over 5 minutes for the slack service; is it running?"
+    ]

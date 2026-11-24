@@ -68,6 +68,25 @@ _CONSUMER_SETTING: Final = text("SELECT value FROM setting_current WHERE setting
 EXTERNAL_CONSUMERS: Final = frozenset({"slack"})
 
 
+def delivered_by(name: str) -> str:
+    """Which process delivers the outbox for a `notifications.consumer` value: `worker` for `log`, otherwise the service
+    of that name (`slack`). The worker and the Slack service both decide with this, so they never split the events."""
+    return name if name in EXTERNAL_CONSUMERS else "worker"
+
+
+# Immediate events never wait for the iTop link (`immediate_link_wait` is 0) and a claim moves `next_attempt_at`
+# forward, so one still due long after its time means nothing is delivering (normal ones may wait for iTop).
+_WAITING_IMMEDIATE: Final = text(
+    "SELECT count(*) FROM notification_event"
+    " WHERE status = 'pending' AND priority = 'immediate' AND next_attempt_at <= :since"
+)
+
+
+def waiting_immediate_events(session: Session, since: datetime) -> int:
+    """Pending immediate events that were already due at `since` and nobody claimed (NOT-03)."""
+    return int(session.scalar(_WAITING_IMMEDIATE, {"since": since}) or 0)
+
+
 def consumer_for(name: str) -> NotificationConsumer:
     """NOT-05: `log` (default) writes each event to the log. `slack` is not built here: it lives in its own service."""
     if name == "log":
