@@ -283,8 +283,8 @@ CI y `make prepush`. Para iniciar sesión con el proyecto real (`hermes-pass-sec
    sudo chgrp 10001 /ruta/firebase-service-account.json && chmod 640 /ruta/firebase-service-account.json
    ```
 
-3. **Modo «proyecto real».** En tu `.env`, descomenta el bloque «Real Firebase project» de `.env.example` y pon la ruta
-   del archivo:
+3. **Modo «proyecto real».** En tu `.env`, descomenta el bloque «Real Firebase project» del final de `.env.example`
+   (va al final para que sus valores ganen sobre los de arriba) y pon la ruta del archivo:
 
    ```bash
    COMPOSE_FILE=compose.yaml:compose.firebase.yaml
@@ -296,7 +296,7 @@ CI y `make prepush`. Para iniciar sesión con el proyecto real (`hermes-pass-sec
    `compose.firebase.yaml` monta la cuenta de servicio como *Docker secret* solo en la API, le apunta
    `FIREBASE_CREDENTIALS_FILE` y apaga el emulador para la API y los *workers*; Compose no arranca si falta el proyecto
    o el archivo. `http://localhost:4200` es el servidor de desarrollo del front.
-4. **Arranca** con `make up`. Como admin, `GET /api/connections/status` muestra si Firebase responde.
+4. **Arranca** con `make up`.
 5. **Primer administrador.** La persona se registra primero en el front con su correo y contraseña. Luego, con la pila
    arriba:
 
@@ -321,7 +321,8 @@ CI y `make prepush`. Para iniciar sesión con el proyecto real (`hermes-pass-sec
    - nunca deja el sistema sin un admin activo;
    - no imprime el correo.
 
-   Los demás roles los asigna después un admin desde el front (`PUT /api/admin/users/{uid}/role`).
+   Los demás roles los asigna después un admin desde el front (`PUT /api/admin/users/{uid}/role`). Ya con un admin,
+   `GET /api/connections/status` muestra si Firebase responde.
 
 Para volver al emulador, comenta esas líneas de `.env` y corre `make up` otra vez.
 

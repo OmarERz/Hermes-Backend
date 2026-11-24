@@ -330,3 +330,20 @@ def test_bootstrap_keeps_a_copy_a_first_login_created_meanwhile(sessions: sessio
     rows = audit_rows(sessions, "b8")
     assert [row[0] for row in rows] == ["role_assignment_requested", "user_created", "role_assigned"]  # by the login
     assert rows[-1][2] == {"role": "reader"}  # the role the login copied, overwritten by the bootstrap
+
+
+def test_an_email_taken_while_firebase_answers_is_a_conflict(sessions: sessionmaker[Session]) -> None:
+    directory = SqlUserDirectory(sessions)
+
+    def another_account_takes_the_email() -> bool:
+        directory.sync_login(identity("other", Role.READER, email="race@example.com"))
+        return True
+
+    with pytest.raises(UserConflictError):
+        directory.bootstrap_role(
+            identity("b9", Role.ADMIN, email="race@example.com"), another_account_takes_the_email, False
+        )
+
+    assert [row[0] for row in audit_rows(sessions, "b9")] == ["role_assignment_requested", "role_assignment_failed"]
+    with sessions() as session:
+        assert session.scalar(select(AppUser).where(AppUser.firebase_uid == "b9")) is None

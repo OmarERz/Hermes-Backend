@@ -20,7 +20,7 @@ from sqlalchemy.exc import OperationalError
 
 from api.auth import AuthUnavailableError, Role, VerifiedIdentity, bootstrap
 from api.auth.bootstrap import FirebaseUser, FirebaseUserLookup, Services, bootstrap_role, main
-from api.auth.directory import BootstrapResult, RoleConflictError, UserConflictError, UserRecord
+from api.auth.directory import BootstrapResult, RoleConflictError, SqlUserDirectory, UserConflictError, UserRecord
 from api.auth.role_admin import RevocationPendingError, UnknownUserError
 
 pytestmark = pytest.mark.unit
@@ -239,6 +239,9 @@ def test_default_services_share_one_firebase_app_and_the_app_database() -> None:
     wiring = bootstrap.default_services(SETTINGS)
     assert isinstance(wiring.users, FirebaseUserLookup)
     assert wiring.manager._verifier is wiring.users._verifier  # type: ignore[attr-defined]
+    assert isinstance(wiring.directory, SqlUserDirectory)
+    engine = wiring.directory._sessions.kw["bind"]
+    assert engine.url.username == "app"  # SETTINGS.database_url: the API's least-privilege role
 
 
 class FakeSdk:

@@ -105,3 +105,12 @@ def test_real_mode_refuses_to_start_without_the_file_or_the_project(tmp_path: Pa
     result = compose_config(tmp_path, "compose.yaml", "compose.firebase.yaml", **env)
     assert result.returncode != 0
     assert f"required variable {missing} is missing a value" in result.stderr
+
+
+def test_the_real_project_block_of_the_env_example_comes_after_the_values_it_overrides() -> None:
+    # A repeated variable keeps its last value (compose and python-dotenv alike): uncommenting the block must win.
+    lines = (ROOT / ".env.example").read_text(encoding="utf-8").splitlines()
+    for name, real in (("CORS_ALLOWED_ORIGINS", "http://localhost:4200"), ("FIREBASE_PROJECT_ID", "hermes-pass-sec")):
+        default = max(i for i, line in enumerate(lines) if line.startswith(f"{name}="))
+        override = lines.index(f"# {name}={real}")
+        assert override > default, name
