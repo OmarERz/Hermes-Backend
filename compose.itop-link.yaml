@@ -1,0 +1,14 @@
+# Optional, Hermes side: puts the api and the workers on the Docker network they share with the persistent iTop
+# (compose.itop.link.yaml), so ITOP_URL=http://itop:8080 works from the containers and iTop's webhook reaches
+# http://api:8000/api/itop/webhook. Use it with COMPOSE_FILE=compose.yaml:compose.itop-link.yaml (in the env file
+# or the environment) after `make itop-link`. README, "Guía de operación" §9.
+services:
+  api:
+    networks: [default, hermes-itop-link]
+  workers:
+    networks: [default, embeddings, hermes-itop-link]
+
+networks:
+  hermes-itop-link:
+    name: hermes-itop-link
+    external: true

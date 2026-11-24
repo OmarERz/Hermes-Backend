@@ -190,6 +190,9 @@ EXAMPLE_EXTRAS = {
     "EMBEDDINGS_PORT",  # compose.host.yaml and make worker-host
     "MIGRATION_DATABASE_URL",  # core.devtools.admin (make seed)
     "FORWARDED_ALLOW_IPS",  # read by uvicorn (trusted proxies for X-Forwarded-For)
+    "ITOP_PORT",  # compose.itop.yaml interpolation (persistent iTop)
+    "ITOP_WEBHOOK_URL",
+    "COMPOSE_FILE",  # read by docker compose itself (compose.itop-link.yaml)
 }
 NOT_IN_EXAMPLE = {"PGPASSWORD"}  # the app role's password reaches Settings as the pgpassword secret file only
 

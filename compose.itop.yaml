@@ -1,32 +1,64 @@
-# iTop 3.2.2 test instance (F0.7, C13). Local tests only, never production.
-#   make itop-up        start it (needs the ITOP_* variables, see docs/itop-test-instance.md)
-#   make itop-install   unattended install + provisioning (idempotent)
-#   make itop-seed      load the synthetic stack
-#   make itop-down      stop and delete its data
-# A separate file on purpose: required-variable checks (`:?`) are evaluated even for services of an inactive
-# profile, so putting these in compose.yaml would break `docker compose up` for everyone without iTop.
+# Persistent iTop 3.2.2 with its web console (D-085): the CMDB and ticket tool Hermes reads and writes.
+# Operator guide: README, "Guía de operación" §9. Short version:
+#   make itop-up          write the iTop secret files (make itop-secrets), then start it
+#   make itop-install     unattended install, recompilation when the extension changed, provisioning (idempotent)
+#   make itop-seed        load the synthetic stack (dry run; APPLY=1 writes)
+#   make itop-backup      database dump plus the conf and data volumes, to backups/
+#   make itop-down        stop it; the data stays in the volumes (make itop-destroy CONFIRM=yes deletes them)
+# Credentials travel as Docker secret files (D-042) in $COMPOSE_SECRETS_DIR (default .compose-secrets), never as
+# environment values. ITOP_LINK=1 adds compose.itop.link.yaml: the network shared with the Hermes stack.
+# A separate file on purpose: a project of its own (its volumes survive `docker compose down` of the Hermes stack)
+# and required secret files that would break `docker compose up` for everyone without iTop.
 name: hermes-itop
+
+secrets:
+  itop_db_root_password:
+    file: ${COMPOSE_SECRETS_DIR:-./.compose-secrets}/itop_db_root_password
+  itop_db_password:
+    file: ${COMPOSE_SECRETS_DIR:-./.compose-secrets}/itop_db_password
+  itop_admin_password:
+    file: ${COMPOSE_SECRETS_DIR:-./.compose-secrets}/itop_admin_password
+  itop_webhook_token:
+    file: ${COMPOSE_SECRETS_DIR:-./.compose-secrets}/itop_webhook_token
+
+# The same limits as compose.yaml (F12.3): bounded processes and rotated logs.
+x-limits: &limits
+  pids_limit: 512
+  logging:
+    driver: json-file
+    options:
+      max-size: "10m"
+      max-file: "5"
 
 services:
   itop-db:
+    <<: *limits
     profiles: [itop]
     image: mariadb:10.11@sha256:e5fe75b2b9de0eb9f6f9a4d9c97272fb3a7480e389ccd487a786bab2a12cc0d7
+    # Runs directly as the image's mysql user (a fresh named volume inherits its ownership): no capability needed.
+    user: mysql
     environment:
-      MARIADB_ROOT_PASSWORD: ${ITOP_DB_ROOT_PASSWORD:?set ITOP_DB_ROOT_PASSWORD}
+      MARIADB_ROOT_PASSWORD_FILE: /run/secrets/itop_db_root_password
       MARIADB_DATABASE: itop
       MARIADB_USER: itop
-      MARIADB_PASSWORD: ${ITOP_DB_PASSWORD:?set ITOP_DB_PASSWORD}
+      MARIADB_PASSWORD_FILE: /run/secrets/itop_db_password
+    secrets: [itop_db_root_password, itop_db_password]
     volumes:
       - itop_db:/var/lib/mysql
+    cap_drop: [ALL]
+    security_opt: ["no-new-privileges:true"]
     healthcheck:
       test: ["CMD", "healthcheck.sh", "--connect", "--innodb_initialized"]
       interval: 5s
       timeout: 5s
       retries: 30
+    restart: unless-stopped
 
   itop:
+    <<: *limits
     profiles: [itop]
-    # docker/itop/Dockerfile: the pinned vbkunin/itop:3.2.2-base (`latest` points to a 3.3 beta) plus mariadb-client.
+    # docker/itop/Dockerfile: the pinned vbkunin/itop:3.2.2-base (`latest` points to a 3.3 beta) plus the MariaDB
+    # client, with Apache running directly as www-data on port 8080: no root, no capabilities.
     build: docker/itop
     image: hermes-itop:3.2.2
     platform: linux/amd64
@@ -34,28 +66,64 @@ services:
       itop-db:
         condition: service_healthy
     environment:
-      ITOP_DB_PASSWORD: ${ITOP_DB_PASSWORD:?set ITOP_DB_PASSWORD}
-      ITOP_ADMIN_PASSWORD: ${ITOP_ADMIN_PASSWORD:?set ITOP_ADMIN_PASSWORD}
+      ITOP_DB_PASSWORD_FILE: /run/secrets/itop_db_password
+      ITOP_ADMIN_PASSWORD_FILE: /run/secrets/itop_admin_password
       ITOP_PORT: ${ITOP_PORT:-8080}
-      # Webhook target (ARQ-02): the backend on the host; the token is optional and sent as a Bearer header
+      # Webhook target (ARQ-02): the backend on the host by default; http://api:8000/api/itop/webhook on the shared
+      # network (ITOP_LINK=1). The token, when its file is not empty, is sent as a Bearer header.
       ITOP_WEBHOOK_URL: ${ITOP_WEBHOOK_URL:-http://host.docker.internal:8000/api/itop/webhook}
-      ITOP_WEBHOOK_TOKEN: ${ITOP_WEBHOOK_TOKEN:-}
+      ITOP_WEBHOOK_TOKEN_FILE: /run/secrets/itop_webhook_token
+    secrets: [itop_db_password, itop_admin_password, itop_webhook_token]
     extra_hosts:
       - "host.docker.internal:host-gateway"
     ports:
-      - "127.0.0.1:${ITOP_PORT:-8080}:80"
+      - "127.0.0.1:${ITOP_PORT:-8080}:8080"
     volumes:
       - itop_conf:/var/www/html/conf
       - itop_data:/var/www/html/data
+      # The compiled data model: without it a recreated container would have a configuration and no model.
+      - itop_env:/var/www/html/env-production
       - ./docker/itop/extensions/hermes-ci-attributes:/var/www/html/extensions/hermes-ci-attributes:ro
       - ./docker/itop:/opt/hermes-itop:ro
+    cap_drop: [ALL]
+    security_opt: ["no-new-privileges:true"]
     healthcheck:
-      test: ["CMD-SHELL", "curl -fs -o /dev/null http://127.0.0.1/ || exit 1"]
-      interval: 5s
+      test: ["CMD-SHELL", "curl -fs -o /dev/null http://127.0.0.1:8080/ || exit 1"]
+      interval: 10s
       timeout: 5s
       retries: 30
+    restart: unless-stopped
+
+  itop-cron:
+    # iTop's background tasks (docker/itop/cron-loop.sh): webservices/cron.php every minute, from the same image and
+    # volumes, as www-data. It only waits until provision.php has written the cron user's param file.
+    <<: *limits
+    profiles: [itop]
+    build: docker/itop
+    image: hermes-itop:3.2.2
+    platform: linux/amd64
+    command: ["/opt/hermes-itop/cron-loop.sh"]
+    depends_on:
+      itop:
+        condition: service_started
+    volumes:
+      - itop_conf:/var/www/html/conf
+      - itop_data:/var/www/html/data
+      - itop_env:/var/www/html/env-production
+      - ./docker/itop/extensions/hermes-ci-attributes:/var/www/html/extensions/hermes-ci-attributes:ro
+      - ./docker/itop:/opt/hermes-itop:ro
+    cap_drop: [ALL]
+    security_opt: ["no-new-privileges:true"]
+    healthcheck:
+      # The loop is PID 1: healthy while it runs.
+      test: ["CMD-SHELL", "kill -0 1"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+    restart: unless-stopped
 
 volumes:
   itop_db:
   itop_conf:
   itop_data:
+  itop_env:
