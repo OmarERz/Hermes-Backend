@@ -185,7 +185,7 @@ def build_jobs(
     `consumers` registers consumers by the name `notifications.consumer` selects; `log` is always available. With
     `slack` (and no consumer registered under that name) the dispatch job leaves the events to the Slack service.
     """
-    itop_url = str(settings.itop_url) if settings.itop_url is not None else None
+    itop_url = settings.itop_link_url  # links in the events: the console URL when it differs (F16.1)
     dispatch = DispatchJob(session_factory, itop_url, dict(consumers or {}), stop)
     jobs = [
         PeriodicJob("notification_dispatch", DISPATCH_SECONDS, dispatch, lane="notifications"),

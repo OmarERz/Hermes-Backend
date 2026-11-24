@@ -94,6 +94,7 @@ devuelve y los registros las enmascaran.
 | Variable | Para qué |
 |---|---|
 | `ITOP_URL`, `ITOP_TOKEN`, `ITOP_SYSTEM_USER`, `ITOP_WEBHOOK_TOKEN` | Leer el CMDB y crear tickets en iTop; sin ellas no corren los trabajos de iTop |
+| `ITOP_CONSOLE_URL` | La consola de iTop que abren las personas desde los enlaces del front y de las notificaciones; vacío = `ITOP_URL`. Hace falta cuando `ITOP_URL` es un nombre que solo resuelven los contenedores (sección 9) |
 | `NVD_API_KEY` | Más cuota en NVD y consulta al diccionario CPE (sin llave solo hay candidatos locales). Sin llave, la primera carga de 90 días de NVD al arrancar tarda varios minutos y un escaneo pedido mientras tanto espera en cola |
 | `DEEPSEEK_API_KEY`, `LLM_BASE_URL_JUDGE`, `LLM_BASE_URL_ANALYSTS` | Juez y analistas de IA; **la demo nunca las usa** |
 | `LLM_PROVIDER`, `CLAUDE_CODE_MODEL_JUDGE`, `CLAUDE_CODE_MODEL_ANALYSTS`, `CLAUDE_CODE_EFFORT`, `CLAUDE_CODE_TIMEOUT_SECONDS` | Proveedor del juez y los analistas: `deepseek` (por defecto) o `claude-code`, la CLI de Claude Code con tu suscripción, solo en tu equipo (ver la sección 8) |
@@ -266,6 +267,81 @@ Qué conviene saber:
   de la API en lugar de usar tu suscripción.
 - La salida pasa por las mismas tres capas de validación que con DeepSeek, y las pruebas automáticas nunca llaman a la
   CLI real.
+
+### 9. iTop persistente con su consola web (D-085)
+
+`compose.itop.yaml` levanta iTop 3.2.2 (proyecto `hermes-itop`) con su base MariaDB, su cron y la extensión de Hermes
+(los cinco atributos de seguridad en cada CI y el perfil de mínimo privilegio del backend). Es un proyecto aparte: sus
+datos sobreviven a `make up` y a `docker compose down` de Hermes. Ningún contenedor corre como root ni con
+capacidades extra; la consola escucha en `127.0.0.1:${ITOP_PORT:-8080}`.
+
+**Primera vez**
+
+1. Si Hermes ya tiene `ITOP_WEBHOOK_TOKEN` en `.env` (un valor largo al azar), corre antes `make compose-secrets` para
+   que iTop use el mismo token en su *webhook*.
+2. `make itop-up ITOP_LINK=1`. Escribe los secretos de iTop en `.compose-secrets/itop_*` y crea la red compartida con
+   Hermes. Las contraseñas de MariaDB y del administrador se generan al azar la primera vez y nunca se reemplazan; la
+   del usuario `admin` está en `.compose-secrets/itop_admin_password`. Para elegirla tú, corre
+   `ITOP_ADMIN_PASSWORD='…' make itop-secrets` **antes** del primer `make itop-up`.
+3. `make itop-install ITOP_LINK=1`: instala iTop, compila el modelo y crea lo que Hermes necesita (organización
+   `Demo-Lab`, persona «Hermes System», usuarios y *webhook*). Repetirlo no cambia nada; después de actualizar el
+   repositorio vuelve a correrlo: si la extensión cambió, recompila el modelo sin tocar los datos.
+4. Entra a `http://127.0.0.1:8080` como `admin` (la consola está en español). Puedes cambiar la contraseña en «Mi
+   cuenta»; el archivo de secretos solo se usa en la instalación.
+5. Carga el inventario: `make itop-seed` (simulacro) y `make itop-seed APPLY=1` (escribe).
+
+**Conectar Hermes con iTop**
+
+Con la red compartida, los contenedores de Hermes llegan a iTop como `http://itop:8080` y el *webhook* de iTop llega a
+la API como `http://api:8000`. En `.env`:
+
+```
+COMPOSE_FILE=compose.yaml:compose.itop-link.yaml
+ITOP_URL=http://itop:8080
+# los enlaces que abren las personas: http://itop:8080 solo lo resuelven los contenedores
+ITOP_CONSOLE_URL=http://127.0.0.1:8080
+ITOP_WEBHOOK_URL=http://api:8000/api/itop/webhook
+ITOP_TOKEN=<lo que imprime make itop-token>
+ITOP_WEBHOOK_TOKEN=<un valor largo al azar>
+# ids de iTop de la organización, de la persona «Hermes System» y del servicio de los tickets
+ITOP_ORG_ID=…
+ITOP_CALLER_ID=…
+ITOP_SERVICE_ID=…
+```
+
+Después `make compose-secrets`, `make itop-install ITOP_LINK=1` (aplica la URL y el token del *webhook* a los objetos
+ya creados) y `make up`. Sin la red compartida, usa `ITOP_URL=http://host.docker.internal:8080` y deja
+`ITOP_WEBHOOK_URL` sin definir (por defecto apunta a la API publicada en el equipo). Para el trabajador en tu equipo
+(sección 8): `ITOP_URL=http://127.0.0.1:8080 make worker-host`.
+
+**Usuarios que crea Hermes en iTop**
+
+| Usuario | Para qué |
+|---|---|
+| `hermes-rest` | El token del backend (`ITOP_TOKEN`): lee el CMDB, crea y actualiza tickets y solo los **reabre** (`ev_reopen`); asignar, resolver y cerrar lo hacen las personas en la consola. Ojo: la API REST de iTop no revisa los estímulos de un perfil, solo el permiso de modificar; lo que limita al backend a `ev_reopen` es su propio *outbox*. `make itop-rotate-token` le da un token nuevo (luego actualiza `ITOP_TOKEN` y corre `make compose-secrets` y `make up`) |
+| `hermes-seed` | Administrador por REST para el cargador de inventario. Está **desactivado** y sin token salvo mientras corre `make itop-seed`, que lo activa con un token nuevo y lo desactiva al terminar, aunque falle |
+| `hermes-cron` | Administrador local con el que corre el cron de iTop (notificaciones, SLA, tareas asíncronas, respaldo nocturno). Su contraseña solo está en un archivo del volumen de datos |
+
+**Respaldo y restauración**
+
+- Los datos viven en los volúmenes `hermes-itop_itop_db` (base), `_itop_conf` (configuración), `_itop_data` (datos y
+  tokens) e `_itop_env` (modelo compilado). `make itop-down` detiene iTop y **conserva** todo;
+  `make itop-destroy CONFIRM=yes` borra los volúmenes.
+- `make itop-backup` deja `backups/itop-<fecha>.tar.gz`: el volcado de la base más las carpetas `conf` y `data`. Contiene
+  la contraseña de la base, la llave de cifrado de iTop y los tokens: guárdalo como un secreto.
+- `make itop-restore BACKUP=backups/itop-<fecha>.tar.gz` reemplaza la base y los archivos por los del respaldo y
+  recompila el modelo. En otra máquina, copia también los archivos `.compose-secrets/itop_*` antes de `make itop-up`,
+  porque la configuración respaldada guarda la contraseña de la base de esa instalación.
+- iTop además hace su propio respaldo cada noche (23:30) dentro de su volumen de datos; `make itop-backup` no lo
+  incluye.
+
+**Salud y registros**
+
+- `docker compose -f compose.itop.yaml --profile itop ps` y `… logs -f itop itop-cron`.
+- Estado de las tareas del cron: `docker compose -f compose.itop.yaml --profile itop exec itop-cron php
+  /var/www/html/webservices/cron.php --param_file=/var/www/html/data/hermes-cron.params --status_only=1`.
+- Las contraseñas de MariaDB solo las usan los contenedores (nunca se publican). Cambiarlas después de instalar pide
+  pasos a mano: `ALTER USER` en MariaDB y el mismo valor en `db_pwd` de `conf/production/config-itop.php`.
 
 ## License
 

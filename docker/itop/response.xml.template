@@ -1,11 +1,15 @@
 <?xml version="1.0" encoding="UTF-8"?>
-<!-- Unattended install response file for iTop 3.2.2 (test instance). The @NAME@ markers are filled in by
-     install.sh from the container environment; the rendered file holds passwords and is deleted afterwards. -->
+<!-- Unattended setup response file for iTop 3.2.2 (install or upgrade). The @NAME@ markers are filled in by
+     install.sh from the secret files; the rendered file holds passwords and is deleted afterwards. In upgrade mode the
+     database settings come from the existing configuration (installer option use_itop_config) and the passwords
+     stay blank.
+     The console speaks Spanish (ES CR); the REST users keep EN US (provision.php). -->
 <installation>
-  <mode>install</mode>
+  <mode>@MODE@</mode>
   <preinstall></preinstall>
   <source_dir>datamodels/2.x/</source_dir>
   <datamodel_version>3.2.2</datamodel_version>
+  <previous_configuration_file>@PREVIOUS_CONFIG@</previous_configuration_file>
   <extensions_dir>extensions</extensions_dir>
   <target_env>production</target_env>
   <workspace_dir></workspace_dir>
@@ -23,9 +27,9 @@
   <admin_account>
     <user>admin</user>
     <pwd>@ITOP_ADMIN_PASSWORD@</pwd>
-    <language>EN US</language>
+    <language>ES CR</language>
   </admin_account>
-  <language>EN US</language>
+  <language>ES CR</language>
   <selected_modules type="array"></selected_modules>
   <selected_extensions type="array">
     <item>itop-config-mgmt-core</item>

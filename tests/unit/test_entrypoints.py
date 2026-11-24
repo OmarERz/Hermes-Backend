@@ -41,6 +41,14 @@ def test_docs_only_when_enabled() -> None:
     assert "/api/health" in client.get("/api/openapi.json").json()["paths"]
 
 
+def test_the_api_links_to_the_itop_console_url() -> None:
+    # F16.1: REST goes to the internal name on the shared network; the links shown to people go to the console.
+    internal = SETTINGS.model_copy(update={"itop_url": "http://itop:8080/"})
+    assert create_app(internal).state.itop_url == "http://itop:8080/"
+    console = internal.model_copy(update={"itop_console_url": "http://127.0.0.1:8080/"})
+    assert create_app(console).state.itop_url == "http://127.0.0.1:8080/"
+
+
 def test_worker_starts_and_stops(monkeypatch: object) -> None:
     stop = threading.Event()
     stop.set()

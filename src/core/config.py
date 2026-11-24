@@ -87,6 +87,9 @@ class Settings(BaseSettings):
 
     # iTop REST API (D-003, D-037)
     itop_url: HttpUrl | None = None
+    # The iTop console people open from the links of the front and the notifications; unset = itop_url. Set it when
+    # the backend reaches iTop by a name the browser cannot (ITOP_URL=http://itop:8080 on the shared network, F16.1).
+    itop_console_url: HttpUrl | None = None
     itop_token: SecretStr | None = None
     itop_system_user: str | None = None
     # Shared secret iTop sends as `Authorization: Bearer` to the webhook doorbell (ARQ-02); unset = webhook off
@@ -118,6 +121,12 @@ class Settings(BaseSettings):
     # exact origins such as "https://hermes-front.example.com". Empty (default) = same origin only, e.g. front and
     # API behind one reverse proxy. A wildcard is refused: the API carries bearer tokens.
     cors_allowed_origins: str = ""
+
+    @property
+    def itop_link_url(self) -> str | None:
+        """Base of the iTop links shown to people: the console URL when set, else the REST base URL."""
+        url = self.itop_console_url or self.itop_url
+        return str(url) if url is not None else None
 
     @property
     def cors_origins(self) -> list[str]:
@@ -166,7 +175,7 @@ class Settings(BaseSettings):
     def _project_id_stripped(cls, value: Any) -> Any:
         return value.strip() if isinstance(value, str) else value
 
-    @field_validator(*_OPTIONAL_FIELDS, "pgpassword", mode="before")
+    @field_validator(*_OPTIONAL_FIELDS, "pgpassword", "itop_console_url", mode="before")
     @classmethod
     def _blank_means_unset(cls, value: Any) -> Any:
         if isinstance(value, str) and not value.strip():

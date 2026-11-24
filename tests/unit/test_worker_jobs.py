@@ -23,7 +23,13 @@ from workers.jobs import (
     run_jobs,
     run_jobs_in_threads,
 )
-from workers.pipeline_jobs import NEWS_SECONDS, NIGHTLY_RECALC_SECONDS, RECALC_REQUEST_SECONDS, SCAN_REQUEST_SECONDS
+from workers.pipeline_jobs import (
+    NEWS_SECONDS,
+    NIGHTLY_RECALC_SECONDS,
+    RECALC_REQUEST_SECONDS,
+    SCAN_REQUEST_SECONDS,
+    _tickets,
+)
 
 pytestmark = pytest.mark.unit
 SETTINGS = Settings(
@@ -223,3 +229,23 @@ def test_events_waiting_for_the_slack_service_raise_a_warning(caplog: pytest.Log
     sinces = [c.args[1]["since"] for c in counts]
     start = datetime(2026, 11, 23, 10, 0, tzinfo=UTC)
     assert sinces == [start - timedelta(minutes=5), start + timedelta(minutes=6)]  # due 5 minutes ago or earlier
+
+
+def test_links_in_events_and_tickets_use_the_itop_console_url() -> None:
+    # F16.1: on the shared Docker network the backend reaches http://itop:8080; people open the published console.
+    settings = SETTINGS.model_copy(
+        update={
+            "itop_url": "http://itop:8080/",
+            "itop_console_url": "http://127.0.0.1:8080/",
+            "itop_token": SecretStr("tok"),
+            "itop_org_id": "1",
+            "itop_caller_id": "2",
+        }
+    )
+    dispatch = build_jobs(settings, MagicMock())[0]
+    assert dispatch.name == "notification_dispatch"
+    assert isinstance(dispatch.run, DispatchJob)
+    assert dispatch.run.itop_base_url == "http://127.0.0.1:8080/"
+    lifecycle = _tickets(settings)
+    assert lifecycle is not None
+    assert lifecycle.itop_base_url == "http://127.0.0.1:8080/"
