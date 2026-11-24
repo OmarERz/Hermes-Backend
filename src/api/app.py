@@ -78,7 +78,7 @@ def create_app(
     app.state.cursor_signer = CursorSigner(settings.cursor_signing_key.get_secret_value())
     # Connection checks (SEG-23): short timeouts, results cached; tests replace it with fake probes.
     app.state.connections = ConnectionChecker(Probes(settings, httpx.Client(trust_env=False)).get)
-    app.state.itop_url = str(settings.itop_url) if settings.itop_url is not None else None  # for links to iTop
+    app.state.itop_url = settings.itop_link_url  # for links to iTop: the console URL when it differs (F16.1)
     claude = settings.llm_provider == "claude-code"
     app.state.llm_setup = LlmSetup(  # telemetry shows the provider and models in use (D-084), never a key
         settings.llm_provider,

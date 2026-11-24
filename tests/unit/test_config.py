@@ -105,6 +105,21 @@ def test_settings_are_immutable(monkeypatch: pytest.MonkeyPatch) -> None:
         settings.firebase_project_id = "other"  # type: ignore[misc]
 
 
+def test_itop_links_use_the_console_url_when_it_is_set(monkeypatch: pytest.MonkeyPatch) -> None:
+    # On the shared Docker network the backend reaches http://itop:8080, which a browser cannot resolve (F16.1).
+    internal = {"ITOP_URL": "http://itop:8080/", "ITOP_TOKEN": "t"}
+    assert load(monkeypatch, internal).itop_link_url == "http://itop:8080/"
+    assert load(monkeypatch, {**internal, "ITOP_CONSOLE_URL": ""}).itop_link_url == "http://itop:8080/"
+    console = load(monkeypatch, {**internal, "ITOP_CONSOLE_URL": "http://127.0.0.1:8080"})
+    assert console.itop_link_url == "http://127.0.0.1:8080/"
+    assert str(console.itop_url) == "http://itop:8080/"  # REST still goes to the internal name
+    assert "ITOP_CONSOLE_URL" not in console.missing()  # optional, never reported as an unconfigured connection
+    monkeypatch.delenv("ITOP_URL")
+    assert load(monkeypatch).itop_link_url == "http://127.0.0.1:8080/"
+    monkeypatch.delenv("ITOP_CONSOLE_URL")
+    assert load(monkeypatch).itop_link_url is None
+
+
 def test_missing_reports_unconfigured_connections(monkeypatch: pytest.MonkeyPatch) -> None:
     settings = load(monkeypatch, {"ITOP_URL": "https://itop.example.test/", "ITOP_TOKEN": "t"})
     missing = settings.missing()
@@ -190,6 +205,9 @@ EXAMPLE_EXTRAS = {
     "EMBEDDINGS_PORT",  # compose.host.yaml and make worker-host
     "MIGRATION_DATABASE_URL",  # core.devtools.admin (make seed)
     "FORWARDED_ALLOW_IPS",  # read by uvicorn (trusted proxies for X-Forwarded-For)
+    "ITOP_PORT",  # compose.itop.yaml interpolation (persistent iTop)
+    "ITOP_WEBHOOK_URL",
+    "COMPOSE_FILE",  # read by docker compose itself (compose.itop-link.yaml)
 }
 NOT_IN_EXAMPLE = {"PGPASSWORD"}  # the app role's password reaches Settings as the pgpassword secret file only
 
