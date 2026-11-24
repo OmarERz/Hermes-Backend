@@ -219,3 +219,7 @@ def test_events_waiting_for_the_slack_service_raise_a_warning(caplog: pytest.Log
     assert warnings == [
         "3 immediate notification event(s) have waited over 5 minutes for the slack service; is it running?"
     ]
+    counts = [c for c in session.scalar.call_args_list if len(c.args) > 1]
+    sinces = [c.args[1]["since"] for c in counts]
+    start = datetime(2026, 11, 23, 10, 0, tzinfo=UTC)
+    assert sinces == [start - timedelta(minutes=5), start + timedelta(minutes=6)]  # due 5 minutes ago or earlier

@@ -10,6 +10,7 @@ from pydantic import ValidationError
 from notifications_slack.settings import SlackSettings, team_key
 
 pytestmark = pytest.mark.unit
+FAKE_PASSWORD = "pw"  # noqa: S105 - fake value for tests
 BOT = "xoxb-" + "1" * 12  # fake values for tests
 APP = "xapp-" + "2" * 12
 
@@ -75,10 +76,23 @@ def test_bad_channel_maps_are_refused(mapping: dict[str, str]) -> None:
         settings(channel_map=mapping)
 
 
+def test_the_slack_module_password_is_required_with_the_database() -> None:
+    url = "postgresql://slack_module@db/hermes"
+    assert settings(database_url=url).problems()[-1] == "SLACK_DB_PASSWORD"
+    assert "SLACK_DB_PASSWORD" not in settings(database_url=url, db_password=FAKE_PASSWORD).problems()
+    assert "SLACK_DB_PASSWORD" not in settings(database_url="postgresql://slack_module:pw@db/hermes").problems()
+    assert settings(database_url="not a url").problems()[-1] == "SLACK_DB_PASSWORD"
+    assert "SLACK_DB_PASSWORD" not in settings().problems()  # the URL itself is what is missing
+
+
 def test_limits() -> None:
     with pytest.raises(ValidationError):
         settings(digest_window_seconds=1)
     ready = settings(
-        bot_token=BOT, app_token=APP, database_url="postgresql://slack_module@db/hermes", default_channel="C0DEFAULT1"
+        bot_token=BOT,
+        app_token=APP,
+        database_url="postgresql://slack_module@db/hermes",
+        db_password=FAKE_PASSWORD,
+        default_channel="C0DEFAULT1",
     )
     assert ready.problems() == []

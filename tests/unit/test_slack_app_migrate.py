@@ -34,10 +34,11 @@ def test_the_migrator_password_comes_from_its_secret(monkeypatch: pytest.MonkeyP
 
 def test_entry_point_commands(monkeypatch: pytest.MonkeyPatch) -> None:
     runs: list[tuple[object, ...]] = []
+    monkeypatch.setattr(entry, "configure_logging", lambda *_: None)  # keep pytest's log capture
     monkeypatch.setattr(migrate, "migration_url", lambda: "postgresql://migrator@db/hermes")
     monkeypatch.setattr(migrate, "run", lambda *args: runs.append(args))
     assert entry.main(["migrate"]) == 0
     assert entry.main(["migrate", "downgrade", "base"]) == 0
     assert entry.main(["migrate", "stamp"]) == 2
-    assert entry.main([]) == 2
+    assert entry.main(["serve"]) == 2
     assert runs == [("postgresql://migrator@db/hermes",), ("postgresql://migrator@db/hermes", "downgrade", "base")]

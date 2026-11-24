@@ -1,8 +1,9 @@
 # Local stack: docker compose up --build
 # Credentials travel as Docker secret files (D-042): `make compose-secrets` writes them from POSTGRES_PASSWORD,
 # MIGRATOR_DB_PASSWORD, APP_DB_PASSWORD, RETENTION_DB_PASSWORD, CURSOR_SIGNING_KEY (required) and ITOP_TOKEN, NVD_API_KEY,
-# DEEPSEEK_API_KEY, ABUSECH_AUTH_KEY, RANSOMWARELIVE_API_KEY, ITOP_WEBHOOK_TOKEN, SLACK_DB_PASSWORD (optional, blank = "not
-# configured"; without SLACK_DB_PASSWORD the slack_module role cannot log in).
+# DEEPSEEK_API_KEY, ABUSECH_AUTH_KEY, RANSOMWARELIVE_API_KEY, ITOP_WEBHOOK_TOKEN, SLACK_DB_PASSWORD, SLACK_BOT_TOKEN,
+# SLACK_APP_TOKEN (optional, blank = "not configured"; without SLACK_DB_PASSWORD the slack_module role cannot log in).
+# The Slack service runs only with the "slack" profile: COMPOSE_PROFILES=slack make up (SLACK.md).
 # Ports bind to 127.0.0.1 only. On every start the provision service (re)applies the idempotent provisioning
 # (extensions, roles, schema owner, role passwords as SCRAM verifiers); the migrate service then runs Alembic as
 # migrator (DAT-05) and the API and workers connect as app, the least-privilege role.
@@ -33,6 +34,10 @@ secrets:
     file: ${COMPOSE_SECRETS_DIR:-./.compose-secrets}/itop_webhook_token
   slack_db_password:
     file: ${COMPOSE_SECRETS_DIR:-./.compose-secrets}/slack_db_password
+  slack_bot_token:
+    file: ${COMPOSE_SECRETS_DIR:-./.compose-secrets}/slack_bot_token
+  slack_app_token:
+    file: ${COMPOSE_SECRETS_DIR:-./.compose-secrets}/slack_app_token
 
 # Limits for every service (F12.3, provisional values pending the user's review): a bounded number of processes and
 # threads (a runaway or a fork bomb cannot exhaust the host's process table) and rotated logs (50 MB per container at
@@ -57,7 +62,7 @@ x-hardening: &hardening
 x-backend: &backend
   <<: *hardening
   build: .
-  environment:
+  environment: &backend-env
     # The password comes from the pgpassword secret (Settings reads the mounted file), never from the URL.
     DATABASE_URL: postgresql://app@db:5432/hermes
     FIREBASE_PROJECT_ID: ${FIREBASE_PROJECT_ID:-demo-hermes}
@@ -250,6 +255,38 @@ services:
     networks: [default, embeddings]
     healthcheck:
       # The worker has no port yet: healthy while its main process (PID 1) is alive.
+      test: ["CMD", "python", "-c", "import os; os.kill(1, 0)"]
+      interval: 10s
+      timeout: 3s
+      retries: 3
+
+  slack:
+    # The Slack module (D-085, SLACK.md): Bolt in Socket Mode (an outgoing connection, no published port), the
+    # notification outbox while notifications.consumer = slack, and the channel digests. Two database roles: app for
+    # the outbox and FeedbackService, slack_module (password secret) for its slack_* tables. Only with --profile slack.
+    <<: *backend
+    profiles: [slack]
+    command: ["python", "-m", "slack_app"]
+    environment:
+      <<: *backend-env
+      SLACK_DATABASE_URL: postgresql://slack_module@db:5432/hermes
+      SLACK_CHANNEL_MAP: ${SLACK_CHANNEL_MAP:-}
+      SLACK_DEFAULT_CHANNEL: ${SLACK_DEFAULT_CHANNEL:-}
+      SLACK_URGENT_CHANNEL: ${SLACK_URGENT_CHANNEL:-}
+      SLACK_RESTRICTED_CHANNEL: ${SLACK_RESTRICTED_CHANNEL:-}
+      SLACK_DIGEST_WINDOW_SECONDS: ${SLACK_DIGEST_WINDOW_SECONDS:-120}
+      SLACK_MAX_RATE_WAIT_SECONDS: ${SLACK_MAX_RATE_WAIT_SECONDS:-30}
+      SLACK_RETENTION_DAYS: ${SLACK_RETENTION_DAYS:-90}
+      SLACK_THREAD_RETENTION_DAYS: ${SLACK_THREAD_RETENTION_DAYS:-365}
+    secrets:
+      - source: app_db_password
+        target: pgpassword
+      - cursor_signing_key
+      - slack_bot_token
+      - slack_app_token
+      - slack_db_password
+    healthcheck:
+      # No port: healthy while its main process (PID 1) is alive, like the worker.
       test: ["CMD", "python", "-c", "import os; os.kill(1, 0)"]
       interval: 10s
       timeout: 3s

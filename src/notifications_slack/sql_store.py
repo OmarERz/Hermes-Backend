@@ -75,6 +75,12 @@ class SqlSlackStore:
     def __init__(self, engine: Engine) -> None:
         self.engine = engine
 
+    def check(self) -> None:
+        """Fail at start, not on the first event: the role can log in and use the module's tables."""
+        with self.engine.connect() as conn:
+            for table in (slack_delivery, slack_thread, slack_digest_item):
+                conn.execute(select(1).select_from(table).limit(1))
+
     def is_known(self, event_id: str, audience: Audience) -> bool:
         with self.engine.connect() as conn:
             if conn.execute(select(1).where(_d.event_id == event_id, _d.audience == audience)).first():

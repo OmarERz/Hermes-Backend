@@ -12,6 +12,8 @@ from typing import Any, Final
 
 from pydantic import Field, SecretStr, field_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
+from sqlalchemy.engine import make_url
+from sqlalchemy.exc import ArgumentError
 
 DOCKER_SECRETS_DIR: Final = Path("/run/secrets")
 # Slack conversation ids: C… (public channel) or G… (private channel created before 2021)
@@ -113,7 +115,7 @@ class SlackSettings(BaseSettings):
 
     def problems(self) -> list[str]:
         """What is missing to run the Slack service, as variable names (empty = ready)."""
-        return [
+        missing = [
             name
             for name, value in (
                 ("SLACK_BOT_TOKEN", self.bot_token),
@@ -123,6 +125,16 @@ class SlackSettings(BaseSettings):
             )
             if value is None
         ]
+        if self.database_url is not None and self.db_password is None and not self._url_has_password():
+            missing.append("SLACK_DB_PASSWORD")  # without it slack_module has no login (core provisioning)
+        return missing
+
+    def _url_has_password(self) -> bool:
+        assert self.database_url is not None  # noqa: S101 - checked by the caller
+        try:
+            return bool(make_url(self.database_url.get_secret_value()).password)
+        except ArgumentError:
+            return False
 
     def secret_values(self) -> list[str]:
         """Every configured secret, for the log masking filter (SEG-24)."""

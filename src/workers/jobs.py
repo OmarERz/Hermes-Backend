@@ -145,7 +145,7 @@ class DispatchJob:
             log.warning(
                 "%d immediate notification event(s) have waited over %d minutes for the %s service; is it running?",
                 waiting,
-                WAITING_WARN_AFTER.seconds // 60,
+                int(WAITING_WARN_AFTER.total_seconds() // 60),
                 name,
             )
 
