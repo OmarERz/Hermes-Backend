@@ -20,6 +20,7 @@ from sqlalchemy import (
     Text,
     delete,
     func,
+    or_,
     select,
     update,
 )
@@ -166,7 +167,11 @@ class SqlSlackStore:
         with self.engine.connect() as conn:
             rows = conn.execute(
                 select(_q.event_id, _q.channel_id, _q.payload, _q.queued_at, _q.attempts, _q.digest_ts)
-                .where(_q.channel_id == channel_id, _q.status == "queued", _q.next_attempt_at <= now)
+                .where(
+                    _q.channel_id == channel_id,
+                    _q.status == "queued",
+                    or_(_q.attempts == 0, _q.next_attempt_at <= now),
+                )
                 .order_by(_q.queued_at, _q.event_id)
             ).all()
         return [
@@ -174,14 +179,14 @@ class SqlSlackStore:
             for r in rows
         ]
 
-    def set_digest_ts(self, event_ids: list[str], digest_ts: str) -> None:
+    def set_digest_ts(self, event_ids: list[str], digest_ts: str, channel_id: str) -> None:
         if not event_ids:
             return
         with self.engine.begin() as conn:
             conn.execute(
                 update(slack_digest_item)
                 .where(_q.event_id.in_(event_ids), _q.status == "queued")
-                .values(digest_ts=digest_ts)
+                .values(digest_ts=digest_ts, channel_id=channel_id)
             )
 
     def complete_item(self, record: DeliveryRecord) -> None:

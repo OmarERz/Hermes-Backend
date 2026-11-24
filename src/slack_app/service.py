@@ -76,12 +76,9 @@ def run_every(stop: threading.Event, interval: float, name: str, job: Callable[[
 
 
 def lanes(module: SlackModule, dispatch: SlackDispatchJob) -> list[tuple[float, str, Callable[[], object]]]:
-    def digests_and_purge() -> None:
-        module.digests.publish_due()
-
     return [
         (DISPATCH_SECONDS, "slack_dispatch", dispatch),
-        (DIGEST_SECONDS, "slack_digests", digests_and_purge),
+        (DIGEST_SECONDS, "slack_digests", module.digests.publish_due),
         (PURGE_SECONDS, "slack_purge", module.purge),
     ]
 

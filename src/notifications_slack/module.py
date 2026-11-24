@@ -74,7 +74,7 @@ def build_module(  # noqa: PLR0913 - keyword-only test seams after the three col
     router = Router.from_settings(settings)
     window = timedelta(seconds=settings.digest_window_seconds)
     consumer = SlackConsumer(store, gateway, router, digest_window=window, clock=clock)
-    digests = DigestPublisher(store, gateway, clock=clock)
+    digests = DigestPublisher(store, gateway, clock=clock, fallback_channel=router.default_channel)
     # The token is checked once, at start, through `client` (auth.test): a bad token stops the service (fail closed),
     # and Bolt keeps the answer, so it never calls auth.test again on the plain per-request client it builds.
     app = App(client=client, name="hermes-slack", token_verification_enabled=True, listener_executor=listener_executor)

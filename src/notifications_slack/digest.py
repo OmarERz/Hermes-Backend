@@ -5,6 +5,10 @@
   top-level message. Either way the message becomes the root of the ticket's thread (SLK-03).
 * Item by item (see `store`): the summary's ts is saved on the batch first; each posted reply is recorded and leaves
   the queue at once. An interrupted digest continues under the same summary, never posting an item twice.
+* The window groups: once a channel's oldest item is due, every item of that channel that was never tried goes out in
+  the same digest (only retries still backing off wait).
+* A team channel that is gone (`channel_not_found`, `not_in_channel`, `is_archived`) falls back to the default channel,
+  as individual posts do (the summary and its replies move there together).
 * A transient failure (rate limit, 5xx, network) retries the item later with the NOT-02 backoff and stops the
   channel for this round; a permanent one (`invalid_blocks`, `msg_too_long`, ...) fails that item and goes on.
 """
@@ -20,7 +24,8 @@ from pydantic import ValidationError
 
 from notifications_api import NotificationEvent
 from notifications_slack import render
-from notifications_slack.gateway import SlackError, SlackGateway
+from notifications_slack.gateway import CHANNEL_ERRORS, SlackError, SlackGateway
+from notifications_slack.render import Message
 from notifications_slack.routing import NEW_ROOT_TYPES, PRIORITY_RANK, thread_key
 from notifications_slack.store import DeliveryRecord, QueuedItem, SlackStore, ThreadRef
 
@@ -37,6 +42,7 @@ class DigestPublisher:
     store: SlackStore
     gateway: SlackGateway
     clock: Callable[[], datetime] = field(default=utcnow)
+    fallback_channel: str | None = None  # SLACK_DEFAULT_CHANNEL
 
     def publish_due(self) -> int:
         """Publish every channel whose oldest queued item is due; returns how many events were posted."""
@@ -66,9 +72,20 @@ class DigestPublisher:
             posted += self._summary_and_replies(channel, fresh, now)
         return posted
 
+    def _top_level(self, channel: str, msg: Message) -> tuple[str, str]:
+        """A top-level post; a team channel that is gone falls back to the default channel."""
+        try:
+            return self.gateway.post(channel, msg, rank=RANK)
+        except SlackError as error:
+            fallback = self.fallback_channel
+            if error.code not in CHANNEL_ERRORS or fallback is None or channel == fallback:
+                raise
+            log.warning("digest: slack %s in its channel; posting to the default channel", error.code)
+            return self.gateway.post(fallback, msg, rank=RANK)
+
     def _single(self, channel: str, item: QueuedItem, event: NotificationEvent, now: datetime) -> int:
         try:
-            channel_id, ts = self.gateway.post(channel, render.message(event, "standard"), rank=RANK)
+            channel_id, ts = self._top_level(channel, render.message(event, "standard"))
         except SlackError as error:
             self._failed(item, error, now)
             return 0
@@ -81,15 +98,16 @@ class DigestPublisher:
     ) -> int:
         ranked = render.rank(event for _, event in fresh)
         try:
-            _, root_ts = self.gateway.post(channel, render.digest(ranked), rank=RANK)
+            root_channel, root_ts = self._top_level(channel, render.digest(ranked))
         except SlackError as error:
             for item, _ in fresh:
                 self._failed(item, error, now)
             return 0
-        self.store.set_digest_ts([item.event_id for item, _ in fresh], root_ts)
+        # Saved before the replies: an interrupted digest continues under this summary, in the channel it landed in.
+        self.store.set_digest_ts([item.event_id for item, _ in fresh], root_ts, root_channel)
         order = {event.event_id: i for i, event in enumerate(ranked)}
         fresh = sorted(fresh, key=lambda pair: order[pair[1].event_id])
-        done, _ = self._replies(channel, root_ts, fresh, now)
+        done, _ = self._replies(root_channel, root_ts, fresh, now)
         return done
 
     def _replies(

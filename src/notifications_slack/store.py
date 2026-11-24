@@ -78,10 +78,13 @@ class SlackStore(Protocol):
         ...
 
     def due_items(self, channel_id: str, now: datetime) -> list[QueuedItem]:
-        """The channel's queued items whose time has come, oldest first."""
+        """What a due channel publishes now, oldest first: every queued item never tried (the whole window groups into
+        one digest, SLK-07) plus the retries whose wait is over; never an item still backing off."""
         ...
 
-    def set_digest_ts(self, event_ids: list[str], digest_ts: str) -> None: ...
+    def set_digest_ts(self, event_ids: list[str], digest_ts: str, channel_id: str) -> None:
+        """The summary of these items was posted (`digest_ts` in `channel_id`, maybe the fallback channel)."""
+        ...
 
     def complete_item(self, record: DeliveryRecord) -> None:
         """The queued item was posted (standard copy): record its delivery and remove it from the queue, in one step."""
@@ -150,7 +153,13 @@ class InMemorySlackStore:
 
     def due_items(self, channel_id: str, now: datetime) -> list[QueuedItem]:
         with self._lock:
-            items = [i.item for i in self._due(now) if i.item.channel_id == channel_id]
+            items = [
+                i.item
+                for i in self.queue.values()
+                if i.status == "queued"
+                and i.item.channel_id == channel_id
+                and (i.item.attempts == 0 or (i.next_attempt_at is not None and i.next_attempt_at <= now))
+            ]
             return sorted(items, key=lambda i: (i.queued_at, i.event_id))
 
     def _due(self, now: datetime) -> list[_Item]:
@@ -158,12 +167,12 @@ class InMemorySlackStore:
             i for i in self.queue.values() if i.status == "queued" and i.next_attempt_at and i.next_attempt_at <= now
         ]
 
-    def set_digest_ts(self, event_ids: list[str], digest_ts: str) -> None:
+    def set_digest_ts(self, event_ids: list[str], digest_ts: str, channel_id: str) -> None:
         with self._lock:
             for event_id in event_ids:
                 if event_id in self.queue:
                     entry = self.queue[event_id]
-                    entry.item = replace(entry.item, digest_ts=digest_ts)
+                    entry.item = replace(entry.item, digest_ts=digest_ts, channel_id=channel_id)
 
     def complete_item(self, record: DeliveryRecord) -> None:
         with self._lock:

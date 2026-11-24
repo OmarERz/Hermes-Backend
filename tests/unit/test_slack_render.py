@@ -133,14 +133,31 @@ def test_the_standard_copy_hides_highly_classified_assets_everywhere() -> None:
     assert "srv-example-01" not in body
     assert "CI-0001" not in body  # also the driving CI and inside the justification
     assert render.HIDDEN in body
-    assert "canal restringido" in body
+    assert "canal restringido, si está configurado" in body  # no promise of a copy that may not exist
     assert "srv-example-02" in body  # the other assets stay visible
+    assert "Alex Example" not in body  # the restricted asset's owner, also out of the ticket's owners
+    assert "Sam Sample" in body
 
 
 def test_the_restricted_copy_shows_everything() -> None:
     body = all_text(render.message(restricted_event(), "restricted"))
     assert "srv-example-01 (CI-0001)" in body
+    assert "Alex Example" in body
     assert body.startswith("Restringido")
+
+
+def test_alert_texts_hide_highly_classified_assets_too() -> None:
+    """Mode 2 writes the relationship and may name the CI it cites (NOT-08)."""
+    assets = raw("inferred_alert")["assets"]
+    assets[0]["confidentiality"] = "highly_classified"
+    text = "La nota menciona a SRV-EXAMPLE-01 (CI-0001) como objetivo."
+    alert = raw("inferred_alert")["alert"] | {"relationship": text, "victim": "srv-example-01"}
+    standard = all_text(render.message(event("inferred_alert", assets=assets, alert=alert), "standard"))
+    assert "srv-example-01" not in standard.lower()
+    assert "CI-0001" not in standard
+    assert f"La nota menciona a {render.HIDDEN} ({render.HIDDEN}) como objetivo." in standard
+    restricted = all_text(render.message(event("inferred_alert", assets=assets, alert=alert), "restricted"))
+    assert text in restricted
 
 
 def test_buttons_carry_only_the_assessment_and_the_numeric_itop_id() -> None:
@@ -221,3 +238,15 @@ def test_rank_puts_events_without_score_last() -> None:
     unscored = event("fixed", event_id="b", score=None)
     assert [e.event_id for e in render.rank([unscored, scored])] == ["a", "b"]
     assert "Sin puntuación vigente" in all_text(render.follow_up(unscored, "standard"))
+
+
+def test_numeric_itop_keys_never_garble_the_text() -> None:
+    """Real inventory ids are iTop object keys ('7', '12'): only whole names are hidden, never digits in scores."""
+    assets = raw("new_ticket")["assets"]
+    assets[0] |= {"confidentiality": "highly_classified", "ci_id": "7", "name": "srv-db"}
+    text = "Puntuación 87 impulsada por SRV-DB: base 74, ajuste +7. Ver srv-db2 y srv-db.corp; actualizar srv-db."
+    body = all_text(render.message(event("new_ticket", assets=assets, justification=text), "standard"))
+    assert "Puntuación 87 impulsada por [activo restringido]: base 74, ajuste +7." in body  # case-insensitive
+    assert "srv-db2" in body  # another asset's name is not cut
+    assert "srv-db.corp" in body
+    assert "actualizar [activo restringido]." in body  # the end of a sentence still hides it

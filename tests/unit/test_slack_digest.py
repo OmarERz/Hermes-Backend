@@ -17,6 +17,7 @@ pytestmark = pytest.mark.unit
 T0 = datetime(2026, 11, 23, 10, 0, tzinfo=UTC)
 WINDOW = timedelta(seconds=120)
 TEAM = "C0INFRA001"
+DEFAULT = "C0DEFAULT1"
 
 
 class Setup:
@@ -25,11 +26,12 @@ class Setup:
         self.store = InMemorySlackStore()
         self.now = T0
         gateway = SlackGateway(self.client, max_wait=0, sleep=lambda _: None)
-        self.publisher = DigestPublisher(self.store, gateway, clock=lambda: self.now)
+        self.publisher = DigestPublisher(self.store, gateway, clock=lambda: self.now, fallback_channel=DEFAULT)
 
-    def queue(self, count: int, **changes: object) -> list[str]:
+    def queue(self, count: int, *, every: timedelta = timedelta(0), **changes: object) -> list[str]:
         ids = []
         for i in range(count):
+            at = T0 + every * i
             sample = event(
                 "new_ticket",
                 event_id=f"evt-{i:02d}",
@@ -38,7 +40,7 @@ class Setup:
                 vulnerability__cve=f"CVE-2099-{i:04d}",
                 **changes,
             )
-            self.store.enqueue(sample.event_id, TEAM, sample.model_dump(mode="json"), T0, due=T0 + WINDOW)
+            self.store.enqueue(sample.event_id, TEAM, sample.model_dump(mode="json"), at, due=at + WINDOW)
             ids.append(sample.event_id)
         return ids
 
@@ -144,12 +146,12 @@ def test_a_failed_summary_retries_every_item_later(s: Setup) -> None:
     assert s.publisher.publish_due() == 2
 
 
-def test_a_single_event_that_fails_is_retried(s: Setup) -> None:
+def test_a_single_event_with_a_permanent_error_fails(s: Setup) -> None:
     s.queue(1)
     s.now = T0 + WINDOW
-    s.client.fail("chat.postMessage", "channel_not_found")
+    s.client.fail("chat.postMessage", "invalid_blocks")
     assert s.publisher.publish_due() == 0
-    assert s.store.status_of("evt-00") == ("failed", 1, "channel_not_found")
+    assert s.store.status_of("evt-00") == ("failed", 1, "invalid_blocks")
 
 
 def test_an_unreadable_item_fails_without_blocking_the_queue(s: Setup) -> None:
@@ -158,3 +160,65 @@ def test_an_unreadable_item_fails_without_blocking_the_queue(s: Setup) -> None:
     s.now = T0 + WINDOW
     assert s.publisher.publish_due() == 2
     assert s.store.status_of("broken") == ("failed", 1, "invalid_payload")
+
+
+def test_events_arriving_during_the_window_join_one_digest(s: Setup) -> None:
+    """SLK-07: a window, not a per-event delay. Events 30 s apart over 90 s go out together when the first is due."""
+    s.queue(4, every=timedelta(seconds=30))
+    s.now = T0 + WINDOW
+    assert s.publisher.publish_due() == 4
+    summary, *replies = s.client.posts()
+    assert "Resumen · 4 avisos" in str(summary["blocks"])
+    assert len(replies) == 4
+
+
+def test_a_missing_team_channel_moves_the_digest_to_the_default_channel(s: Setup) -> None:
+    s.queue(3)
+    s.now = T0 + WINDOW
+    s.client.fail("chat.postMessage", "not_in_channel")  # the bot was never invited to the team channel
+    assert s.publisher.publish_due() == 3
+    channels = [p["channel"] for p in s.client.posts()]
+    assert channels == [TEAM, DEFAULT, DEFAULT, DEFAULT, DEFAULT]  # the refused summary, then all in #general
+    assert {r.channel_id for r in s.store.deliveries.values()} == {DEFAULT}
+
+
+def test_an_interrupted_digest_in_the_default_channel_continues_there(s: Setup) -> None:
+    s.queue(3)
+    s.now = T0 + WINDOW
+    original = s.client.api_call
+    posts = {"n": 0}
+
+    def refuse_team_then_rate_limit(method: str, **kwargs: object) -> object:
+        if method == "chat.postMessage":
+            posts["n"] += 1
+            if posts["n"] == 1:
+                s.client.fail("chat.postMessage", "channel_not_found")
+            if posts["n"] == 4:  # summary refused, summary in #general, reply 1, then a rate limit
+                s.client.fail("chat.postMessage", "ratelimited", status=429, retry_after=60)
+        return original(method, **kwargs)
+
+    s.client.api_call = refuse_team_then_rate_limit  # type: ignore[method-assign]
+    assert s.publisher.publish_due() == 1
+    s.now += timedelta(minutes=1)
+    assert s.publisher.publish_due() == 2
+    later = s.client.posts()[4:]
+    assert {p["channel"] for p in later} == {DEFAULT}
+    assert {p["thread_ts"] for p in later} == {"1700000000.000001"}
+
+
+def test_a_single_event_falls_back_too(s: Setup) -> None:
+    s.queue(1)
+    s.now = T0 + WINDOW
+    s.client.fail("chat.postMessage", "is_archived")
+    assert s.publisher.publish_due() == 1
+    assert [p["channel"] for p in s.client.posts()] == [TEAM, DEFAULT]
+
+
+def test_without_a_default_channel_the_channel_error_fails_the_items() -> None:
+    s = Setup()
+    s.publisher.fallback_channel = None
+    s.queue(2)
+    s.now = T0 + WINDOW
+    s.client.fail("chat.postMessage", "channel_not_found")
+    assert s.publisher.publish_due() == 0
+    assert s.store.status_of("evt-00") == ("failed", 1, "channel_not_found")

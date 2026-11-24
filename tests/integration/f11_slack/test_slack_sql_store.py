@@ -25,7 +25,7 @@ def test_sql_store(slack_engine: Engine, case: Callable[[SlackStore], None]) -> 
 
 
 def test_set_digest_ts_with_nothing_does_nothing(slack_engine: Engine) -> None:
-    SqlSlackStore(slack_engine).set_digest_ts([], "1700000000.000001")
+    SqlSlackStore(slack_engine).set_digest_ts([], "1700000000.000001", "C0TEAM0001")
 
 
 def test_check_passes_for_the_slack_role_and_fails_for_a_wrong_password(

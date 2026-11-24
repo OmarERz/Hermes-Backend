@@ -115,22 +115,34 @@ def safe_link(url: Any, label: Any) -> str:
 
 
 class _Redactor:
-    """Hides the names and ids of highly classified assets in the standard copy (NOT-08)."""
+    """Hides the names and ids of highly classified assets in the standard copy (NOT-08).
+
+    Whole tokens only and without case (`srv-db` hides `SRV-DB`, never a piece of `srv-db2` or of a version); purely
+    numeric ids (iTop object keys such as `12`) are left alone in free text: alone they identify nothing and hiding
+    them would garble scores and versions. The asset list hides those assets entirely either way, and the owners of
+    those assets are left out of the ticket's owners, as they are left out of the asset list.
+    """
 
     def __init__(self, event: NotificationEvent, audience: Audience) -> None:
+        self.active = audience == "standard" and is_restricted(event)
         words: set[str] = set()
-        if audience == "standard" and is_restricted(event):
+        self._owners: set[str] = set()
+        if self.active:
             for asset in event.assets:
                 if asset.confidentiality == RESTRICTED:
-                    words.update(w for w in (asset.name.strip(), asset.ci_id.strip()) if w)
+                    words.update(w for w in (asset.name.strip(), asset.ci_id.strip()) if w and not w.isdigit())
+                    if asset.owner and asset.owner.strip():
+                        self._owners.add(asset.owner.strip().casefold())
         # Longest first, so a name that contains another one is hidden whole.
-        self._pattern = (
-            re.compile("|".join(re.escape(w) for w in sorted(words, key=len, reverse=True))) if words else None
-        )
-        self.active = self._pattern is not None
+        alternatives = "|".join(re.escape(w) for w in sorted(words, key=len, reverse=True))
+        self._pattern = re.compile(rf"(?<![\w.-])(?:{alternatives})(?![\w-])(?!\.\w)", re.IGNORECASE) if words else None
 
     def __call__(self, text: str) -> str:
         return self._pattern.sub(HIDDEN, text) if self._pattern is not None else text
+
+    def owner_hidden(self, name: str) -> bool:
+        """Whether this ticket owner owns a highly classified asset (left out of the standard copy)."""
+        return name.strip().casefold() in self._owners
 
 
 # --- blocks -----------------------------------------------------------------------------------------------------
@@ -297,7 +309,7 @@ def message(event: NotificationEvent, audience: Audience) -> Message:
         )
         pairs = [("Relevancia", relevance)]
         pairs += [
-            (label, escape(value) if value else "—")
+            (label, escape(redact(value)) if value else "—")  # mode 2 writes `relationship` and may name the CI
             for label, value in (
                 ("Actor", a.actor),
                 ("Víctima", a.victim),
@@ -308,7 +320,7 @@ def message(event: NotificationEvent, audience: Audience) -> Message:
         blocks.append(_fields(pairs))
     if event.ticket is not None:
         t = event.ticket
-        owners = ", ".join(escape(o.name) for o in t.owners) or "—"
+        owners = ", ".join(escape(o.name) for o in t.owners if not redact.owner_hidden(o.name)) or "—"
         blocks.append(
             _fields(
                 [
@@ -323,7 +335,13 @@ def message(event: NotificationEvent, audience: Audience) -> Message:
         blocks += _listing("CIs afectados", _asset_lines(event, redact), max_blocks=3)
     if redact.active:
         blocks.append(
-            _context([":lock: Hay activos ultra clasificados: el detalle completo está en el canal restringido."])
+            # The renderer does not know whether SLACK_RESTRICTED_CHANNEL is set, so the note does not promise a copy.
+            _context(
+                [
+                    ":lock: Hay activos ultra clasificados: aquí sus nombres están ocultos."
+                    " El detalle completo va al canal restringido, si está configurado."
+                ]
+            )
         )
     blocks.append(_section("*Justificación*\n" + escape(redact(event.justification))))
     if event.mitigation:

@@ -52,10 +52,11 @@ def completing_an_item_records_it_and_empties_the_queue(store: SlackStore) -> No
     items = store.due_items(CHANNEL, T0)
     assert [i.event_id for i in items] == ["evt-4", "evt-5"]  # oldest first
     assert items[0].payload == {"event_id": "evt-4", "nested": {"a": [1, 2]}}
-    store.set_digest_ts(["evt-4", "evt-5"], "1700000000.000100")
-    assert {i.digest_ts for i in store.due_items(CHANNEL, T0)} == {"1700000000.000100"}
-    store.complete_item(DeliveryRecord("evt-4", "standard", CHANNEL, "digest", "1700000000.000101", T0))
-    assert [i.event_id for i in store.due_items(CHANNEL, T0)] == ["evt-5"]
+    store.set_digest_ts(["evt-4", "evt-5"], "1700000000.000100", OTHER)  # the summary landed in OTHER (fallback)
+    assert store.due_items(CHANNEL, T0) == []
+    assert {(i.digest_ts, i.channel_id) for i in store.due_items(OTHER, T0)} == {("1700000000.000100", OTHER)}
+    store.complete_item(DeliveryRecord("evt-4", "standard", OTHER, "digest", "1700000000.000101", T0))
+    assert [i.event_id for i in store.due_items(OTHER, T0)] == ["evt-5"]
     assert store.is_known("evt-4", "standard")
 
 
@@ -92,7 +93,21 @@ def purge_removes_old_records_only(store: SlackStore) -> None:
     assert store.is_known("waiting", "standard")  # a queued item is never purged
 
 
+def a_due_channel_takes_its_whole_window_but_not_items_backing_off(store: SlackStore) -> None:
+    """SLK-07: the oldest item makes the channel due; everything queued after it joins the same digest."""
+    store.enqueue("first", CHANNEL, {"event_id": "first"}, T0, due=T0 + timedelta(seconds=120))
+    store.enqueue("later", CHANNEL, {"event_id": "later"}, T0 + timedelta(seconds=60), due=T0 + timedelta(seconds=180))
+    store.enqueue("retry", CHANNEL, {"event_id": "retry"}, T0, due=T0)
+    store.fail_item("retry", "ratelimited", T0, permanent=False)  # waits until T0 + 1 min
+    store.enqueue("elsewhere", OTHER, {"event_id": "elsewhere"}, T0, due=T0 + timedelta(seconds=150))
+    now = T0 + timedelta(seconds=120)
+    assert store.due_channels(now) == [CHANNEL]
+    assert [i.event_id for i in store.due_items(CHANNEL, now)] == ["first", "retry", "later"]
+    assert [i.event_id for i in store.due_items(CHANNEL, T0 + timedelta(seconds=30))] == ["first", "later"]
+
+
 CASES: list[Callable[[SlackStore], None]] = [
+    a_due_channel_takes_its_whole_window_but_not_items_backing_off,
     idempotency_by_event_and_audience,
     queued_events_are_known_and_never_queued_twice,
     threads_move_and_keep_their_creation_date,
