@@ -1,0 +1,29 @@
+meta {
+  name: telemetry-summary
+  type: http
+  seq: 1
+}
+
+get {
+  url: {{baseUrl}}/api/telemetry/summary?window=7d
+  body: none
+  auth: bearer
+}
+
+auth:bearer {
+  token: {{readerToken}}
+}
+
+assert {
+  res.status: eq 200
+  res.body.window: eq 7d
+  res.body.agents.length: eq 3
+  res.body.runs: isArray
+  res.body.ladder_level: gte 0
+}
+
+docs {
+  Agent telemetry of the last 7 days as a reader (IN-4, AG-1 to AG-12): one card per agent, runs by status.
+
+  operationId: get_telemetry_summary
+}

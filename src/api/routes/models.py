@@ -417,6 +417,24 @@ class Run(_Model):
     started_at: str
     finished_at: str | None
     progress: int = Field(ge=0, le=100)
+    trigger_reason: Literal["schedule", "manual", "after_scan", "formula_change"] | None = None
+    triggered_by: str | None = None
+
+
+class RunFilters(_Model):
+    """Optional filters of the run list (HI-2)."""
+
+    # The same query string also carries `cursor` and `limit`, read by other parameters.
+    model_config = ConfigDict(extra="ignore", strict=False)
+
+    kind: Literal["scan", "ingestion", "recalculation", "nightly"] | None = Field(
+        default=None, description="Tipo de corrida."
+    )
+    status: Literal["queued", "running", "succeeded", "failed"] | None = Field(
+        default=None, description="Estado de la corrida."
+    )
+    date_from: DateTimeString | None = Field(default=None, description="Started on or after (RFC 3339)")
+    date_to: DateTimeString | None = Field(default=None, description="Started on or before (RFC 3339)")
 
 
 class StixExportRequest(_Model):
@@ -545,3 +563,153 @@ class RecommendationFilters(_Model):
 
     group_id: str | None = Field(default=None, max_length=100, description="Timeline of one vulnerability group")
     ci_id: str | None = Field(default=None, max_length=100, description="Timeline of one CI (iTop id)")
+
+
+# --- agent telemetry (D-088, F18.1) ------------------------------------------------------------------------------
+AgentName = Literal["news_analyst", "cve_analyst", "judge"]
+TelemetryWindow = Literal["24h", "7d", "30d"]
+RunKindAny = Literal["scan", "ingestion", "recalculation", "nightly", "inventory_sync", "calibration"]
+ReviewStatus = Literal[
+    "applied", "suggestion", "partial_review", "judge_disagreement", "no_judge_review", "rejected", "queued"
+]
+
+
+class RunCounts(_Model):
+    kind: RunKindAny
+    queued: int
+    running: int
+    succeeded: int
+    failed: int
+
+
+class AgentTelemetry(_Model):
+    agent: AgentName
+    reviews: int
+    by_status: dict[str, int]
+    success_percent: str | None
+    latency_avg_ms: int | None
+    latency_p95_ms: int | None
+    tokens_input: int
+    tokens_output: int
+    cost_usd: str
+    provider: Literal["deepseek", "claude-code"]
+    model: str
+    last_model: str | None
+    spend_today_usd: str
+    active: bool
+    ladder_level: int | None
+
+
+class ReasonUsage(_Model):
+    code: str
+    label: str
+    accepted: int
+    rejected: int
+
+
+class TelemetrySummary(_Model):
+    window: TelemetryWindow
+    since: str
+    generated_at: str
+    runs: list[RunCounts]
+    runs_queued: int
+    runs_running: int
+    runs_succeeded: int
+    runs_failed: int
+    run_success_percent: str | None
+    agents: list[AgentTelemetry]
+    top_reasons: list[ReasonUsage]
+    daily_budget_usd: str
+    spend_today_usd: str
+    ladder_level: int = Field(ge=0, le=3)
+    ladder_label: str
+
+
+class AgentDay(_Model):
+    agent: AgentName
+    reviews: int
+    success_percent: str | None
+    latency_avg_ms: int | None
+    cost_usd: str
+
+
+class TelemetryDay(_Model):
+    date: str
+    runs_succeeded: int
+    runs_failed: int
+    agents: list[AgentDay]
+
+
+class TelemetryDaily(_Model):
+    days: int
+    series: list[TelemetryDay]
+
+
+class LlmReviewFilters(_Model):
+    """Optional filters of the LLM review log."""
+
+    # The same query string also carries `cursor` and `limit`, read by other parameters.
+    model_config = ConfigDict(extra="ignore", strict=False)
+
+    agent: AgentName | None = None
+    status: ReviewStatus | None = Field(default=None, description="Estado de la revisión.")
+    date_from: DateTimeString | None = Field(default=None, description="On or after (RFC 3339)")
+    date_to: DateTimeString | None = Field(default=None, description="On or before (RFC 3339)")
+
+
+class LlmReviewEntry(_Model):
+    id: str
+    created_at: str
+    agent: AgentName
+    mode: str | None
+    model: str
+    status: ReviewStatus
+    attempts: int
+    latency_ms: int
+    tokens_input: int
+    tokens_cached: int
+    tokens_output: int
+    tokens_reasoning: int
+    cost_usd: str
+    ladder_level: int
+    second_review: bool
+    assessment_id: str | None
+    reasons_accepted: int
+    reasons_rejected: int
+
+
+# --- history timeline (D-088, F18.1) ------------------------------------------------------------------------------
+HistoryType = Literal["run", "llm_review", "config_change"]
+
+
+class HistoryFilters(_Model):
+    """Optional filters of the history timeline (HI-2)."""
+
+    # The same query string also carries `cursor` and `limit`, read by other parameters.
+    model_config = ConfigDict(extra="ignore", strict=False)
+
+    type: HistoryType | None = Field(default=None, description="Tipo de evento.")
+    status: str | None = Field(
+        default=None,
+        max_length=30,
+        pattern=r"^[a-z_]{1,30}$",
+        description="Estado final exacto: el de la corrida (`succeeded`, `failed`…) o el de la revisión "
+        "(`applied`, `no_judge_review`…); los cambios de configuración tienen `applied`.",
+    )
+    date_from: DateTimeString | None = Field(default=None, description="On or after (RFC 3339)")
+    date_to: DateTimeString | None = Field(default=None, description="On or before (RFC 3339)")
+
+
+class HistoryEvent(_Model):
+    id: str
+    type: HistoryType
+    at: str
+    title: str
+    status: str
+    actor: str
+    trigger: Literal["schedule", "manual", "after_scan", "formula_change"] | None
+    run_kind: RunKindAny | None
+    agent: AgentName | None
+    assessment_id: str | None
+    config_version: int | None
+    duration_seconds: int | None

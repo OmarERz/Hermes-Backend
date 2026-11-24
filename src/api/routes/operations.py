@@ -8,7 +8,7 @@ from collections.abc import Iterator
 from datetime import UTC, datetime
 from typing import Annotated, Literal
 
-from fastapi import APIRouter
+from fastapi import APIRouter, Query
 from fastapi.responses import StreamingResponse
 from sqlalchemy import select
 
@@ -28,6 +28,7 @@ from api.routes.models import (
     MetricsDashboard,
     NotificationEventRow,
     Run,
+    RunFilters,
     ScanRequest,
     StixBundle,
     StixExportRequest,
@@ -60,10 +61,11 @@ def launch_scan(_request: ScanRequest, runs: Runs, user: CurrentUserDep) -> Run:
 
 
 @router.get("/api/runs", dependencies=[guard("GET", "/api/runs")], responses=PAGINATED_RESPONSES)
-def list_runs(params: PageQuery, signer: Signer, runs: Runs) -> Page[Run]:
-    """Scans, news runs and recalculations: those not started yet first, then the newest (ARQ-04)."""
+def list_runs(params: PageQuery, signer: Signer, runs: Runs, filters: Annotated[RunFilters, Query()]) -> Page[Run]:
+    """Scans, news runs and recalculations: those not started yet first, then the newest (ARQ-04). Optional filters
+    by kind, status and start date (HI-2); each run says why and by whom it was launched (HI-10)."""
     key = decode_key(params, "runs", ("int", "time", "str"))
-    items, next_key = runs.page(None if key is None else (key[0], key[1], key[2]), params.limit)
+    items, next_key = runs.page(None if key is None else (key[0], key[1], key[2]), params.limit, filters)
     return Page[Run](items=items, next_cursor=encode_key(signer, "runs", next_key))
 
 

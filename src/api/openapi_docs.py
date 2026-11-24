@@ -51,6 +51,12 @@ TAGS: Final = (
     ("stix", "Exportación STIX", "Exportación de hallazgos como bundle STIX 2.1."),
     ("calibration", "Calibración", "Propuestas de ajuste supervisadas por un administrador."),
     ("operations", "Operación", "Métricas, eventos de notificación, conexiones, instalación y auditoría."),
+    (
+        "telemetry",
+        "Telemetría de agentes",
+        "Corridas y revisiones de los agentes de IA (analistas y juez): resúmenes, series diarias y bitácora. "
+        "Solo metadatos; nunca prompts, llamadas crudas ni texto de noticias.",
+    ),
     ("admin", "Administración", "Gestión de roles de usuario."),
     ("itop", "iTop", "Webhook que iTop llama cuando cambia un ticket."),
 )
@@ -261,7 +267,8 @@ OPERATIONS: Final[dict[tuple[str, str], Op]] = {
         "list_runs",
         "runs",
         "Listar corridas",
-        "Corridas de escaneo, ingesta, recálculo y nocturnas, las más recientes primero.",
+        "Corridas de escaneo, ingesta, recálculo y nocturnas, las más recientes primero. Filtros opcionales por "
+        "tipo, estado y fecha de inicio; cada corrida dice por qué se lanzó y quién la lanzó.",
     ),
     ("GET", "/api/runs/{id}/events"): Op(
         "stream_run_events",
@@ -342,6 +349,38 @@ OPERATIONS: Final[dict[tuple[str, str], Op]] = {
         "Webhook de iTop",
         "iTop avisa que un ticket cambió. Usa su propio token Bearer (no el de Firebase); responde 202.",
     ),
+    ("GET", "/api/telemetry/summary"): Op(
+        "get_telemetry_summary",
+        "telemetry",
+        "Resumen de telemetría",
+        "Corridas por estado y tipo, una tarjeta por agente (revisiones, éxito, latencia promedio y p95, tokens, "
+        "costo, proveedor y modelo, gasto del día contra el presupuesto, nivel de la escalera del juez) y los "
+        "motivos del juez más usados, en la ventana pedida. Rol mínimo: `reader`.",
+    ),
+    ("GET", "/api/telemetry/daily"): Op(
+        "get_telemetry_daily",
+        "telemetry",
+        "Series diarias de telemetría",
+        "Un punto por día UTC, del más antiguo a hoy, con ceros en los días sin actividad: corridas terminadas "
+        "bien y con error, y por agente revisiones, % de éxito, latencia promedio y costo. Rol mínimo: `reader`.",
+    ),
+    ("GET", "/api/telemetry/reviews"): Op(
+        "list_llm_reviews",
+        "telemetry",
+        "Bitácora de revisiones de IA",
+        "Cada interacción con un LLM, de la más reciente a la más antigua: agente, modo, modelo, estado, intentos, "
+        "latencia, tokens, costo y la evaluación ligada. Solo metadatos (X-2). Pagina por cursor. "
+        "Rol mínimo: `reader`.",
+    ),
+    ("GET", "/api/history"): Op(
+        "list_history",
+        "runs",
+        "Historial de eventos",
+        "Una sola línea de tiempo con las corridas, las revisiones de IA y los cambios de configuración, del más "
+        "reciente al más antiguo. Cada revisión trae la evaluación que alimentó (para ligar su feedback) y cada "
+        "cambio de configuración su versión y su autor. La auditoría completa sigue siendo solo de `admin` "
+        "(`GET /api/audit`). Filtros por tipo, estado y fechas. Pagina por cursor. Rol mínimo: `reader`.",
+    ),
 }
 
 PARAMS: Final[dict[str, str]] = {
@@ -364,6 +403,10 @@ PARAMS: Final[dict[str, str]] = {
     "status": "Estado del hallazgo.",
     "urgency": "Urgencia del ticket: 1 (crítica) a 4 (baja).",
     "view": "Vista agrupada: `vulnerability`, `criticality` o `asset`.",
+    "window": "Ventana del resumen: últimas 24 horas, 7 días o 30 días.",
+    "days": "Cuántos días hacia atrás, hoy incluido (1 a 90).",
+    "agent": "Agente de IA.",
+    "type": "Tipo de evento.",
 }
 
 ENUMS: Final[dict[tuple[str, ...], dict[str, str]]] = {
@@ -474,6 +517,49 @@ ENUMS: Final[dict[tuple[str, ...], dict[str, str]]] = {
         "analyst": "Lee, da feedback, lanza escaneos y exporta",
         "admin": "Además configura el sistema y administra usuarios",
     },
+    ("news_analyst", "cve_analyst", "judge"): {
+        "news_analyst": "Analista de noticias",
+        "cve_analyst": "Analista de CVE",
+        "judge": "Juez",
+    },
+    ("24h", "7d", "30d"): {"24h": "Últimas 24 horas", "7d": "Últimos 7 días", "30d": "Últimos 30 días"},
+    ("scan", "ingestion", "recalculation", "nightly", "inventory_sync", "calibration"): {
+        "scan": "Escaneo simulado de vulnerabilidades",
+        "ingestion": "Ingesta y análisis de noticias",
+        "recalculation": "Recálculo por un cambio de fórmula, sin juez",
+        "nightly": "Recálculo nocturno por el paso del tiempo",
+        "inventory_sync": "Sincronización del inventario con iTop",
+        "calibration": "Calibración semanal (modo 4)",
+    },
+    (
+        "applied",
+        "suggestion",
+        "partial_review",
+        "judge_disagreement",
+        "no_judge_review",
+        "rejected",
+        "queued",
+    ): {
+        "applied": "Aplicada: su ajuste llegó a la puntuación",
+        "suggestion": "Solo sugerencia (ticket que cambió una persona)",
+        "partial_review": "Revisión parcial: se aplicó lo validado",
+        "judge_disagreement": "Desacuerdo en la doble revisión: final = base",
+        "no_judge_review": "Sin juez (respaldo): final = base",
+        "rejected": "Rechazada por la validación",
+        "queued": "En cola para la siguiente corrida",
+    },
+    ("run", "llm_review", "config_change"): {
+        "run": "Corrida (escaneo, noticias, recálculo, sincronización o calibración)",
+        "llm_review": "Revisión de un agente de IA",
+        "config_change": "Cambio de configuración",
+    },
+    ("schedule", "manual", "after_scan", "formula_change"): {
+        "schedule": "Por la agenda",
+        "manual": "Lanzada por una persona",
+        "after_scan": "Después de un escaneo",
+        "formula_change": "Por un cambio de fórmula",
+    },
+    ("deepseek", "claude-code"): {"deepseek": "API de DeepSeek", "claude-code": "Claude por la CLI de Claude Code"},
     ("decimal", "integer", "boolean", "string", "enum"): {
         "decimal": "Número decimal (como texto)",
         "integer": "Número entero",
@@ -645,6 +731,48 @@ FIELDS: Final[dict[str, str]] = {
     "without_custodian": "Activos sin equipo custodio.",
     "without_exposure": "Activos sin dato de exposición.",
     "without_owner": "Activos sin responsable.",
+    # F18.1 (D-088): telemetry, inventory, tickets, history, judge detail, users and the error queue.
+    "accepted": "Veces que se aceptó.",
+    "agent": "Agente de IA: analista de noticias, analista de CVE o juez.",
+    "agents": "Una entrada por agente de IA.",
+    "by_status": "Cantidad por estado: estado -> cantidad.",
+    "cost_usd": "Costo en dólares (USD), como texto.",
+    "days": "Días de la serie.",
+    "last_model": "Modelo de la última revisión guardada de ese agente, si hubo.",
+    "latency_avg_ms": "Latencia promedio de una llamada al LLM, en milisegundos.",
+    "latency_p95_ms": "Latencia p95 de una llamada al LLM, en milisegundos.",
+    "ladder_label": "Nombre del nivel de la escalera del juez.",
+    "ladder_level": "Nivel de la escalera del juez: 0 normal, 1 vigilado, 2 cauteloso, 3 apagado.",
+    "mode": "Modo del agente (por ejemplo `scoring` o `dismissals`).",
+    "model": "Modelo de IA.",
+    "provider": "Proveedor del LLM.",
+    "reasons_accepted": "Motivos del juez aceptados en esta revisión.",
+    "reasons_rejected": "Motivos del juez rechazados en esta revisión.",
+    "rejected": "Veces que se rechazó.",
+    "reviews": "Revisiones de IA.",
+    "runs": "Corridas por tipo y estado.",
+    "runs_failed": "Corridas que terminaron con error.",
+    "runs_queued": "Corridas en cola.",
+    "runs_running": "Corridas en ejecución.",
+    "runs_succeeded": "Corridas que terminaron bien.",
+    "run_success_percent": "Corridas terminadas bien sobre las terminadas, en %, como texto; nulo sin corridas.",
+    "second_review": "Si es la segunda revisión ciega de una doble revisión.",
+    "series": "Un punto por día, del más antiguo al más reciente.",
+    "since": "Inicio de la ventana (UTC).",
+    "spend_today_usd": "Gasto de LLM de hoy (UTC) en dólares, como texto.",
+    "daily_budget_usd": "Presupuesto diario de LLM en dólares, como texto.",
+    "success_percent": "Revisiones válidas sobre las terminadas, en %, como texto; nulo sin revisiones.",
+    "tokens_cached": "Tokens de entrada leídos de la caché.",
+    "tokens_input": "Tokens de entrada.",
+    "tokens_output": "Tokens de salida.",
+    "tokens_reasoning": "Tokens de razonamiento.",
+    "top_reasons": "Motivos del juez más usados en la ventana, con cuántas veces se aceptaron y rechazaron.",
+    "window": "Ventana del resumen.",
+    "at": "Cuándo ocurrió (UTC).",
+    "config_version": "Versión de la configuración que creó el cambio.",
+    "duration_seconds": "Duración en segundos; nula si no terminó.",
+    "run_kind": "Tipo de corrida, si el evento es una corrida.",
+    "trigger": "Por qué se lanzó la corrida.",
 }
 OVERRIDES: Final[dict[str, str]] = {
     "Alert.id": "Id de la alerta.",
@@ -728,7 +856,37 @@ OVERRIDES: Final[dict[str, str]] = {
     "RoleAssignment.role": "Rol que se asigna.",
     "RoleAssigned.role": "Rol asignado.",
     "WebhookAccepted.status": "Siempre `accepted`.",
+    "Run.trigger_reason": "Por qué se lanzó la corrida.",
+    "Run.triggered_by": "Nombre de quien la lanzó; nulo si la lanzó la agenda.",
+    "HistoryEvent.id": "Id del evento (el de la corrida, la revisión o el registro del cambio).",
+    "HistoryEvent.type": "Tipo de evento.",
+    "HistoryEvent.status": "Estado final: el de la corrida, el de la revisión o `applied` en un cambio.",
+    "HistoryEvent.actor": "Quién: la persona que lanzó o cambió, el agente de IA o `sistema`.",
+    "HistoryEvent.assessment_id": "Evaluación que alimentó la revisión; con ella se lee su feedback.",
+    "HistoryEvent.title": "Título del evento, en español.",
     "SimulationResult.last_30_days_effect": "Resumen del impacto sobre los hallazgos abiertos de hoy, en español.",
+    "AgentTelemetry.active": "Si el agente puede trabajar: queda presupuesto hoy y, para el juez, la escalera no "
+    "lo apagó.",
+    "AgentTelemetry.model": "Modelo configurado para el agente con el proveedor vigente.",
+    "AgentTelemetry.reviews": "Revisiones del agente en la ventana.",
+    "AgentDay.reviews": "Revisiones del agente ese día.",
+    "LlmReviewEntry.id": "Id de la revisión.",
+    "LlmReviewEntry.status": "Resultado de la revisión.",
+    "LlmReviewEntry.attempts": "Intentos (reintentos de formato incluidos).",
+    "LlmReviewEntry.latency_ms": "Latencia total de la revisión, en milisegundos.",
+    "LlmReviewEntry.ladder_level": "Nivel de la escalera del juez cuando se hizo la revisión.",
+    "LlmReviewEntry.assessment_id": "Evaluación que usó esta revisión, si la hay.",
+    "ReasonUsage.code": "Código del motivo, por ejemplo `mass_exploitation`.",
+    "ReasonUsage.label": "Descripción del motivo, en español.",
+    "RunCounts.kind": "Tipo de corrida.",
+    "RunCounts.queued": "En cola.",
+    "RunCounts.running": "En ejecución.",
+    "RunCounts.succeeded": "Terminadas bien.",
+    "RunCounts.failed": "Terminadas con error (o canceladas).",
+    "TelemetryDay.date": "Día (UTC), `AAAA-MM-DD`.",
+    "TelemetryDay.agents": "Revisiones del día por agente.",
+    "TelemetrySummary.generated_at": "Cuándo se calculó el resumen (UTC).",
+    "TelemetrySummary.ladder_level": "Nivel vigente de la escalera del juez (0 a 3).",
 }
 
 EXAMPLES: Final[dict[str, list[dict[str, Any]]]] = {
@@ -862,6 +1020,44 @@ EXAMPLES: Final[dict[str, list[dict[str, Any]]]] = {
     "ConnectionTestRequest": [{"names": ["itop", "nvd"]}],
     "SetupStepUpdate": [{"done": True, "skipped": False}],
     "RoleAssignment": [{"role": "analyst"}],
+    "LlmReviewEntry": [
+        {
+            "id": "0192f3a8-4f50-7162-8d7e-8f9a0b1c2d3e",
+            "created_at": "2026-11-23T10:34:12Z",
+            "agent": "judge",
+            "mode": "scoring",
+            "model": "deepseek-v4-pro",
+            "status": "applied",
+            "attempts": 1,
+            "latency_ms": 9800,
+            "tokens_input": 14200,
+            "tokens_cached": 9000,
+            "tokens_output": 820,
+            "tokens_reasoning": 0,
+            "cost_usd": "0.004120",
+            "ladder_level": 0,
+            "second_review": False,
+            "assessment_id": "0192f3a4-7b1e-7c2d-8a5f-3e4d5c6b7a89",
+            "reasons_accepted": 2,
+            "reasons_rejected": 1,
+        }
+    ],
+    "HistoryEvent": [
+        {
+            "id": "0192f3a6-2d3e-7f40-8b5c-6d7e8f9a0b1c",
+            "type": "run",
+            "at": "2026-11-23T10:30:00Z",
+            "title": "Escaneo simulado",
+            "status": "succeeded",
+            "actor": "Ana Analista",
+            "trigger": "manual",
+            "run_kind": "scan",
+            "agent": None,
+            "assessment_id": None,
+            "config_version": None,
+            "duration_seconds": 412,
+        }
+    ],
 }
 
 

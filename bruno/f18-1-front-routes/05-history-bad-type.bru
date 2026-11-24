@@ -1,0 +1,26 @@
+meta {
+  name: history-bad-type
+  type: http
+  seq: 5
+}
+
+get {
+  url: {{baseUrl}}/api/history?type=ticket
+  body: none
+  auth: bearer
+}
+
+auth:bearer {
+  token: {{token}}
+}
+
+assert {
+  res.status: eq 422
+  res.body.error.code: eq validation_error
+}
+
+docs {
+  An unknown event type is refused with the error envelope.
+
+  operationId: list_history
+}

@@ -123,6 +123,210 @@
         "title": "AffectedAsset",
         "type": "object"
       },
+      "AgentDay": {
+        "additionalProperties": false,
+        "properties": {
+          "agent": {
+            "description": "Agente de IA: analista de noticias, analista de CVE o juez. Valores: `news_analyst`: Analista de noticias; `cve_analyst`: Analista de CVE; `judge`: Juez.",
+            "enum": [
+              "news_analyst",
+              "cve_analyst",
+              "judge"
+            ],
+            "title": "Agent",
+            "type": "string"
+          },
+          "cost_usd": {
+            "description": "Costo en dólares (USD), como texto.",
+            "title": "Cost Usd",
+            "type": "string"
+          },
+          "latency_avg_ms": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Latencia promedio de una llamada al LLM, en milisegundos.",
+            "title": "Latency Avg Ms"
+          },
+          "reviews": {
+            "description": "Revisiones del agente ese día.",
+            "title": "Reviews",
+            "type": "integer"
+          },
+          "success_percent": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Revisiones válidas sobre las terminadas, en %, como texto; nulo sin revisiones.",
+            "title": "Success Percent"
+          }
+        },
+        "required": [
+          "agent",
+          "reviews",
+          "success_percent",
+          "latency_avg_ms",
+          "cost_usd"
+        ],
+        "title": "AgentDay",
+        "type": "object"
+      },
+      "AgentTelemetry": {
+        "additionalProperties": false,
+        "properties": {
+          "active": {
+            "description": "Si el agente puede trabajar: queda presupuesto hoy y, para el juez, la escalera no lo apagó.",
+            "title": "Active",
+            "type": "boolean"
+          },
+          "agent": {
+            "description": "Agente de IA: analista de noticias, analista de CVE o juez. Valores: `news_analyst`: Analista de noticias; `cve_analyst`: Analista de CVE; `judge`: Juez.",
+            "enum": [
+              "news_analyst",
+              "cve_analyst",
+              "judge"
+            ],
+            "title": "Agent",
+            "type": "string"
+          },
+          "by_status": {
+            "additionalProperties": {
+              "type": "integer"
+            },
+            "description": "Cantidad por estado: estado -> cantidad.",
+            "title": "By Status",
+            "type": "object"
+          },
+          "cost_usd": {
+            "description": "Costo en dólares (USD), como texto.",
+            "title": "Cost Usd",
+            "type": "string"
+          },
+          "ladder_level": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Nivel de la escalera del juez: 0 normal, 1 vigilado, 2 cauteloso, 3 apagado.",
+            "title": "Ladder Level"
+          },
+          "last_model": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Modelo de la última revisión guardada de ese agente, si hubo.",
+            "title": "Last Model"
+          },
+          "latency_avg_ms": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Latencia promedio de una llamada al LLM, en milisegundos.",
+            "title": "Latency Avg Ms"
+          },
+          "latency_p95_ms": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Latencia p95 de una llamada al LLM, en milisegundos.",
+            "title": "Latency P95 Ms"
+          },
+          "model": {
+            "description": "Modelo configurado para el agente con el proveedor vigente.",
+            "title": "Model",
+            "type": "string"
+          },
+          "provider": {
+            "description": "Proveedor del LLM. Valores: `deepseek`: API de DeepSeek; `claude-code`: Claude por la CLI de Claude Code.",
+            "enum": [
+              "deepseek",
+              "claude-code"
+            ],
+            "title": "Provider",
+            "type": "string"
+          },
+          "reviews": {
+            "description": "Revisiones del agente en la ventana.",
+            "title": "Reviews",
+            "type": "integer"
+          },
+          "spend_today_usd": {
+            "description": "Gasto de LLM de hoy (UTC) en dólares, como texto.",
+            "title": "Spend Today Usd",
+            "type": "string"
+          },
+          "success_percent": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Revisiones válidas sobre las terminadas, en %, como texto; nulo sin revisiones.",
+            "title": "Success Percent"
+          },
+          "tokens_input": {
+            "description": "Tokens de entrada.",
+            "title": "Tokens Input",
+            "type": "integer"
+          },
+          "tokens_output": {
+            "description": "Tokens de salida.",
+            "title": "Tokens Output",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "agent",
+          "reviews",
+          "by_status",
+          "success_percent",
+          "latency_avg_ms",
+          "latency_p95_ms",
+          "tokens_input",
+          "tokens_output",
+          "cost_usd",
+          "provider",
+          "model",
+          "last_model",
+          "spend_today_usd",
+          "active",
+          "ladder_level"
+        ],
+        "title": "AgentTelemetry",
+        "type": "object"
+      },
       "Alert": {
         "additionalProperties": false,
         "examples": [
@@ -1551,6 +1755,169 @@
         "title": "FeedbackResult",
         "type": "object"
       },
+      "HistoryEvent": {
+        "additionalProperties": false,
+        "examples": [
+          {
+            "actor": "Ana Analista",
+            "agent": null,
+            "assessment_id": null,
+            "at": "2026-11-23T10:30:00Z",
+            "config_version": null,
+            "duration_seconds": 412,
+            "id": "0192f3a6-2d3e-7f40-8b5c-6d7e8f9a0b1c",
+            "run_kind": "scan",
+            "status": "succeeded",
+            "title": "Escaneo simulado",
+            "trigger": "manual",
+            "type": "run"
+          }
+        ],
+        "properties": {
+          "actor": {
+            "description": "Quién: la persona que lanzó o cambió, el agente de IA o `sistema`.",
+            "title": "Actor",
+            "type": "string"
+          },
+          "agent": {
+            "anyOf": [
+              {
+                "enum": [
+                  "news_analyst",
+                  "cve_analyst",
+                  "judge"
+                ],
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Agente de IA: analista de noticias, analista de CVE o juez. Valores: `news_analyst`: Analista de noticias; `cve_analyst`: Analista de CVE; `judge`: Juez.",
+            "title": "Agent"
+          },
+          "assessment_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Evaluación que alimentó la revisión; con ella se lee su feedback.",
+            "title": "Assessment Id"
+          },
+          "at": {
+            "description": "Cuándo ocurrió (UTC).",
+            "title": "At",
+            "type": "string"
+          },
+          "config_version": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Versión de la configuración que creó el cambio.",
+            "title": "Config Version"
+          },
+          "duration_seconds": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Duración en segundos; nula si no terminó.",
+            "title": "Duration Seconds"
+          },
+          "id": {
+            "description": "Id del evento (el de la corrida, la revisión o el registro del cambio).",
+            "title": "Id",
+            "type": "string"
+          },
+          "run_kind": {
+            "anyOf": [
+              {
+                "enum": [
+                  "scan",
+                  "ingestion",
+                  "recalculation",
+                  "nightly",
+                  "inventory_sync",
+                  "calibration"
+                ],
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Tipo de corrida, si el evento es una corrida. Valores: `scan`: Escaneo simulado de vulnerabilidades; `ingestion`: Ingesta y análisis de noticias; `recalculation`: Recálculo por un cambio de fórmula, sin juez; `nightly`: Recálculo nocturno por el paso del tiempo; `inventory_sync`: Sincronización del inventario con iTop; `calibration`: Calibración semanal (modo 4).",
+            "title": "Run Kind"
+          },
+          "status": {
+            "description": "Estado final: el de la corrida, el de la revisión o `applied` en un cambio.",
+            "title": "Status",
+            "type": "string"
+          },
+          "title": {
+            "description": "Título del evento, en español.",
+            "title": "Title",
+            "type": "string"
+          },
+          "trigger": {
+            "anyOf": [
+              {
+                "enum": [
+                  "schedule",
+                  "manual",
+                  "after_scan",
+                  "formula_change"
+                ],
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Por qué se lanzó la corrida. Valores: `schedule`: Por la agenda; `manual`: Lanzada por una persona; `after_scan`: Después de un escaneo; `formula_change`: Por un cambio de fórmula.",
+            "title": "Trigger"
+          },
+          "type": {
+            "description": "Tipo de evento. Valores: `run`: Corrida (escaneo, noticias, recálculo, sincronización o calibración); `llm_review`: Revisión de un agente de IA; `config_change`: Cambio de configuración.",
+            "enum": [
+              "run",
+              "llm_review",
+              "config_change"
+            ],
+            "title": "Type",
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "type",
+          "at",
+          "title",
+          "status",
+          "actor",
+          "trigger",
+          "run_kind",
+          "agent",
+          "assessment_id",
+          "config_version",
+          "duration_seconds"
+        ],
+        "title": "HistoryEvent",
+        "type": "object"
+      },
       "InventoryItem": {
         "additionalProperties": false,
         "properties": {
@@ -1676,6 +2043,173 @@
           "id"
         ],
         "title": "ItopWebhookCall",
+        "type": "object"
+      },
+      "LlmReviewEntry": {
+        "additionalProperties": false,
+        "examples": [
+          {
+            "agent": "judge",
+            "assessment_id": "0192f3a4-7b1e-7c2d-8a5f-3e4d5c6b7a89",
+            "attempts": 1,
+            "cost_usd": "0.004120",
+            "created_at": "2026-11-23T10:34:12Z",
+            "id": "0192f3a8-4f50-7162-8d7e-8f9a0b1c2d3e",
+            "ladder_level": 0,
+            "latency_ms": 9800,
+            "mode": "scoring",
+            "model": "deepseek-v4-pro",
+            "reasons_accepted": 2,
+            "reasons_rejected": 1,
+            "second_review": false,
+            "status": "applied",
+            "tokens_cached": 9000,
+            "tokens_input": 14200,
+            "tokens_output": 820,
+            "tokens_reasoning": 0
+          }
+        ],
+        "properties": {
+          "agent": {
+            "description": "Agente de IA: analista de noticias, analista de CVE o juez. Valores: `news_analyst`: Analista de noticias; `cve_analyst`: Analista de CVE; `judge`: Juez.",
+            "enum": [
+              "news_analyst",
+              "cve_analyst",
+              "judge"
+            ],
+            "title": "Agent",
+            "type": "string"
+          },
+          "assessment_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Evaluación que usó esta revisión, si la hay.",
+            "title": "Assessment Id"
+          },
+          "attempts": {
+            "description": "Intentos (reintentos de formato incluidos).",
+            "title": "Attempts",
+            "type": "integer"
+          },
+          "cost_usd": {
+            "description": "Costo en dólares (USD), como texto.",
+            "title": "Cost Usd",
+            "type": "string"
+          },
+          "created_at": {
+            "description": "Fecha y hora de creación (UTC).",
+            "title": "Created At",
+            "type": "string"
+          },
+          "id": {
+            "description": "Id de la revisión.",
+            "title": "Id",
+            "type": "string"
+          },
+          "ladder_level": {
+            "description": "Nivel de la escalera del juez cuando se hizo la revisión.",
+            "title": "Ladder Level",
+            "type": "integer"
+          },
+          "latency_ms": {
+            "description": "Latencia total de la revisión, en milisegundos.",
+            "title": "Latency Ms",
+            "type": "integer"
+          },
+          "mode": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Modo del agente (por ejemplo `scoring` o `dismissals`).",
+            "title": "Mode"
+          },
+          "model": {
+            "description": "Modelo de IA.",
+            "title": "Model",
+            "type": "string"
+          },
+          "reasons_accepted": {
+            "description": "Motivos del juez aceptados en esta revisión.",
+            "title": "Reasons Accepted",
+            "type": "integer"
+          },
+          "reasons_rejected": {
+            "description": "Motivos del juez rechazados en esta revisión.",
+            "title": "Reasons Rejected",
+            "type": "integer"
+          },
+          "second_review": {
+            "description": "Si es la segunda revisión ciega de una doble revisión.",
+            "title": "Second Review",
+            "type": "boolean"
+          },
+          "status": {
+            "description": "Resultado de la revisión. Valores: `applied`: Aplicada: su ajuste llegó a la puntuación; `suggestion`: Solo sugerencia (ticket que cambió una persona); `partial_review`: Revisión parcial: se aplicó lo validado; `judge_disagreement`: Desacuerdo en la doble revisión: final = base; `no_judge_review`: Sin juez (respaldo): final = base; `rejected`: Rechazada por la validación; `queued`: En cola para la siguiente corrida.",
+            "enum": [
+              "applied",
+              "suggestion",
+              "partial_review",
+              "judge_disagreement",
+              "no_judge_review",
+              "rejected",
+              "queued"
+            ],
+            "title": "Status",
+            "type": "string"
+          },
+          "tokens_cached": {
+            "description": "Tokens de entrada leídos de la caché.",
+            "title": "Tokens Cached",
+            "type": "integer"
+          },
+          "tokens_input": {
+            "description": "Tokens de entrada.",
+            "title": "Tokens Input",
+            "type": "integer"
+          },
+          "tokens_output": {
+            "description": "Tokens de salida.",
+            "title": "Tokens Output",
+            "type": "integer"
+          },
+          "tokens_reasoning": {
+            "description": "Tokens de razonamiento.",
+            "title": "Tokens Reasoning",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "id",
+          "created_at",
+          "agent",
+          "mode",
+          "model",
+          "status",
+          "attempts",
+          "latency_ms",
+          "tokens_input",
+          "tokens_cached",
+          "tokens_output",
+          "tokens_reasoning",
+          "cost_usd",
+          "ladder_level",
+          "second_review",
+          "assessment_id",
+          "reasons_accepted",
+          "reasons_rejected"
+        ],
+        "title": "LlmReviewEntry",
         "type": "object"
       },
       "Mapping": {
@@ -1991,6 +2525,64 @@
           "items"
         ],
         "title": "Page[ConfigVersion]",
+        "type": "object"
+      },
+      "Page_HistoryEvent_": {
+        "properties": {
+          "items": {
+            "description": "Elementos de la página.",
+            "items": {
+              "$ref": "#/components/schemas/HistoryEvent"
+            },
+            "title": "Items",
+            "type": "array"
+          },
+          "next_cursor": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Opaque cursor for the next page; null if none",
+            "title": "Next Cursor"
+          }
+        },
+        "required": [
+          "items"
+        ],
+        "title": "Page[HistoryEvent]",
+        "type": "object"
+      },
+      "Page_LlmReviewEntry_": {
+        "properties": {
+          "items": {
+            "description": "Elementos de la página.",
+            "items": {
+              "$ref": "#/components/schemas/LlmReviewEntry"
+            },
+            "title": "Items",
+            "type": "array"
+          },
+          "next_cursor": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Opaque cursor for the next page; null if none",
+            "title": "Next Cursor"
+          }
+        },
+        "required": [
+          "items"
+        ],
+        "title": "Page[LlmReviewEntry]",
         "type": "object"
       },
       "Page_NotificationEventRow_": {
@@ -2356,6 +2948,39 @@
         "title": "ProfileUpdate",
         "type": "object"
       },
+      "ReasonUsage": {
+        "additionalProperties": false,
+        "properties": {
+          "accepted": {
+            "description": "Veces que se aceptó.",
+            "title": "Accepted",
+            "type": "integer"
+          },
+          "code": {
+            "description": "Código del motivo, por ejemplo `mass_exploitation`.",
+            "title": "Code",
+            "type": "string"
+          },
+          "label": {
+            "description": "Descripción del motivo, en español.",
+            "title": "Label",
+            "type": "string"
+          },
+          "rejected": {
+            "description": "Veces que se rechazó.",
+            "title": "Rejected",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "code",
+          "label",
+          "accepted",
+          "rejected"
+        ],
+        "title": "ReasonUsage",
+        "type": "object"
+      },
       "Recommendation": {
         "additionalProperties": false,
         "examples": [
@@ -2684,6 +3309,36 @@
             ],
             "title": "Status",
             "type": "string"
+          },
+          "trigger_reason": {
+            "anyOf": [
+              {
+                "enum": [
+                  "schedule",
+                  "manual",
+                  "after_scan",
+                  "formula_change"
+                ],
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Por qué se lanzó la corrida. Valores: `schedule`: Por la agenda; `manual`: Lanzada por una persona; `after_scan`: Después de un escaneo; `formula_change`: Por un cambio de fórmula.",
+            "title": "Trigger Reason"
+          },
+          "triggered_by": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Nombre de quien la lanzó; nulo si la lanzó la agenda.",
+            "title": "Triggered By"
           }
         },
         "required": [
@@ -2695,6 +3350,53 @@
           "progress"
         ],
         "title": "Run",
+        "type": "object"
+      },
+      "RunCounts": {
+        "additionalProperties": false,
+        "properties": {
+          "failed": {
+            "description": "Terminadas con error (o canceladas).",
+            "title": "Failed",
+            "type": "integer"
+          },
+          "kind": {
+            "description": "Tipo de corrida. Valores: `scan`: Escaneo simulado de vulnerabilidades; `ingestion`: Ingesta y análisis de noticias; `recalculation`: Recálculo por un cambio de fórmula, sin juez; `nightly`: Recálculo nocturno por el paso del tiempo; `inventory_sync`: Sincronización del inventario con iTop; `calibration`: Calibración semanal (modo 4).",
+            "enum": [
+              "scan",
+              "ingestion",
+              "recalculation",
+              "nightly",
+              "inventory_sync",
+              "calibration"
+            ],
+            "title": "Kind",
+            "type": "string"
+          },
+          "queued": {
+            "description": "En cola.",
+            "title": "Queued",
+            "type": "integer"
+          },
+          "running": {
+            "description": "En ejecución.",
+            "title": "Running",
+            "type": "integer"
+          },
+          "succeeded": {
+            "description": "Terminadas bien.",
+            "title": "Succeeded",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "kind",
+          "queued",
+          "running",
+          "succeeded",
+          "failed"
+        ],
+        "title": "RunCounts",
         "type": "object"
       },
       "ScanRequest": {
@@ -3202,6 +3904,188 @@
           "scope"
         ],
         "title": "StixExportRequest",
+        "type": "object"
+      },
+      "TelemetryDaily": {
+        "additionalProperties": false,
+        "properties": {
+          "days": {
+            "description": "Días de la serie.",
+            "title": "Days",
+            "type": "integer"
+          },
+          "series": {
+            "description": "Un punto por día, del más antiguo al más reciente.",
+            "items": {
+              "$ref": "#/components/schemas/TelemetryDay"
+            },
+            "title": "Series",
+            "type": "array"
+          }
+        },
+        "required": [
+          "days",
+          "series"
+        ],
+        "title": "TelemetryDaily",
+        "type": "object"
+      },
+      "TelemetryDay": {
+        "additionalProperties": false,
+        "properties": {
+          "agents": {
+            "description": "Revisiones del día por agente.",
+            "items": {
+              "$ref": "#/components/schemas/AgentDay"
+            },
+            "title": "Agents",
+            "type": "array"
+          },
+          "date": {
+            "description": "Día (UTC), `AAAA-MM-DD`.",
+            "title": "Date",
+            "type": "string"
+          },
+          "runs_failed": {
+            "description": "Corridas que terminaron con error.",
+            "title": "Runs Failed",
+            "type": "integer"
+          },
+          "runs_succeeded": {
+            "description": "Corridas que terminaron bien.",
+            "title": "Runs Succeeded",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "date",
+          "runs_succeeded",
+          "runs_failed",
+          "agents"
+        ],
+        "title": "TelemetryDay",
+        "type": "object"
+      },
+      "TelemetrySummary": {
+        "additionalProperties": false,
+        "properties": {
+          "agents": {
+            "description": "Una entrada por agente de IA.",
+            "items": {
+              "$ref": "#/components/schemas/AgentTelemetry"
+            },
+            "title": "Agents",
+            "type": "array"
+          },
+          "daily_budget_usd": {
+            "description": "Presupuesto diario de LLM en dólares, como texto.",
+            "title": "Daily Budget Usd",
+            "type": "string"
+          },
+          "generated_at": {
+            "description": "Cuándo se calculó el resumen (UTC).",
+            "title": "Generated At",
+            "type": "string"
+          },
+          "ladder_label": {
+            "description": "Nombre del nivel de la escalera del juez.",
+            "title": "Ladder Label",
+            "type": "string"
+          },
+          "ladder_level": {
+            "description": "Nivel vigente de la escalera del juez (0 a 3).",
+            "maximum": 3.0,
+            "minimum": 0.0,
+            "title": "Ladder Level",
+            "type": "integer"
+          },
+          "run_success_percent": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Corridas terminadas bien sobre las terminadas, en %, como texto; nulo sin corridas.",
+            "title": "Run Success Percent"
+          },
+          "runs": {
+            "description": "Corridas por tipo y estado.",
+            "items": {
+              "$ref": "#/components/schemas/RunCounts"
+            },
+            "title": "Runs",
+            "type": "array"
+          },
+          "runs_failed": {
+            "description": "Corridas que terminaron con error.",
+            "title": "Runs Failed",
+            "type": "integer"
+          },
+          "runs_queued": {
+            "description": "Corridas en cola.",
+            "title": "Runs Queued",
+            "type": "integer"
+          },
+          "runs_running": {
+            "description": "Corridas en ejecución.",
+            "title": "Runs Running",
+            "type": "integer"
+          },
+          "runs_succeeded": {
+            "description": "Corridas que terminaron bien.",
+            "title": "Runs Succeeded",
+            "type": "integer"
+          },
+          "since": {
+            "description": "Inicio de la ventana (UTC).",
+            "title": "Since",
+            "type": "string"
+          },
+          "spend_today_usd": {
+            "description": "Gasto de LLM de hoy (UTC) en dólares, como texto.",
+            "title": "Spend Today Usd",
+            "type": "string"
+          },
+          "top_reasons": {
+            "description": "Motivos del juez más usados en la ventana, con cuántas veces se aceptaron y rechazaron.",
+            "items": {
+              "$ref": "#/components/schemas/ReasonUsage"
+            },
+            "title": "Top Reasons",
+            "type": "array"
+          },
+          "window": {
+            "description": "Ventana del resumen. Valores: `24h`: Últimas 24 horas; `7d`: Últimos 7 días; `30d`: Últimos 30 días.",
+            "enum": [
+              "24h",
+              "7d",
+              "30d"
+            ],
+            "title": "Window",
+            "type": "string"
+          }
+        },
+        "required": [
+          "window",
+          "since",
+          "generated_at",
+          "runs",
+          "runs_queued",
+          "runs_running",
+          "runs_succeeded",
+          "runs_failed",
+          "run_success_percent",
+          "agents",
+          "top_reasons",
+          "daily_budget_usd",
+          "spend_today_usd",
+          "ladder_level",
+          "ladder_label"
+        ],
+        "title": "TelemetrySummary",
         "type": "object"
       },
       "Ticket": {
@@ -6746,6 +7630,240 @@
         ]
       }
     },
+    "/api/history": {
+      "get": {
+        "description": "Una sola línea de tiempo con las corridas, las revisiones de IA y los cambios de configuración, del más reciente al más antiguo. Cada revisión trae la evaluación que alimentó (para ligar su feedback) y cada cambio de configuración su versión y su autor. La auditoría completa sigue siendo solo de `admin` (`GET /api/audit`). Filtros por tipo, estado y fechas. Pagina por cursor. Rol mínimo: `reader`.",
+        "operationId": "list_history",
+        "parameters": [
+          {
+            "description": "Tipo de evento. Valores: `run`: Corrida (escaneo, noticias, recálculo, sincronización o calibración); `llm_review`: Revisión de un agente de IA; `config_change`: Cambio de configuración.",
+            "in": "query",
+            "name": "type",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "enum": [
+                    "run",
+                    "llm_review",
+                    "config_change"
+                  ],
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Tipo de evento.",
+              "title": "Type"
+            }
+          },
+          {
+            "description": "Estado final exacto: el de la corrida (`succeeded`, `failed`…) o el de la revisión (`applied`, `no_judge_review`…); los cambios de configuración tienen `applied`.",
+            "in": "query",
+            "name": "status",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "maxLength": 30,
+                  "pattern": "^[a-z_]{1,30}$",
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Estado final exacto: el de la corrida (`succeeded`, `failed`…) o el de la revisión (`applied`, `no_judge_review`…); los cambios de configuración tienen `applied`.",
+              "title": "Status"
+            }
+          },
+          {
+            "description": "On or after (RFC 3339)",
+            "in": "query",
+            "name": "date_from",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "format": "date-time",
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "On or after (RFC 3339)",
+              "title": "Date From"
+            }
+          },
+          {
+            "description": "On or before (RFC 3339)",
+            "in": "query",
+            "name": "date_to",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "format": "date-time",
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "On or before (RFC 3339)",
+              "title": "Date To"
+            }
+          },
+          {
+            "description": "Opaque cursor from `next_cursor`: base64url(payload).base64url(signature). A cursor that is not ours or was altered is answered with 400 `invalid_cursor`.",
+            "in": "query",
+            "name": "cursor",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "maxLength": 1024,
+                  "pattern": "^[A-Za-z0-9_-]+\\.[A-Za-z0-9_-]+$",
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Opaque cursor from `next_cursor`: base64url(payload).base64url(signature). A cursor that is not ours or was altered is answered with 400 `invalid_cursor`.",
+              "title": "Cursor"
+            }
+          },
+          {
+            "description": "Page size",
+            "in": "query",
+            "name": "limit",
+            "required": false,
+            "schema": {
+              "default": 50,
+              "description": "Page size",
+              "maximum": 200,
+              "minimum": 1,
+              "title": "Limit",
+              "type": "integer"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Page_HistoryEvent_"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Cursor inválido o alterado (code: invalid_cursor)"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Se requiere autenticación válida."
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "No tienes permiso para realizar esta acción."
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "El recurso solicitado no existe."
+          },
+          "405": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Método no permitido para esta ruta."
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "La solicitud entra en conflicto con el estado actual del recurso."
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Los datos enviados no son válidos."
+          },
+          "429": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Demasiadas solicitudes; intenta de nuevo más tarde."
+          },
+          "500": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Error interno del servidor."
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "Historial de eventos",
+        "tags": [
+          "runs"
+        ]
+      }
+    },
     "/api/itop/webhook": {
       "post": {
         "description": "iTop avisa que un ticket cambió. Usa su propio token Bearer (no el de Firebase); responde 202.",
@@ -8959,9 +10077,95 @@
     },
     "/api/runs": {
       "get": {
-        "description": "Corridas de escaneo, ingesta, recálculo y nocturnas, las más recientes primero.",
+        "description": "Corridas de escaneo, ingesta, recálculo y nocturnas, las más recientes primero. Filtros opcionales por tipo, estado y fecha de inicio; cada corrida dice por qué se lanzó y quién la lanzó.",
         "operationId": "list_runs",
         "parameters": [
+          {
+            "description": "Tipo de corrida. Valores: `scan`: Escaneo simulado de vulnerabilidades; `ingestion`: Ingesta y análisis de noticias; `recalculation`: Recálculo por un cambio de fórmula, sin juez; `nightly`: Recálculo nocturno por el paso del tiempo.",
+            "in": "query",
+            "name": "kind",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "enum": [
+                    "scan",
+                    "ingestion",
+                    "recalculation",
+                    "nightly"
+                  ],
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Tipo de corrida.",
+              "title": "Kind"
+            }
+          },
+          {
+            "description": "Estado de la corrida. Valores: `queued`: En cola; el worker aún no la toma; `running`: En ejecución; `succeeded`: Terminó bien; `failed`: Terminó con error.",
+            "in": "query",
+            "name": "status",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "enum": [
+                    "queued",
+                    "running",
+                    "succeeded",
+                    "failed"
+                  ],
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Estado de la corrida.",
+              "title": "Status"
+            }
+          },
+          {
+            "description": "Started on or after (RFC 3339)",
+            "in": "query",
+            "name": "date_from",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "format": "date-time",
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Started on or after (RFC 3339)",
+              "title": "Date From"
+            }
+          },
+          {
+            "description": "Started on or before (RFC 3339)",
+            "in": "query",
+            "name": "date_to",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "format": "date-time",
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Started on or before (RFC 3339)",
+              "title": "Date To"
+            }
+          },
           {
             "description": "Opaque cursor from `next_cursor`: base64url(payload).base64url(signature). A cursor that is not ours or was altered is answered with 400 `invalid_cursor`.",
             "in": "query",
@@ -10198,6 +11402,514 @@
         ]
       }
     },
+    "/api/telemetry/daily": {
+      "get": {
+        "description": "Un punto por día UTC, del más antiguo a hoy, con ceros en los días sin actividad: corridas terminadas bien y con error, y por agente revisiones, % de éxito, latencia promedio y costo. Rol mínimo: `reader`.",
+        "operationId": "get_telemetry_daily",
+        "parameters": [
+          {
+            "description": "Days back",
+            "in": "query",
+            "name": "days",
+            "required": false,
+            "schema": {
+              "default": 7,
+              "description": "Days back",
+              "maximum": 90,
+              "minimum": 1,
+              "title": "Days",
+              "type": "integer"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TelemetryDaily"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "La solicitud no es válida."
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Se requiere autenticación válida."
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "No tienes permiso para realizar esta acción."
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "El recurso solicitado no existe."
+          },
+          "405": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Método no permitido para esta ruta."
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "La solicitud entra en conflicto con el estado actual del recurso."
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Los datos enviados no son válidos."
+          },
+          "429": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Demasiadas solicitudes; intenta de nuevo más tarde."
+          },
+          "500": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Error interno del servidor."
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "Series diarias de telemetría",
+        "tags": [
+          "telemetry"
+        ]
+      }
+    },
+    "/api/telemetry/reviews": {
+      "get": {
+        "description": "Cada interacción con un LLM, de la más reciente a la más antigua: agente, modo, modelo, estado, intentos, latencia, tokens, costo y la evaluación ligada. Solo metadatos (X-2). Pagina por cursor. Rol mínimo: `reader`.",
+        "operationId": "list_llm_reviews",
+        "parameters": [
+          {
+            "description": "Agente de IA. Valores: `news_analyst`: Analista de noticias; `cve_analyst`: Analista de CVE; `judge`: Juez.",
+            "in": "query",
+            "name": "agent",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "enum": [
+                    "news_analyst",
+                    "cve_analyst",
+                    "judge"
+                  ],
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Agent"
+            }
+          },
+          {
+            "description": "Estado de la revisión. Valores: `applied`: Aplicada: su ajuste llegó a la puntuación; `suggestion`: Solo sugerencia (ticket que cambió una persona); `partial_review`: Revisión parcial: se aplicó lo validado; `judge_disagreement`: Desacuerdo en la doble revisión: final = base; `no_judge_review`: Sin juez (respaldo): final = base; `rejected`: Rechazada por la validación; `queued`: En cola para la siguiente corrida.",
+            "in": "query",
+            "name": "status",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "enum": [
+                    "applied",
+                    "suggestion",
+                    "partial_review",
+                    "judge_disagreement",
+                    "no_judge_review",
+                    "rejected",
+                    "queued"
+                  ],
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Estado de la revisión.",
+              "title": "Status"
+            }
+          },
+          {
+            "description": "On or after (RFC 3339)",
+            "in": "query",
+            "name": "date_from",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "format": "date-time",
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "On or after (RFC 3339)",
+              "title": "Date From"
+            }
+          },
+          {
+            "description": "On or before (RFC 3339)",
+            "in": "query",
+            "name": "date_to",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "format": "date-time",
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "On or before (RFC 3339)",
+              "title": "Date To"
+            }
+          },
+          {
+            "description": "Opaque cursor from `next_cursor`: base64url(payload).base64url(signature). A cursor that is not ours or was altered is answered with 400 `invalid_cursor`.",
+            "in": "query",
+            "name": "cursor",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "maxLength": 1024,
+                  "pattern": "^[A-Za-z0-9_-]+\\.[A-Za-z0-9_-]+$",
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Opaque cursor from `next_cursor`: base64url(payload).base64url(signature). A cursor that is not ours or was altered is answered with 400 `invalid_cursor`.",
+              "title": "Cursor"
+            }
+          },
+          {
+            "description": "Page size",
+            "in": "query",
+            "name": "limit",
+            "required": false,
+            "schema": {
+              "default": 50,
+              "description": "Page size",
+              "maximum": 200,
+              "minimum": 1,
+              "title": "Limit",
+              "type": "integer"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Page_LlmReviewEntry_"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Cursor inválido o alterado (code: invalid_cursor)"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Se requiere autenticación válida."
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "No tienes permiso para realizar esta acción."
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "El recurso solicitado no existe."
+          },
+          "405": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Método no permitido para esta ruta."
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "La solicitud entra en conflicto con el estado actual del recurso."
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Los datos enviados no son válidos."
+          },
+          "429": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Demasiadas solicitudes; intenta de nuevo más tarde."
+          },
+          "500": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Error interno del servidor."
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "Bitácora de revisiones de IA",
+        "tags": [
+          "telemetry"
+        ]
+      }
+    },
+    "/api/telemetry/summary": {
+      "get": {
+        "description": "Corridas por estado y tipo, una tarjeta por agente (revisiones, éxito, latencia promedio y p95, tokens, costo, proveedor y modelo, gasto del día contra el presupuesto, nivel de la escalera del juez) y los motivos del juez más usados, en la ventana pedida. Rol mínimo: `reader`.",
+        "operationId": "get_telemetry_summary",
+        "parameters": [
+          {
+            "description": "Ventana del resumen: últimas 24 horas, 7 días o 30 días. Valores: `24h`: Últimas 24 horas; `7d`: Últimos 7 días; `30d`: Últimos 30 días.",
+            "in": "query",
+            "name": "window",
+            "required": false,
+            "schema": {
+              "default": "24h",
+              "enum": [
+                "24h",
+                "7d",
+                "30d"
+              ],
+              "title": "Window",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TelemetrySummary"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "La solicitud no es válida."
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Se requiere autenticación válida."
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "No tienes permiso para realizar esta acción."
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "El recurso solicitado no existe."
+          },
+          "405": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Método no permitido para esta ruta."
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "La solicitud entra en conflicto con el estado actual del recurso."
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Los datos enviados no son válidos."
+          },
+          "429": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Demasiadas solicitudes; intenta de nuevo más tarde."
+          },
+          "500": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Error interno del servidor."
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "Resumen de telemetría",
+        "tags": [
+          "telemetry"
+        ]
+      }
+    },
     "/api/tickets": {
       "get": {
         "description": "Tickets ya creados en iTop, los más urgentes primero.",
@@ -10906,6 +12618,10 @@
     {
       "description": "Operación. Métricas, eventos de notificación, conexiones, instalación y auditoría.",
       "name": "operations"
+    },
+    {
+      "description": "Telemetría de agentes. Corridas y revisiones de los agentes de IA (analistas y juez): resúmenes, series diarias y bitácora. Solo metadatos; nunca prompts, llamadas crudas ni texto de noticias.",
+      "name": "telemetry"
     },
     {
       "description": "Administración. Gestión de roles de usuario.",

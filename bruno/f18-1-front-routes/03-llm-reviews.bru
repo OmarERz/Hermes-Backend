@@ -1,0 +1,36 @@
+meta {
+  name: llm-reviews
+  type: http
+  seq: 3
+}
+
+get {
+  url: {{baseUrl}}/api/telemetry/reviews?limit=10
+  body: none
+  auth: bearer
+}
+
+auth:bearer {
+  token: {{token}}
+}
+
+assert {
+  res.status: eq 200
+  res.body.items: isArray
+}
+
+tests {
+  test("only metadata: no prompt, raw call or package", function () {
+    for (const item of res.body.items) {
+      expect(item).to.not.have.property("calls");
+      expect(item).to.not.have.property("parameters");
+      expect(item).to.not.have.property("input_ref");
+    }
+  });
+}
+
+docs {
+  LLM review log (HI-3, HI-7): metadata only (X-2).
+
+  operationId: list_llm_reviews
+}
