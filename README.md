@@ -53,6 +53,7 @@ devuelve y los registros las enmascaran.
 | Variable | Para qué |
 |---|---|
 | `ITOP_URL`, `ITOP_TOKEN`, `ITOP_SYSTEM_USER`, `ITOP_WEBHOOK_TOKEN` | Leer el CMDB y crear tickets en iTop; sin ellas no corren los trabajos de iTop |
+| `ITOP_CONSOLE_URL` | La consola de iTop que abren las personas desde los enlaces del front y de las notificaciones; vacío = `ITOP_URL`. Hace falta cuando `ITOP_URL` es un nombre que solo resuelven los contenedores (sección 9) |
 | `NVD_API_KEY` | Más cuota en NVD y consulta al diccionario CPE (sin llave solo hay candidatos locales). Sin llave, la primera carga de 90 días de NVD al arrancar tarda varios minutos y un escaneo pedido mientras tanto espera en cola |
 | `DEEPSEEK_API_KEY`, `LLM_BASE_URL_JUDGE`, `LLM_BASE_URL_ANALYSTS` | Juez y analistas de IA; **la demo nunca las usa** |
 | `LLM_PROVIDER`, `CLAUDE_CODE_MODEL_JUDGE`, `CLAUDE_CODE_MODEL_ANALYSTS`, `CLAUDE_CODE_EFFORT`, `CLAUDE_CODE_TIMEOUT_SECONDS` | Proveedor del juez y los analistas: `deepseek` (por defecto) o `claude-code`, la CLI de Claude Code con tu suscripción, solo en tu equipo (ver la sección 8) |
@@ -255,6 +256,8 @@ la API como `http://api:8000`. En `.env`:
 ```
 COMPOSE_FILE=compose.yaml:compose.itop-link.yaml
 ITOP_URL=http://itop:8080
+# los enlaces que abren las personas: http://itop:8080 solo lo resuelven los contenedores
+ITOP_CONSOLE_URL=http://127.0.0.1:8080
 ITOP_WEBHOOK_URL=http://api:8000/api/itop/webhook
 ITOP_TOKEN=<lo que imprime make itop-token>
 ITOP_WEBHOOK_TOKEN=<un valor largo al azar>
