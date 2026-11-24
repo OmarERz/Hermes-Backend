@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import logging
 import threading
 from unittest.mock import MagicMock
 
@@ -9,11 +10,13 @@ import pytest
 from pydantic import SecretStr
 
 from core.config import Settings
+from notifications_api import LogConsumer
 from workers.jobs import (
     DISPATCH_SECONDS,
     ITOP_OUTBOX_SECONDS,
     NIGHTLY_SECONDS,
     TICKET_SYNC_SECONDS,
+    DispatchJob,
     PeriodicJob,
     build_jobs,
     run_jobs,
@@ -145,3 +148,50 @@ def test_registered_consumers_are_used_by_name() -> None:
     job = build_jobs(SETTINGS, MagicMock(), {"slack": consumer})[0]
     assert job.lane == "notifications"
     assert job.run.consumers == {"slack": consumer}
+
+
+def _factory_with_consumer_setting(value: str) -> MagicMock:
+    session = MagicMock()
+    session.scalar.return_value = value
+    factory = MagicMock()
+    factory.return_value.__enter__.return_value = session
+    return factory
+
+
+def test_the_worker_leaves_slack_events_to_the_slack_service(caplog: pytest.LogCaptureFixture) -> None:
+    """notifications.consumer = slack: the Slack service (slack_app) delivers; the worker claims nothing."""
+    job = DispatchJob(_factory_with_consumer_setting("slack"))
+    with caplog.at_level(logging.INFO, logger="workers.jobs"):
+        assert job() == 0
+        assert job() == 0
+    assert [r.getMessage() for r in caplog.records].count(
+        "notification events are delivered by the slack service; this worker leaves them"
+    ) == 1  # once, not every cycle
+    assert job.consumers == {}
+
+
+def test_a_registered_slack_consumer_still_delivers_in_the_worker(monkeypatch: pytest.MonkeyPatch) -> None:
+    drained: list[object] = []
+
+    class Dispatcher:
+        def __init__(self, _factory: object, consumer: object, **_: object) -> None:
+            drained.append(consumer)
+
+        def drain(self, stop: object = None) -> int:
+            return 1
+
+    monkeypatch.setattr("workers.jobs.NotificationDispatcher", Dispatcher)
+    consumer = MagicMock()
+    job = DispatchJob(_factory_with_consumer_setting("slack"), consumers={"slack": consumer})
+    assert job() == 1
+    assert drained == [consumer]
+
+
+def test_switching_back_to_log_delivers_again(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr("workers.jobs.NotificationDispatcher", MagicMock(return_value=MagicMock(drain=lambda stop: 2)))
+    factory = _factory_with_consumer_setting("slack")
+    job = DispatchJob(factory)
+    assert job() == 0
+    factory.return_value.__enter__.return_value.scalar.return_value = "log"
+    assert job() == 2
+    assert isinstance(job.consumers["log"], LogConsumer)

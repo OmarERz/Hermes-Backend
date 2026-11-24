@@ -21,7 +21,12 @@ from core.itop.client import reader_from_settings
 from core.itop.outbox import ItopOutboxWorker, writer_from_settings
 from core.metrics.ladder import evaluate
 from core.metrics.nightly import NightlyMetrics
-from core.notifications.dispatcher import NotificationDispatcher, configured_consumer_name, consumer_for
+from core.notifications.dispatcher import (
+    EXTERNAL_CONSUMERS,
+    NotificationDispatcher,
+    configured_consumer_name,
+    consumer_for,
+)
 from core.tickets.sync import TicketStateSync
 from notifications_api import NotificationConsumer
 from workers.pipeline_jobs import pipeline_jobs
@@ -104,11 +109,20 @@ class DispatchJob:
     itop_base_url: str | None = None
     consumers: dict[str, NotificationConsumer] = field(default_factory=dict)
     stop: threading.Event | None = None  # the worker's shutdown signal, checked between events
+    _left_to: str | None = field(default=None, init=False, repr=False)  # logs the hand-over once, not every cycle
 
     def __call__(self) -> int:
         with self.session_factory() as session:
             name = configured_consumer_name(session)
-        consumer = self.consumers.get(name) or self.consumers.setdefault(name, consumer_for(name))
+        consumer = self.consumers.get(name)
+        if consumer is None and name in EXTERNAL_CONSUMERS:
+            # Delivered by its own service (python -m slack_app): the events stay pending for it.
+            if self._left_to != name:
+                log.info("notification events are delivered by the %s service; this worker leaves them", name)
+            self._left_to = name
+            return 0
+        self._left_to = None
+        consumer = consumer or self.consumers.setdefault(name, consumer_for(name))
         dispatcher = NotificationDispatcher(self.session_factory, consumer, itop_base_url=self.itop_base_url)
         return dispatcher.drain(stop=self.stop)
 
@@ -145,8 +159,8 @@ def build_jobs(
     """The notification dispatcher, the nightly metrics and the pipeline cycles always (each on its own lane); the
     iTop jobs only when iTop is configured.
 
-    `consumers` registers consumers by the name `notifications.consumer` selects (the Slack module plugs in here in
-    F11); `log` is always available.
+    `consumers` registers consumers by the name `notifications.consumer` selects; `log` is always available. With
+    `slack` (and no consumer registered under that name) the dispatch job leaves the events to the Slack service.
     """
     itop_url = str(settings.itop_url) if settings.itop_url is not None else None
     dispatch = DispatchJob(session_factory, itop_url, dict(consumers or {}), stop)

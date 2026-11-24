@@ -63,11 +63,18 @@ _CLAIM_SQL: Final = text(
 _CONSUMER_SETTING: Final = text("SELECT value FROM setting_current WHERE setting_key = 'notifications.consumer'")
 
 
+# Consumers that run in a service of their own: `slack` is delivered by the Slack service (`python -m slack_app`, the
+# composition root of `notifications_slack`, D-085), so the worker leaves those events to it.
+EXTERNAL_CONSUMERS: Final = frozenset({"slack"})
+
+
 def consumer_for(name: str) -> NotificationConsumer:
-    """NOT-05: `log` (default) writes each event to the log; `slack` is provided by the Slack module (F11)."""
+    """NOT-05: `log` (default) writes each event to the log. `slack` is not built here: it lives in its own service."""
     if name == "log":
         return LogConsumer()
-    raise ValueError(f"notification consumer {name!r} is not available yet")
+    if name in EXTERNAL_CONSUMERS:
+        raise ValueError(f"notification consumer {name!r} runs in its own service")
+    raise ValueError(f"unknown notification consumer {name!r}")
 
 
 def configured_consumer_name(session: Session) -> str:
