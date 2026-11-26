@@ -15,6 +15,8 @@ from typing import Final
 
 import httpx
 
+from core.shutdown import StopSignal
+
 EmbedFn = Callable[[Sequence[str]], list[list[float]]]
 
 # TODO(P-019): confirm the model with the team; it must handle Spanish and English and run on CPU.
@@ -62,13 +64,21 @@ class HttpEmbedder:
     Fails closed: a network error, a timeout, a non-200 answer or vectors that do not fit the schema raise
     `EmbeddingError` after `max_attempts`, so the news cycle reports the service down and keeps the articles for the
     next cycle instead of storing bad vectors. Transport errors and 5xx answers are retried with a short backoff; a
-    4xx answer is not (it would fail again). Texts go in batches the service accepts.
+    4xx answer is not (it would fail again). Texts go in batches the service accepts. With the worker's `stop` signal
+    each attempt checks it first and the backoff sleeps on it (#170).
     """
 
-    def __init__(self, url: str, config: HttpEmbedderConfig | None = None, http: httpx.Client | None = None) -> None:
+    def __init__(
+        self,
+        url: str,
+        config: HttpEmbedderConfig | None = None,
+        http: httpx.Client | None = None,
+        stop: StopSignal | None = None,
+    ) -> None:
         self.url = url.rstrip("/") + "/embed"
         self.config = config or HttpEmbedderConfig()
         self._http = http
+        self._stop = stop
 
     def __call__(self, texts: Sequence[str]) -> list[list[float]]:
         vectors: list[list[float]] = []
@@ -85,6 +95,8 @@ class HttpEmbedder:
         try:
             problem = "no attempt"
             for attempt in range(1, config.max_attempts + 1):
+                if self._stop is not None:
+                    self._stop.check()
                 try:
                     response = client.post(self.url, json={"texts": batch}, timeout=timeout)
                 except httpx.TransportError as exc:
@@ -96,7 +108,8 @@ class HttpEmbedder:
                     if response.status_code < HTTP_SERVER_ERROR:
                         break  # a client error does not get better with retries
                 if attempt < config.max_attempts:
-                    config.sleep(config.backoff_seconds * 2 ** (attempt - 1))
+                    pause = self._stop.sleep if self._stop is not None else config.sleep
+                    pause(config.backoff_seconds * 2 ** (attempt - 1))
             raise EmbeddingError(f"The embeddings service is unavailable: {problem}")
         finally:
             if self._http is None:
