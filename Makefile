@@ -4,7 +4,7 @@
 SHELL := /bin/bash
 .SHELLFLAGS := -eu -o pipefail -c
 
-.PHONY: up demo worker-host backup compose-secrets help openapi verify prepush lint typecheck boundaries test coverage semgrep kics secrets audit verify-full schemathesis adversarial dynamic zap bruno ci-lint seed events emulator-token itop-secrets itop-link itop-up itop-install itop-seed itop-token itop-rotate-token itop-down itop-destroy itop-backup itop-restore review
+.PHONY: up demo worker-host backup compose-secrets help openapi verify prepush lint typecheck boundaries test coverage semgrep kics secrets audit verify-full schemathesis adversarial dynamic zap bruno ci-lint seed events emulator-token itop-secrets itop-link itop-up itop-install itop-load itop-seed itop-map-cpe itop-token itop-rotate-token itop-down itop-destroy itop-backup itop-restore review
 
 help: ## List the available targets
 	@grep -E '^[a-z-]+:.*## ' $(MAKEFILE_LIST) | awk 'BEGIN {FS = ":.*## "}; {printf "  %-12s %s\n", $$1, $$2}'
@@ -169,14 +169,28 @@ itop-up: itop-secrets $(if $(ITOP_LINK),itop-link) ## Start iTop (Docker); ITOP_
 itop-install: ## Install iTop, recompile its model when needed, (re)apply the Hermes objects (idempotent)
 	$(ITOP_EXEC) /opt/hermes-itop/install.sh
 
-# The loader's administrator token only exists while it runs: enabled with a fresh token, disabled afterwards.
-itop-seed: ## Load the synthetic stack into iTop (dry run; add APPLY=1 to write)
+# Inventory loader (tests/harness/itop_load.py, F16.2). Its administrator token only exists while it runs: enabled
+# with a fresh token, disabled afterwards even when the load fails. It lives with the test tooling because it writes
+# CMDB objects straight to iTop, which the Semgrep ARQ-01 rule allows only in the outbox and in tests/.
+INVENTORY ?= docker/itop/stack.yaml
+
+itop-load: ## Load an inventory into iTop: INVENTORY=<file> (dry run; APPLY=1 writes, UPDATE=1 updates)
+	@test -f "$(INVENTORY)" || { echo "INVENTORY=$(INVENTORY): no such file" >&2; exit 2; }
 	@$(ITOP_EXEC) php /opt/hermes-itop/provision.php seed-user on >/dev/null
 	@status=0; ITOP_URL="http://$$($(ITOP_COMPOSE) port itop 8080)" \
 	  ITOP_TOKEN="$$($(ITOP_EXEC) cat /var/www/html/data/hermes-seed-token)" \
-	  PYTHONPATH=tests uv run --locked python -m harness.itop_seed docker/itop/stack.yaml $(if $(APPLY),--apply) \
+	  PYTHONPATH=tests uv run --locked python -m harness.itop_load "$(INVENTORY)" $(if $(APPLY),--apply) $(if $(UPDATE),--update) \
 	  || status=$$?; \
 	$(ITOP_EXEC) php /opt/hermes-itop/provision.php seed-user off; exit $$status
+
+itop-seed: ## Load the synthetic stack (docker/itop/stack.yaml) into iTop (dry run; add APPLY=1 to write)
+	@$(MAKE) --no-print-directory itop-load INVENTORY=docker/itop/stack.yaml
+
+# After a scan synced the inventory into Hermes: HERMES_API_TOKEN is an analyst's token (with the local emulator:
+# HERMES_API_TOKEN=$$(make -s emulator-token ROLE=analyst)); HERMES_API_URL defaults to the published API.
+itop-map-cpe: ## Set the CPE of each product of INVENTORY=<file> through the Hermes API (needs HERMES_API_TOKEN)
+	@HERMES_API_URL="$${HERMES_API_URL:-http://127.0.0.1:$${API_PORT:-8000}}" \
+	  PYTHONPATH=tests uv run --locked python -m harness.itop_load "$(INVENTORY)" --map-cpe
 
 itop-token: ## Print the least-privilege REST token of iTop (ITOP_TOKEN of the backend)
 	@$(ITOP_EXEC) cat /var/www/html/data/hermes-rest-token
