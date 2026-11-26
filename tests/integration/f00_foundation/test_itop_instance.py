@@ -21,7 +21,7 @@ from typing import Any, ClassVar
 import httpx
 import pytest
 
-from harness import itop_seed
+from harness import itop_load
 from harness.isolation import free_port, run_name
 
 pytestmark = [pytest.mark.e2e, pytest.mark.slow]
@@ -118,8 +118,8 @@ def instance(webhook_receiver: str, tmp_path_factory: pytest.TempPathFactory) ->
         install = compose(env, "exec", "-T", "-u", "www-data", "itop", "/opt/hermes-itop/install.sh")
         assert install.returncode == 0, install.stdout[-2000:] + install.stderr[-2000:]
         www_data(env, "php", PROVISION, "seed-user", "on")
-        seed = itop_seed.ItopRest(f"http://127.0.0.1:{PORT}", read_token(env, "hermes-seed-token"))
-        assert itop_seed.run([str(ROOT / "docker" / "itop" / "stack.yaml"), "--apply"], itop=seed) == 0
+        seed = itop_load.ItopRest(f"http://127.0.0.1:{PORT}", read_token(env, "hermes-seed-token"))
+        assert itop_load.run([str(ROOT / "docker" / "itop" / "stack.yaml"), "--apply"], itop=seed) == 0
         yield env
     finally:
         # The image stays: its tag is shared with a persistent iTop that may run on the same host.
