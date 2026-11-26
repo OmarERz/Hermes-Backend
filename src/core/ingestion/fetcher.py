@@ -9,6 +9,7 @@ from urllib.parse import urljoin
 import httpx
 
 from core.ingestion.ssrf import Resolver, UnsafeUrlError, resolve_public_address, system_resolver, validate_public_url
+from core.shutdown import StopSignal
 from core.textnum import ascii_int
 
 FEED_CONTENT_TYPES = frozenset(
@@ -69,7 +70,11 @@ class FetchedDocument:
 
 
 class Fetcher:
-    """GET over HTTPS with limits. `transport` and `resolver` are injectable so tests need no network."""
+    """GET over HTTPS with limits. `transport` and `resolver` are injectable so tests need no network.
+
+    With the worker's `stop` signal, every request (each redirect hop too) first checks it, so a news cycle that
+    downloads one article after another stops at the next download when the worker is asked to stop (#170).
+    """
 
     def __init__(
         self,
@@ -77,9 +82,11 @@ class Fetcher:
         limits: FetchLimits | None = None,
         transport: httpx.BaseTransport | None = None,
         resolver: Resolver = system_resolver,
+        stop: StopSignal | None = None,
     ) -> None:
         self._limits = limits or FetchLimits()
         self._resolver = resolver
+        self._stop = stop or StopSignal()
         self._client = httpx.Client(
             transport=PinnedTransport(transport or httpx.HTTPTransport(), resolver),
             timeout=self._limits.timeout_seconds,
@@ -100,6 +107,7 @@ class Fetcher:
         """GET with limits. `host_allowed` (an allowlist) is checked on the first URL and on every redirect hop."""
         current = url
         for _ in range(self._limits.max_redirects + 1):
+            self._stop.check()
             try:
                 host = validate_public_url(current, self._resolver)
             except UnsafeUrlError as exc:
