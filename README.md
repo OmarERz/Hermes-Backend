@@ -245,7 +245,8 @@ con lotes reales, el trabajador corre **en tu equipo**, contra la base de la pil
    `ITOP_URL=http://127.0.0.1:8080 make worker-host`.
 4. Pide un escaneo (`POST /api/scans`) y sigue el registro: cada llamada deja una línea `claude-code call` con el modelo,
    la latencia, los tokens y el costo que estima la CLI.
-5. Al terminar, `Ctrl+C` (puede tardar hasta que acabe el trabajo en curso) y `docker compose start workers` para
+5. Al terminar, `Ctrl+C` (el ciclo en curso se detiene en su siguiente descarga o llamada, y el trabajador sale en
+   menos de 10 s; una llamada de la CLI en curso se corta) y `docker compose start workers` para
    volver al trabajador del contenedor; `make up` devuelve el servicio de *embeddings* a su red interna.
 
 Ajustes (todos opcionales): `CLAUDE_CODE_MODEL_JUDGE` (por defecto `opus`) y `CLAUDE_CODE_MODEL_ANALYSTS` (por defecto

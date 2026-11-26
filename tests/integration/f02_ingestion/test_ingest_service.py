@@ -14,6 +14,7 @@ from core.db.ids import new_id
 from core.ingestion.catalog import DEFAULT_SOURCES, sync_default_sources
 from core.ingestion.fetcher import Fetcher
 from core.ingestion.service import ingest_source, news_sources, run_news_ingestion
+from core.shutdown import ShutdownRequested, StopSignal
 from doubles.web import FakeWeb
 
 pytestmark = pytest.mark.integration
@@ -232,3 +233,30 @@ def test_unreadable_csv_is_a_format_change_and_the_next_source_still_runs(sessio
     assert results["aaa_csv"].status == "format_changed"
     assert results["bbb_good"].items_new == 1
     assert session.scalar(select(m.Run.status)) == "succeeded"
+
+
+def test_a_shutdown_mid_cycle_rolls_back_the_source_and_closes_the_run(session: Session, web: FakeWeb) -> None:
+    first = add_source(session, "aaa_first")
+    second = add_source(session, "bbb_second")
+    web.serve(first.url, feed(entry("s", "&lt;p&gt;Short&lt;/p&gt;")))  # short: the article is downloaded next
+    web.serve("https://news.example.com/s", article_page(LONG_BODY), "text/html")
+    web.serve(second.url, feed(entry("t", LONG_BODY)))
+    session.commit()
+    signal = StopSignal()
+    inner = web.transport()
+
+    def stop_after_the_first_feed(request: httpx.Request) -> httpx.Response:
+        response = inner.handle_request(request)
+        signal.event.set()  # SIGTERM arrives while the first source is being read (#170)
+        return response
+
+    fetcher = Fetcher(
+        transport=httpx.MockTransport(stop_after_the_first_feed), resolver=lambda _host: ["93.184.216.34"], stop=signal
+    )
+    with pytest.raises(ShutdownRequested):
+        run_news_ingestion(session, fetcher, clock=clock, load_defaults=False)
+    assert len(web.requests) == 1  # neither the article nor the second source was requested
+    run = session.scalars(select(m.Run)).one()
+    assert (run.status, run.finished_at) == ("failed", NOW)
+    assert session.scalar(select(func.count()).select_from(m.RawArticle)) == 0  # comes again next cycle
+    assert session.scalar(select(func.count()).select_from(m.SourceFetch)) == 0

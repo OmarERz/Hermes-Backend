@@ -43,6 +43,7 @@ from core.llm.client import DEFAULT_MAX_OUTPUT_TOKENS, RetryPolicy, Role, ToolCa
 from core.llm.errors import LlmError, LlmRequestError, LlmResponseError, LlmTransportError
 from core.llm.tools import ToolDefinition
 from core.llm.usage import Usage
+from core.shutdown import ShutdownRequested
 
 logger = logging.getLogger(__name__)
 
@@ -236,6 +237,9 @@ class ClaudeCodeClient:
         except LlmError as exc:
             exc.usage = usage  # tokens the subscription spent on an unusable answer still count (L12)
             status = type(exc).__name__
+            raise
+        except ShutdownRequested:
+            status = "interrupted"  # the worker is stopping: the CLI was killed before it answered (#170)
             raise
         finally:
             _log_call(
