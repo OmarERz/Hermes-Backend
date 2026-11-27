@@ -5,6 +5,7 @@ from __future__ import annotations
 import base64
 import hashlib
 import hmac
+import os
 
 import psycopg
 import pytest
@@ -63,3 +64,32 @@ def test_superuser_password_never_in_connection_errors() -> None:
     with pytest.raises(psycopg.OperationalError) as error:
         provision("postgresql://su@127.0.0.1:1/db", {"app": "x"}, superuser_password=with_spaces)
     assert with_spaces not in str(error.value)
+
+
+def test_nologin_takes_optional_roles_without_a_password_only() -> None:
+    with pytest.raises(ValueError, match="nologin"):
+        provision("postgresql://x@localhost/db", {"migrator": "pw"}, nologin=["app"])
+    with pytest.raises(ValueError, match="nologin"):
+        provision("postgresql://x@localhost/db", {"slack_module": "pw"}, nologin=["slack_module"])
+
+
+def test_main_passes_the_optional_slack_password_only_when_set(monkeypatch: pytest.MonkeyPatch) -> None:
+    calls: list[tuple[dict[str, str], list[str]]] = []
+    monkeypatch.setattr("core.db.provision.configure_logging", lambda *a, **k: None)  # keep pytest's log capture
+    monkeypatch.setattr("core.db.provision.wait_for_database", lambda *a, **k: None)
+    monkeypatch.setattr(
+        "core.db.provision.provision", lambda url, passwords, **kw: calls.append((dict(passwords), list(kw["nologin"])))
+    )
+    monkeypatch.setenv("PROVISION_DATABASE_URL", "postgresql://su@localhost/db")
+    for env in ("MIGRATOR_DB_PASSWORD", "APP_DB_PASSWORD", "RETENTION_DB_PASSWORD"):
+        monkeypatch.setenv(env, "pw-" + env.lower())
+    monkeypatch.delenv("SLACK_DB_PASSWORD", raising=False)
+    monkeypatch.setattr("core.db.provision.read_secret", lambda name: os.environ.get(name.upper()) or None)
+    assert main() == 0
+    monkeypatch.setenv("SLACK_DB_PASSWORD", "pw-slack")
+    assert main() == 0
+    (first, first_nologin), (second, second_nologin) = calls
+    assert "slack_module" not in first
+    assert first_nologin == ["slack_module"]  # no password: the Slack role cannot log in (fail closed)
+    assert second["slack_module"] == "pw-slack"
+    assert second_nologin == []

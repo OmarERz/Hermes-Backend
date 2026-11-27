@@ -9,6 +9,7 @@ import pytest
 from pydantic import ValidationError
 
 from core.config import DEFAULT_LLM_BASE_URL, Settings, read_secret
+from notifications_slack.settings import SlackSettings
 
 REQUIRED = {
     "DATABASE_URL": "postgresql://app:s3cret-pw@db:5432/hermes",
@@ -217,6 +218,7 @@ def test_the_example_env_file_lists_every_setting_and_only_settings() -> None:
     example = (Path(__file__).resolve().parents[2] / ".env.example").read_text(encoding="utf-8")
     listed = set(re.findall(r"^#? ?([A-Z][A-Z0-9_]+)=", example, re.MULTILINE))
     fields = {name.upper() for name in Settings.model_fields} - NOT_IN_EXAMPLE
+    fields |= {"SLACK_" + name.upper() for name in SlackSettings.model_fields}  # the Slack module (NOT-07)
     assert fields <= listed, f"settings missing from .env.example: {sorted(fields - listed)}"
     assert listed <= fields | EXAMPLE_EXTRAS, (
         f".env.example lists unread variables: {sorted(listed - fields - EXAMPLE_EXTRAS)}"

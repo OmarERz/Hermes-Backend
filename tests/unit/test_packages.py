@@ -5,7 +5,7 @@ from pathlib import Path
 
 import pytest
 
-PACKAGES = ["api", "core", "notifications_api", "notifications_slack", "workers"]
+PACKAGES = ["api", "core", "notifications_api", "notifications_slack", "slack_app", "workers"]
 
 
 @pytest.mark.parametrize("name", PACKAGES)
