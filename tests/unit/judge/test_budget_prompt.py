@@ -127,7 +127,13 @@ def test_the_prompt_asks_for_versions_as_quoted_and_its_examples_hold_against_ju
     prompt = system_prompt(ReasonCatalog.default(), SensitivityProfile.named("normal"), JudgeSettings())
     assert "copia cada versión tal como está en la cita" in prompt
     assert "Una rama (3.0.x, «la rama 3.0») vale solo si la cita trae una versión de esa rama" in prompt
-    assert "`)` cierra con la versión corregida" in prompt
+    assert "una versión antes de `)` es la corregida" in prompt
+    assert "un rango sin límite superior (`[2.0,)`) no tiene corrección" in prompt
+    assert "Redacta cada action en español; los ejemplos solo muestran cómo tratar las versiones" in prompt
+    english = system_prompt(
+        ReasonCatalog.default(), SensitivityProfile.named("normal"), JudgeSettings(output_language="en")
+    )
+    assert "Redacta cada action en inglés" in english  # JUE-MIT-08: the examples do not set the language
     assert "`]` cierra con la última versión vulnerable y no nombra ninguna corrección" in prompt
     assert "recomienda una versión corregida solo si otra cita N1 la nombra" in prompt
     assert "Con varios rangos del mismo producto (fabricante:producto)" in prompt
