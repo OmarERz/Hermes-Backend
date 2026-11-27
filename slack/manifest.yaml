@@ -1,0 +1,26 @@
+# Slack app manifest of Hermes (F11.1, D-085): Socket Mode, minimal scopes. Create the app from it at
+# https://api.slack.com/apps → Create New App → From an app manifest (guide: SLACK.md).
+# - chat:write: post messages and the ephemeral feedback answers (the bot must be invited to each channel)
+# - users:read + users:read.email: map the user who clicks a button to their e-mail (FeedbackService checks the role)
+# Socket Mode needs an app-level token with connections:write; Slack creates it apart (Basic Information →
+# App-Level Tokens), it cannot be declared here. No request URLs: nothing is exposed to the internet.
+display_information:
+  name: Hermes
+  description: Avisos de vulnerabilidades priorizadas y feedback de los analistas.
+  background_color: "#1d3557"
+features:
+  bot_user:
+    display_name: Hermes
+    always_online: true
+oauth_config:
+  scopes:
+    bot:
+      - chat:write
+      - users:read
+      - users:read.email
+settings:
+  interactivity:
+    is_enabled: true
+  org_deploy_enabled: false
+  socket_mode_enabled: true
+  token_rotation_enabled: false

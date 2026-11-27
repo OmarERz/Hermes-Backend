@@ -27,7 +27,7 @@ from sqlalchemy.orm import Session, sessionmaker
 
 from core.db import models as m
 from core.itop.outbox import ItopWrite, comment_payload, record_write
-from notifications_api import FeedbackInput, FeedbackResult
+from notifications_api import FeedbackInput, FeedbackRejected, FeedbackResult
 
 log = logging.getLogger("core.feedback.service")
 
@@ -75,12 +75,11 @@ class _Rated:
     clicked: m.Ticket | None
 
 
-class FeedbackRejectedError(Exception):
-    """The feedback is not accepted. `code` is stable; the message never echoes the input (SEG-21)."""
+class FeedbackRejectedError(FeedbackRejected):
+    """The feedback is not accepted. `code` is stable; the message never echoes the input (SEG-21).
 
-    def __init__(self, code: str) -> None:
-        super().__init__(code)
-        self.code = code
+    A `notifications_api.FeedbackRejected`, so the Slack module (which imports only the contract) catches it too.
+    """
 
 
 def utcnow() -> datetime:
