@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import uuid
 from dataclasses import dataclass
-from typing import Final
+from typing import Any, Final
 
 from sqlalchemy import text
 from sqlalchemy.orm import Session
@@ -12,9 +12,12 @@ from sqlalchemy.orm import Session
 ISSUES: Final = ("software_unmapped", "exposure_unknown", "unclassified", "owner_missing", "custodian_missing")
 MAX_PAGE: Final = 200
 
+# The last column is how many items match, computed before LIMIT in the same statement (one snapshot): a list and
+# its total never contradict each other, even while an analyst maps a CPE or a sync adds a CI (F18.6).
 _ROWS = text(
     "SELECT i.issue, i.asset_id, a.itop_ci_id, a.name, a.itop_class, i.software_product_id, p.itop_name, "
-    "(SELECT count(*) FROM installed_software s WHERE s.software_product_id = p.id AND s.removed_at IS NULL) "
+    "(SELECT count(*) FROM installed_software s WHERE s.software_product_id = p.id AND s.removed_at IS NULL), "
+    "count(*) OVER () "
     "FROM inventory_issue i "
     "LEFT JOIN asset a ON a.id = i.asset_id "
     "LEFT JOIN software_product p ON p.id = i.software_product_id "
@@ -37,13 +40,22 @@ class PendingItem:
     installations: int | None  # live installations of an unmapped product
 
 
-def list_pending(session: Session, issue: str | None = None, *, limit: int = 50, offset: int = 0) -> list[PendingItem]:
+def _rows(session: Session, issue: str | None, limit: int, offset: int) -> list[Any]:
     if issue is not None and issue not in ISSUES:
         raise ValueError("unknown issue")
     if not 1 <= limit <= MAX_PAGE or offset < 0:
         raise ValueError("limit must be 1 to 200 and offset not negative")
-    rows = session.execute(_ROWS, {"issue": issue, "limit": limit, "offset": offset})
-    return [PendingItem(*row) for row in rows]
+    return list(session.execute(_ROWS, {"issue": issue, "limit": limit, "offset": offset}))
+
+
+def list_pending(session: Session, issue: str | None = None, *, limit: int = 50, offset: int = 0) -> list[PendingItem]:
+    return [PendingItem(*row[:-1]) for row in _rows(session, issue, limit, offset)]
+
+
+def first_pending(session: Session, issue: str, *, limit: int = MAX_PAGE) -> tuple[list[PendingItem], int]:
+    """The first `limit` items of one type and how many of that type there are, both read by one statement."""
+    rows = _rows(session, issue, limit, 0)
+    return [PendingItem(*row[:-1]) for row in rows], int(rows[0][-1]) if rows else 0
 
 
 def count_pending(session: Session) -> dict[str, int]:

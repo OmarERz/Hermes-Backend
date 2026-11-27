@@ -33,7 +33,7 @@ from core.cpe.candidates import (
 from core.cpe.mapping import MappingError, set_mapping
 from core.cpe.mapping import MappingInput as MappingData
 from core.db.models import AppUser, AuditLog, CpeMapping
-from core.inventory.pending import MAX_PAGE, PendingItem, count_pending, list_pending
+from core.inventory.pending import MAX_PAGE, PendingItem, first_pending
 
 router = APIRouter(tags=["sources and inventory"])
 CurrentUserDep = Annotated[CurrentUser, Depends(get_current_user)]
@@ -78,13 +78,11 @@ def pending_inventory(session: SessionDep) -> InventoryPending:
 
     `outside_delivery_model` stays empty: the iTop cache has no delivery model to compare the custodian teams with
     (pendientes F12 #34)."""
-    lists = {
-        field: [_inventory_item(i) for i in list_pending(session, issue, limit=MAX_PAGE)]
-        for issue, field in ISSUE_FIELDS.items()
-    }
-    counts = count_pending(session)
+    pages = {field: first_pending(session, issue, limit=MAX_PAGE) for issue, field in ISSUE_FIELDS.items()}
+    lists = {field: [_inventory_item(i) for i in items] for field, (items, _total) in pages.items()}
+    # Each total comes from the statement that read its list, so the two never contradict each other
     totals = InventoryPendingTotals(
-        **{field: counts[issue] for issue, field in ISSUE_FIELDS.items()}, outside_delivery_model=0
+        **{field: total for field, (_items, total) in pages.items()}, outside_delivery_model=0
     )
     return InventoryPending(**lists, outside_delivery_model=[], totals=totals)
 

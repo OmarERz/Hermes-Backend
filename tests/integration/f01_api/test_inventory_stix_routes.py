@@ -9,7 +9,7 @@ from typing import Any
 import pytest
 from fastapi.testclient import TestClient
 from pydantic import SecretStr
-from sqlalchemy import Engine, text
+from sqlalchemy import Engine, event, text
 from sqlalchemy.orm import Session, sessionmaker
 
 from api.app import create_app
@@ -285,3 +285,24 @@ def test_pending_rows_carry_their_own_ids_classes_and_the_totals(client: TestCli
             ("CI-77", "Server", None)
         ]
     assert body["outside_delivery_model"] == []
+
+
+def test_each_pending_total_is_read_by_the_statement_of_its_list(client: TestClient, engine: Engine) -> None:
+    """F18.6 (feature review P1): a list and its total come from one statement, one snapshot, so a CPE mapped or a
+    CI synced between two reads can never give a list that contradicts its total."""
+    seed_inventory(engine)
+    as_role(client, Role.READER)
+    reads: list[str] = []
+
+    def record(_conn: Any, _cursor: Any, statement: str, *_args: Any) -> None:
+        if "inventory_issue" in statement:
+            reads.append(statement)
+
+    event.listen(engine, "before_cursor_execute", record)
+    try:
+        body = client.get("/api/pending/inventory").json()
+    finally:
+        event.remove(engine, "before_cursor_execute", record)
+    assert len(reads) == 5  # one per list, no separate count
+    assert all("count(*) OVER ()" in statement for statement in reads)
+    assert body["totals"]["software_without_cpe"] == len(body["software_without_cpe"]) == 1
