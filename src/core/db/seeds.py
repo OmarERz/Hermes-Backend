@@ -337,6 +337,20 @@ def _inventory(session: Session, *, edge: bool) -> None:
         for i, (asset, status) in enumerate([(payments, "active"), (intranet, "inactive")], start=1)
     ]
     session.add_all(installs)
+    support = m.SoftwareLicence(  # F18.3: one installation with its iTop licence, so the front has one without iTop
+        id=_id(),
+        itop_licence_id="LIC-1",
+        software_product_id=product.id,
+        name="Soporte OpenSSL",
+        usage_limit="10 servidores",
+        start_date=date(2026, 1, 1),
+        end_date=date(2026, 12, 31),
+        perpetual=False,
+        synced_at=NOW,
+    )
+    session.add(support)
+    session.flush()
+    installs[0].software_licence_id = support.id
     cve = m.Cve(
         id="CVE-2026-10001",
         description="Desbordamiento sintético para la demo",
