@@ -23,6 +23,7 @@ from api.routes.models import (
     TelemetryDay,
     TelemetrySummary,
     TelemetryWindow,
+    parse_moment,
 )
 from core.views import telemetry, timeline
 from core.views.common import iso
@@ -37,11 +38,6 @@ def get_llm_setup(request: Request) -> telemetry.LlmSetup:
 
 
 LlmSetupDep = Annotated[telemetry.LlmSetup, Depends(get_llm_setup)]
-
-
-def parse_moment(value: str | None) -> datetime | None:
-    """An RFC 3339 filter already checked by its model (`DateTimeString`)."""
-    return datetime.fromisoformat(value.upper()) if value else None
 
 
 @router.get("/api/telemetry/summary", dependencies=[guard("GET", "/api/telemetry/summary")])

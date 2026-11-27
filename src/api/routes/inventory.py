@@ -5,7 +5,7 @@ The inventory belongs to iTop (D-003): these routes never write; the front links
 
 from __future__ import annotations
 
-from typing import Annotated, cast
+from typing import Annotated, Literal, cast
 
 from fastapi import APIRouter, Query
 
@@ -14,8 +14,9 @@ from api.pagination import PAGINATED_RESPONSES, Page, PageQuery, Signer, decode_
 from api.routes._auth import guard
 from api.routes._db import SessionDep
 from api.routes._paths import CiId
-from api.routes.findings import ItopUrl
+from api.routes.findings import ItopUrl, licence_info
 from api.routes.models import (
+    CatalogueLicence,
     Classification,
     Criticality,
     InstalledSoftwareItem,
@@ -23,6 +24,7 @@ from api.routes.models import (
     InventoryAssetFilters,
     InventorySummary,
     Level,
+    SoftwareCategory,
     SoftwareFilters,
     SoftwareHealth,
     SoftwareItem,
@@ -54,6 +56,9 @@ def _asset_model(a: assets.InventoryAsset) -> InventoryAsset:
         risk=a.risk,
         level=cast(Level | None, a.level),
         software_count=a.software_count,
+        description=a.description,
+        cpu=a.cpu,
+        ram=a.ram,
     )
 
 
@@ -131,7 +136,9 @@ def inventory_summary(session: SessionDep) -> InventorySummary:
 def inventory_software(
     params: PageQuery, signer: Signer, session: SessionDep, filters: Annotated[SoftwareFilters, Query()]
 ) -> Page[SoftwareItem]:
-    """Software installed on live CIs, alphabetical (ST-1): versions, instances, CPE and its worst open level."""
+    """Software installed on live CIs, alphabetical (ST-1): versions, instances, CPE, its worst open level and,
+    from iTop, its live installations per category (ST-2, filtered by any of them) and per status, and its live
+    licences with the installations each one covers (ST-3, proposal §9.1)."""
     found, next_key = assets.list_software(
         session,
         assets.SoftwareQuery(
@@ -139,6 +146,7 @@ def inventory_software(
             has_cpe=filters.has_cpe,
             worst_level=filters.worst_level,
             with_vulnerabilities=filters.with_vulnerabilities,
+            category=filters.category,
         ),
         after=_name_key(params, "inventory_software"),
         limit=params.limit,
@@ -156,6 +164,16 @@ def inventory_software(
                 has_cpe=s.cpe is not None,
                 open_vulnerabilities=s.open_vulnerabilities,
                 worst_level=cast(Level | None, s.worst_level),
+                categories=cast(list[SoftwareCategory], s.categories),
+                by_category=s.by_category,
+                by_status=s.by_status,
+                licences=[
+                    CatalogueLicence.model_validate(
+                        {**licence_info(item.licence).model_dump(), "instances": item.instances}
+                    )
+                    for item in s.licences
+                ],
+                licensed_instances=s.licensed_instances,
             )
             for s in found
         ],
@@ -167,8 +185,8 @@ def inventory_software(
     "/api/inventory/assets/{ci_id}/software", dependencies=[guard("GET", "/api/inventory/assets/{ci_id}/software")]
 )
 def asset_software(ci_id: CiId, session: SessionDep) -> list[InstalledSoftwareItem]:
-    """The software installed on one live CI (AS-2), with its version, CPE and worst open level; 404 if the CI is
-    not in the live inventory."""
+    """The software installed on one live CI (AS-2), with its version, CPE and worst open level, and its iTop
+    category, status, description and live licence (ST-3); 404 if the CI is not in the live inventory."""
     found = assets.asset_software(session, ci_id)
     if found is None:
         raise ApiError(404, "not_found", "El activo no existe.")
@@ -182,6 +200,10 @@ def asset_software(ci_id: CiId, session: SessionDep) -> list[InstalledSoftwareIt
             has_cpe=i.cpe is not None,
             open_vulnerabilities=i.open_vulnerabilities,
             worst_level=cast(Level | None, i.worst_level),
+            category=cast(SoftwareCategory | None, i.category),
+            status=cast(Literal["active", "inactive"] | None, i.status),
+            description=i.description,
+            licence=None if i.licence is None else licence_info(i.licence),
         )
         for i in found
     ]

@@ -1,0 +1,38 @@
+meta {
+  name: inventory-assets-itop-fields
+  type: http
+  seq: 1
+}
+
+get {
+  url: {{baseUrl}}/api/inventory/assets?limit=50
+  body: none
+  auth: bearer
+}
+
+auth:bearer {
+  token: {{readerToken}}
+}
+
+assert {
+  res.status: eq 200
+  res.body.items: isArray
+}
+
+tests {
+  test("every CI carries its iTop description, CPU and RAM as text or null", function () {
+    for (const ci of res.body.items) {
+      for (const key of ["description", "cpu", "ram"]) {
+        expect(ci).to.have.property(key);
+        expect(ci[key] === null || typeof ci[key] === "string").to.equal(true);
+      }
+      expect(ci.itop_class).to.be.a("string");
+    }
+  });
+}
+
+docs {
+  Every live CI with the iTop fields of F18.3: description, CPU and RAM, free text shown as given (D-088).
+
+  operationId: list_inventory_assets
+}

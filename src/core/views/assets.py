@@ -7,6 +7,13 @@ A CI's open findings are its current scored findings (not fixed, D-035); its ris
 never a sum (FRO-11). Software counts only installations not removed, on live CIs. A version is known unless iTop
 left it empty or with a placeholder (`UNKNOWN_VERSIONS`). The inventory is aggregated in memory, like the grouped
 views: one query per table, then plain Python, enough for the prototype's inventory.
+
+The iTop fields of F18.3 (D-088) are shown as iTop gives them: the CI's description, CPU and RAM, and each
+installation's category (its iTop class), status, description and live licence. The catalogue aggregates them per
+product over its live installations (F18.3 proposal §9.1): the categories (user decision 1), installations per
+category and per status, the product's live licences with the installations each one covers, and how many
+installations have a live licence assigned. Lists read only what they aggregate; the per-CI list adds the
+description and the licence's fields.
 """
 
 from __future__ import annotations
@@ -23,6 +30,7 @@ from sqlalchemy.orm import Session
 
 from core.cpe.candidates import cpe_uri
 from core.views.common import LEVELS, ci_url, scored_findings
+from core.views.groups import Licence
 
 NameKey = tuple[str, str]  # (case-folded name, id) of the last row of a page, alphabetical
 UNKNOWN_VERSIONS: Final = frozenset(
@@ -33,26 +41,50 @@ MAX_VERSIONS: Final = 20
 _ASSETS: Final = text(
     """
     SELECT a.id, a.itop_ci_id, a.itop_class, a.name, a.criticality, a.exposed, a.confidentiality, a.personal_data,
-           a.service, a.os, a.synced_at, pe.name AS owner, t.name AS custodian
+           a.service, a.os, a.description, a.cpu, a.ram, a.synced_at, pe.name AS owner, t.name AS custodian
       FROM asset a
       LEFT JOIN person pe ON pe.id = a.owner_person_id
       LEFT JOIN team t ON t.id = a.custodian_team_id
      WHERE a.decommissioned_at IS NULL
-       AND (CAST(:ci AS text) IS NULL OR a.itop_ci_id = CAST(:ci AS text))
     """
 )
+# Live installations on live CIs, with what the aggregates need; `licence_id` is the live licence assigned.
 _INSTALLS: Final = text(
     """
     SELECT i.asset_id, i.software_product_id AS product_id, p.itop_name AS product, i.version,
+           i.itop_class AS category, i.status, l.id AS licence_id,
            c.nvd_vendor, c.nvd_product, c.cna_vendor, c.cna_product
       FROM installed_software i
       JOIN asset a ON a.id = i.asset_id AND a.decommissioned_at IS NULL
       JOIN software_product p ON p.id = i.software_product_id
+      LEFT JOIN software_licence l ON l.id = i.software_licence_id AND l.removed_at IS NULL
       LEFT JOIN cpe_mapping c ON c.software_product_id = p.id
      WHERE i.removed_at IS NULL
-       AND (CAST(:asset AS uuid) IS NULL OR i.asset_id = CAST(:asset AS uuid))
     """
 )
+# The live installations of one CI, with the description and the live licence's fields (AS-2, ST-3)
+_ASSET_INSTALLS: Final = text(
+    """
+    SELECT i.asset_id, i.software_product_id AS product_id, p.itop_name AS product, i.version,
+           i.itop_class AS category, i.status, i.description,
+           l.name AS licence_name, l.usage_limit, l.start_date, l.end_date, l.perpetual,
+           c.nvd_vendor, c.nvd_product, c.cna_vendor, c.cna_product
+      FROM installed_software i
+      JOIN software_product p ON p.id = i.software_product_id
+      LEFT JOIN software_licence l ON l.id = i.software_licence_id AND l.removed_at IS NULL
+      LEFT JOIN cpe_mapping c ON c.software_product_id = p.id
+     WHERE i.removed_at IS NULL AND i.asset_id = :asset
+    """
+)
+# Live iTop licences tied to a product (F18.3): assigned or not, the catalogue shows them under their product
+_LICENCES: Final = text(
+    """
+    SELECT l.id, l.software_product_id AS product_id, l.name, l.usage_limit, l.start_date, l.end_date, l.perpetual
+      FROM software_licence l
+     WHERE l.removed_at IS NULL AND l.software_product_id IS NOT NULL
+    """
+)
+STATUSES: Final = ("active", "inactive", "unknown")  # `unknown`: no status in iTop
 
 
 def version_known(version: str | None) -> bool:
@@ -70,6 +102,18 @@ def _cpe(row: Any) -> str | None:
     if row.cna_vendor and row.cna_product:
         return cpe_uri(row.cna_vendor, row.cna_product)
     return None
+
+
+def _licence(row: Any) -> Licence | None:
+    """The live iTop licence of an installation row, or None (a removed licence is not shown)."""
+    if row.licence_name is None:
+        return None
+    return Licence(row.licence_name, row.usage_limit, row.start_date, row.end_date, row.perpetual)
+
+
+def _installs(session: Session) -> list[Any]:
+    """Installations not removed, on live CIs."""
+    return list(session.execute(_INSTALLS))
 
 
 @dataclass
@@ -110,6 +154,10 @@ class InventoryAsset:
     risk: int | None
     level: str | None
     software_count: int
+    # F18.3 (D-088): iTop free text, shown as given (data, never instructions); None without data in iTop
+    description: str | None = None
+    cpu: str | None = None
+    ram: str | None = None
 
 
 @dataclass(frozen=True)
@@ -137,11 +185,12 @@ class AssetQuery:
         return text_ok and all(wanted is None or wanted == value for wanted, value in checks)
 
 
-def _assets(session: Session, itop_base_url: str | None, ci: str | None = None) -> list[InventoryAsset]:
-    findings = _findings(session)
-    software: Counter[uuid.UUID] = Counter(row.asset_id for row in session.execute(_INSTALLS, {"asset": None}))
+def _assets(
+    session: Session, itop_base_url: str | None, findings: _Findings, installs: Sequence[Any]
+) -> list[InventoryAsset]:
+    software: Counter[uuid.UUID] = Counter(row.asset_id for row in installs)
     out: list[InventoryAsset] = []
-    for row in session.execute(_ASSETS, {"ci": ci}):
+    for row in session.execute(_ASSETS):
         current = findings.by_asset.get(row.id, [])
         risk = max((final for _g, _l, _k, final in current), default=None)
         out.append(
@@ -164,6 +213,9 @@ def _assets(session: Session, itop_base_url: str | None, ci: str | None = None) 
                 risk=risk,
                 level=_worst(level for _g, level, _k, _f in current),
                 software_count=software.get(row.id, 0),
+                description=row.description,
+                cpu=row.cpu,
+                ram=row.ram,
             )
         )
     return out
@@ -188,10 +240,17 @@ def list_assets(
     session: Session, query: AssetQuery, itop_base_url: str | None, *, after: NameKey | None, limit: int
 ) -> tuple[list[InventoryAsset], NameKey | None]:
     """Every live CI that matches, alphabetical; the second value keys the next page."""
-    return page_by_name((a for a in _assets(session, itop_base_url) if query.matches(a)), asset_key, after, limit)
+    found = _assets(session, itop_base_url, _findings(session), _installs(session))
+    return page_by_name((a for a in found if query.matches(a)), asset_key, after, limit)
 
 
 # --- software ------------------------------------------------------------------------------------------------
+@dataclass(frozen=True)
+class ProductLicence:
+    licence: Licence
+    instances: int  # live installations of the product that have it assigned
+
+
 @dataclass(frozen=True)
 class SoftwareItem:
     id: uuid.UUID
@@ -203,6 +262,11 @@ class SoftwareItem:
     cpe: str | None
     open_vulnerabilities: int
     worst_level: str | None
+    categories: list[str] = field(default_factory=list)  # distinct iTop classes of its live installations, sorted
+    by_category: dict[str, int] = field(default_factory=dict)  # live installations per iTop class (if it has one)
+    by_status: dict[str, int] = field(default_factory=dict)  # live installations per status, keys `STATUSES`
+    licences: list[ProductLicence] = field(default_factory=list)  # the product's live licences, by name
+    licensed_instances: int = 0  # live installations with a live licence assigned (any licence, as iTop links it)
 
 
 @dataclass(frozen=True)
@@ -211,6 +275,7 @@ class SoftwareQuery:
     has_cpe: bool | None = None
     worst_level: str | None = None
     with_vulnerabilities: bool | None = None
+    category: str | None = None  # the product counts when any of its live installations has it
 
     def matches(self, s: SoftwareItem) -> bool:
         return (
@@ -218,30 +283,46 @@ class SoftwareQuery:
             and (self.has_cpe is None or self.has_cpe == (s.cpe is not None))
             and (self.worst_level is None or self.worst_level == s.worst_level)
             and (self.with_vulnerabilities is None or self.with_vulnerabilities == (s.open_vulnerabilities > 0))
+            and (self.category is None or self.category in s.categories)
         )
 
 
-def _software(session: Session) -> list[SoftwareItem]:
-    findings = _findings(session)
+def _software(findings: _Findings, installs: Sequence[Any], licences: Sequence[Any] = ()) -> list[SoftwareItem]:
     rows: dict[uuid.UUID, list[Any]] = defaultdict(list)
-    for row in session.execute(_INSTALLS, {"asset": None}):
+    for row in installs:
         rows[row.product_id].append(row)
+    tied: dict[uuid.UUID, list[Any]] = defaultdict(list)
+    for licence in sorted(licences, key=lambda r: (r.name.casefold(), str(r.id))):
+        tied[licence.product_id].append(licence)
     out: list[SoftwareItem] = []
-    for product_id, installs in rows.items():
-        first = installs[0]
+    for product_id, own in rows.items():
+        first = own[0]
         current = findings.by_product.get(first.product, [])
-        known = sorted({r.version for r in installs if version_known(r.version)})
+        known = sorted({r.version for r in own if version_known(r.version)})
+        by_category = dict(sorted(Counter(r.category for r in own if r.category is not None).items()))
+        statuses = Counter(r.status or "unknown" for r in own)
+        assigned = Counter(r.licence_id for r in own if r.licence_id is not None)
         out.append(
             SoftwareItem(
                 id=product_id,
                 name=first.product,
                 versions=known[:MAX_VERSIONS],
                 version_known=bool(known),
-                instances=len(installs),
-                ci_count=len({r.asset_id for r in installs}),
+                instances=len(own),
+                ci_count=len({r.asset_id for r in own}),
                 cpe=_cpe(first),
                 open_vulnerabilities=len({group for group, _l, _a in current}),
                 worst_level=_worst(level for _g, level, _a in current),
+                categories=list(by_category),
+                by_category=by_category,
+                by_status={status: statuses[status] for status in STATUSES},
+                licences=[
+                    ProductLicence(
+                        Licence(r.name, r.usage_limit, r.start_date, r.end_date, r.perpetual), assigned[r.id]
+                    )
+                    for r in tied.get(product_id, [])
+                ],
+                licensed_instances=sum(assigned.values()),
             )
         )
     return out
@@ -255,7 +336,8 @@ def list_software(
     session: Session, query: SoftwareQuery, *, after: NameKey | None, limit: int
 ) -> tuple[list[SoftwareItem], NameKey | None]:
     """Software installed on live CIs, alphabetical; the second value keys the next page."""
-    return page_by_name((s for s in _software(session) if query.matches(s)), software_key, after, limit)
+    found = _software(_findings(session), _installs(session), list(session.execute(_LICENCES)))
+    return page_by_name((s for s in found if query.matches(s)), software_key, after, limit)
 
 
 @dataclass(frozen=True)
@@ -267,6 +349,11 @@ class InstalledItem:
     cpe: str | None
     open_vulnerabilities: int
     worst_level: str | None
+    # F18.3 (D-088): the installation as iTop has it; None until synced (category also for a custom class)
+    category: str | None = None
+    status: str | None = None  # active | inactive; only shown, an inactive installation is still scanned
+    description: str | None = None
+    licence: Licence | None = None
 
 
 def asset_software(session: Session, ci_id: str) -> list[InstalledItem] | None:
@@ -279,7 +366,7 @@ def asset_software(session: Session, ci_id: str) -> list[InstalledItem] | None:
     findings = _findings(session)
     groups_here = {group: level for group, level, _k, _f in findings.by_asset.get(asset_id, [])}
     out: list[InstalledItem] = []
-    for row in session.execute(_INSTALLS, {"asset": asset_id}):
+    for row in session.execute(_ASSET_INSTALLS, {"asset": asset_id}):
         current = [
             (group, level)
             for group, level, asset in findings.by_product.get(row.product, [])
@@ -294,6 +381,10 @@ def asset_software(session: Session, ci_id: str) -> list[InstalledItem] | None:
                 cpe=_cpe(row),
                 open_vulnerabilities=len({group for group, _l in current}),
                 worst_level=_worst(level for _g, level in current),
+                category=row.category,
+                status=row.status,
+                description=row.description,
+                licence=_licence(row),
             )
         )
     return sorted(out, key=lambda i: (i.name.casefold(), i.version, str(i.software_id)))
@@ -329,9 +420,10 @@ def _counts(values: Sequence[str]) -> dict[str, int]:
 
 
 def summary(session: Session) -> Summary:
-    """Totals of the live inventory and the health of its software (D-088)."""
-    assets = _assets(session, None)
-    software = _software(session)
+    """Totals of the live inventory and the health of its software (D-088). Each table is read once."""
+    findings, installs = _findings(session), _installs(session)
+    assets = _assets(session, None, findings, installs)
+    software = _software(findings, installs)
     exposure = ["exposed" if a.exposed else "internal" if a.exposed is False else "unknown" for a in assets]
     return Summary(
         total_assets=len(assets),

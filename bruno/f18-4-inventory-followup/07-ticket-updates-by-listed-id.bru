@@ -1,0 +1,47 @@
+meta {
+  name: ticket-updates-by-listed-id
+  type: http
+  seq: 7
+}
+
+get {
+  url: {{baseUrl}}/api/tickets/updates?ticket_itop_id={{listedTicketId}}&limit=20
+  body: none
+  auth: bearer
+}
+
+auth:bearer {
+  token: {{readerToken}}
+}
+
+script:pre-request {
+  const hermes = require("./lib/hermes");
+  const page = await hermes.api(bru, "GET", "/api/tickets?limit=50", "readerToken");
+  bru.setVar("listedTicketId", "");
+  if (!hermes.needData(bru, page.items[0] || null, "a ticket in iTop")) return;
+  const numbered = page.items.find((t) => t.ticket_itop_id !== null);
+  if (!numbered) {
+    bru.runner.skipRequest(); // only demo tickets (DEMO-n): none has an id the filter takes
+    return;
+  }
+  bru.setVar("listedTicketId", numbered.ticket_itop_id);
+}
+
+assert {
+  res.status: eq 200
+  res.body.items: isArray
+}
+
+tests {
+  test("the log of the ticket picked from the list is only that ticket's", function () {
+    const id = bru.getVar("listedTicketId");
+    for (const entry of res.body.items) expect(entry.ticket_itop_id).to.equal(id);
+  });
+}
+
+docs {
+  The `ticket_itop_id` of the first listed ticket that has one filters its log; skipped when no ticket exists in
+  iTop yet or every listed ticket is a demo one (DEMO-n, no numeric id).
+
+  operationId: list_ticket_updates
+}
