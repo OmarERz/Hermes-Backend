@@ -579,6 +579,25 @@ def test_addresses_lose_only_the_quotes_and_brackets_around_them(fact: Traceable
 
 
 @pytest.mark.parametrize(
+    ("fact", "backed"),
+    [
+        ("https://[2001:db8::1]", True),  # a bracketed list that starts with an IPv6 URL: its own ']' stays
+        ("https://[2001:db8::1", False),  # so a truncated address is not backed
+    ],
+)
+def test_the_closing_bracket_is_trimmed_only_when_unbalanced(fact: str, backed: bool) -> None:
+    quote = "Ver [https://[2001:db8::1], https://b.example] ahora."
+    assert TraceableFact(FactKind.URL, fact).in_quote(quote) is backed
+
+
+@pytest.mark.parametrize(
+    "quote", ["Ver {https://a.example/{id}} ahora.", "Ver \u2018https://a.example/{id}\u2019 ahora."]
+)
+def test_braces_and_single_typographic_quotes_close_around_an_address(quote: str) -> None:
+    assert TraceableFact(FactKind.URL, "https://a.example/{id}").in_quote(quote)
+
+
+@pytest.mark.parametrize(
     ("action", "expected"),
     [
         ("Ver https://[2001:db8::1234] ahora.", ["https://[2001:db8::1234]"]),  # an IPv6 bracket is part of it
