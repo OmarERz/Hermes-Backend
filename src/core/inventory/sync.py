@@ -280,7 +280,11 @@ def _sync_licences(run: _Run) -> dict[str, m.SoftwareLicence]:
 def _link_licences(
     run: _Run, installed: dict[str, m.InstalledSoftware], licences: dict[str, m.SoftwareLicence]
 ) -> None:
-    """Point each written installation at its live licence, as iTop says (X-3); a mismatch is only warned."""
+    """Point each installation iTop still has at its live licence, as iTop says (X-3); a mismatch is only warned.
+
+    The mismatch compares iTop's own Software records, as iTop does: two records with one name share a product here.
+    """
+    licensed_software = {lic.itop_id: lic.software_itop_id for lic in run.snapshot.licences}
     for item in run.snapshot.instances:
         row = installed.get(item.itop_id)
         if row is None:
@@ -291,7 +295,10 @@ def _link_licences(
                 f"Software instance {item.itop_id}: licence {item.licence_itop_id} is not in the inventory read, "
                 "left empty"
             )
-        elif licence is not None and licence.software_product_id not in (None, row.software_product_id):
+        elif licence is not None and licensed_software.get(item.licence_itop_id or "") not in (
+            None,
+            item.software_itop_id,
+        ):
             run.result.warnings.append(
                 f"Software instance {item.itop_id}: licence {item.licence_itop_id} is for another software, kept"
             )

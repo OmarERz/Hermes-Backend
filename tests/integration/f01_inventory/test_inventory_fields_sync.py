@@ -213,3 +213,16 @@ def test_an_installation_that_loses_its_version_still_follows_itop(engine: Engin
             None,
             None,
         )
+
+
+def test_a_licence_of_another_record_with_the_same_name_is_warned(engine: Engine) -> None:
+    """Two iTop Software records named alike share one local product; iTop's own records are compared."""
+    double = build_double()
+    double.add("Software", 204, name="nginx", vendor="F5", version="1.26.0", type="WebServer")
+    double.add("SoftwareLicence", 402, name="nginx 1.26 plus", software_id="204", perpetual="yes")
+    double.add("WebServer", 304, name="nginx @ vm-01", system_id="110", software_id="200", softwarelicence_id="402")
+    result = run_sync(engine, double)
+    assert "Software instance 304: licence 402 is for another software, kept" in result.warnings
+    assert not [w for w in result.warnings if w.startswith("Software instance 300:")]
+    with Session(engine) as session:
+        assert installation(session, "304").software_licence_id == licence(session, "402").id
