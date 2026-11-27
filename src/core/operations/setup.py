@@ -12,7 +12,7 @@ import uuid
 from collections.abc import Mapping
 from dataclasses import dataclass
 from datetime import datetime
-from typing import Final
+from typing import Final, Literal
 
 from sqlalchemy import text
 from sqlalchemy.orm import Session
@@ -46,12 +46,18 @@ _MARKS: Final = text(
 )
 
 
+DoneSource = Literal["data", "manual"]
+
+
 @dataclass(frozen=True)
 class SetupStep:
     n: int
     name: str
     done: bool
     skipped: bool
+    # Why it is done (F18.6): `data` when the data shows it (a mark changes nothing then), `manual` when only an
+    # admin's mark makes it done (marking it not done undoes it); None while it is not done
+    done_source: DoneSource | None = None
 
 
 def _marks(session: Session) -> dict[int, tuple[bool, bool]]:
@@ -80,8 +86,9 @@ def setup_status(session: Session, connections_ok: bool, language: str = DEFAULT
     steps: list[SetupStep] = []
     for n, name in enumerate(STEP_NAMES.get(language, STEP_NAMES[DEFAULT_LANGUAGE]), start=1):
         marked_done, marked_skipped = marks.get(n, (False, False))
-        done = bool(shown[n]) or marked_done
-        steps.append(SetupStep(n=n, name=name, done=done, skipped=marked_skipped and not done))
+        source: DoneSource | None = "data" if shown[n] else "manual" if marked_done else None
+        done = source is not None
+        steps.append(SetupStep(n=n, name=name, done=done, skipped=marked_skipped and not done, done_source=source))
     return steps
 
 

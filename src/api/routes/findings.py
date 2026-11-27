@@ -32,6 +32,7 @@ from api.routes.models import (
     Classification,
     ComparisonRow,
     ComparisonSummary,
+    Criticality,
     DoubleReviewInfo,
     FeedbackEntry,
     FeedbackRequest,
@@ -207,9 +208,10 @@ def vulnerability_detail(group_id: UuidId, session: SessionDep, itop_url: ItopUr
 
 
 @router.get("/api/assets/{ci_id}", dependencies=[guard("GET", "/api/assets/{ci_id}")])
-def asset_detail(ci_id: CiId, session: SessionDep) -> AssetDetail:
-    """A live CI and its vulnerabilities; each one carries this CI's final, level and status (D-035)."""
-    found = views.asset_detail(session, ci_id)
+def asset_detail(ci_id: CiId, session: SessionDep, itop_url: ItopUrl) -> AssetDetail:
+    """A live CI and its vulnerabilities; each one carries this CI's final, level and status (D-035). The CI's
+    inventory fields and its link to iTop are the ones of the inventory list (F18.6)."""
+    found = views.asset_detail(session, ci_id, itop_url)
     if found is None:
         raise _not_found("El activo")
     return AssetDetail(
@@ -225,6 +227,13 @@ def asset_detail(ci_id: CiId, session: SessionDep) -> AssetDetail:
         cpu=found.cpu,
         ram=found.ram,
         software=[_asset_software(s) for s in found.software],
+        criticality=cast(Criticality | None, found.criticality),
+        exposed=found.exposed,
+        personal_data=found.personal_data,
+        os=found.os,
+        service=found.service,
+        synced_at=None if found.synced_at is None else iso(found.synced_at),
+        itop_url=found.itop_url,
     )
 
 

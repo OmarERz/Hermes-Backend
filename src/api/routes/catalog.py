@@ -18,6 +18,7 @@ from api.routes.models import (
     CpeCandidate,
     InventoryItem,
     InventoryPending,
+    InventoryPendingTotals,
     Mapping,
     MappingInput,
 )
@@ -32,7 +33,7 @@ from core.cpe.candidates import (
 from core.cpe.mapping import MappingError, set_mapping
 from core.cpe.mapping import MappingInput as MappingData
 from core.db.models import AppUser, AuditLog, CpeMapping
-from core.inventory.pending import MAX_PAGE, PendingItem, list_pending
+from core.inventory.pending import MAX_PAGE, PendingItem, first_pending
 
 router = APIRouter(tags=["sources and inventory"])
 CurrentUserDep = Annotated[CurrentUser, Depends(get_current_user)]
@@ -56,24 +57,34 @@ ISSUE_DETAIL = {
 def _inventory_item(item: PendingItem) -> InventoryItem:
     if item.issue == "software_unmapped":
         count = item.installations or 0
+        product = str(item.software_product_id)
         return InventoryItem(
-            ci_id=str(item.software_product_id),
+            ci_id=product,  # kept for clients generated before F18.6; `software_product_id` names it
             name=item.software_name or "",
             detail=f"Software sin CPE ({count} instalaciones)",
+            software_product_id=product,
         )
     return InventoryItem(
-        ci_id=item.asset_itop_id or str(item.asset_id), name=item.asset_name or "", detail=ISSUE_DETAIL[item.issue]
+        ci_id=item.asset_itop_id or str(item.asset_id),
+        name=item.asset_name or "",
+        detail=ISSUE_DETAIL[item.issue],
+        itop_class=item.asset_class,
     )
 
 
 @router.get("/api/pending/inventory", dependencies=[guard("GET", "/api/pending/inventory")])
 def pending_inventory(session: SessionDep) -> InventoryPending:
-    """Inventory items waiting for a person, up to 200 per type (FRO-17); `outside_delivery_model` is not modelled."""
-    lists = {
-        field: [_inventory_item(i) for i in list_pending(session, issue, limit=MAX_PAGE)]
-        for issue, field in ISSUE_FIELDS.items()
-    }
-    return InventoryPending(**lists, outside_delivery_model=[])
+    """Inventory items waiting for a person, up to 200 per type, with the total of each type (FRO-17, F18.6).
+
+    `outside_delivery_model` stays empty: the iTop cache has no delivery model to compare the custodian teams with
+    (pendientes F12 #34)."""
+    pages = {field: first_pending(session, issue, limit=MAX_PAGE) for issue, field in ISSUE_FIELDS.items()}
+    lists = {field: [_inventory_item(i) for i in items] for field, (items, _total) in pages.items()}
+    # Each total comes from the statement that read its list, so the two never contradict each other
+    totals = InventoryPendingTotals(
+        **{field: total for field, (_items, total) in pages.items()}, outside_delivery_model=0
+    )
+    return InventoryPending(**lists, outside_delivery_model=[], totals=totals)
 
 
 @router.get("/api/cpe/candidates", dependencies=[guard("GET", "/api/cpe/candidates")])

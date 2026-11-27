@@ -117,3 +117,17 @@ def test_a_ci_without_inventory_data_answers_nulls(get: Get, licensed: Scenario)
             "licence": None,
         }
     ]
+
+
+INVENTORY_FIELDS = ("itop_class", "criticality", "exposed", "personal_data", "os", "service", "synced_at", "itop_url")
+
+
+@pytest.mark.parametrize("ci_id", ["CI-1", "CI-2", "CI-3"])
+def test_the_detail_gives_the_inventory_fields_of_the_list(get: Get, licensed: Scenario, ci_id: str) -> None:
+    """F18.6: the detail has the CI's inventory fields with the same values as GET /api/inventory/assets, so the
+    front reads one route."""
+    detail = get(f"/api/assets/{ci_id}")
+    listed = next(a for a in get("/api/inventory/assets", q=ci_id, limit=200)["items"] if a["ci_id"] == ci_id)
+    assert {k: detail[k] for k in INVENTORY_FIELDS} == {k: listed[k] for k in INVENTORY_FIELDS}
+    assert detail["itop_url"].endswith(f"class={detail['itop_class']}&id={ci_id}")
+    assert detail["synced_at"].endswith("Z")

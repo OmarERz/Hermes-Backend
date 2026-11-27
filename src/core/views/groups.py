@@ -34,7 +34,8 @@ ScoreKey = tuple[int, uuid.UUID]  # (score, id) of the last row of a page, highe
 
 _ASSET: Final = text(
     "SELECT a.id, a.itop_ci_id, a.name, a.confidentiality, pe.name AS owner, t.name AS custodian, "
-    "a.itop_class, a.description, a.cpu, a.ram "
+    "a.itop_class, a.description, a.cpu, a.ram, "
+    "a.criticality, a.exposed, a.personal_data, a.os, a.service, a.synced_at "
     "FROM asset a LEFT JOIN team t ON t.id = a.custodian_team_id "
     "LEFT JOIN person pe ON pe.id = a.owner_person_id "
     "WHERE a.itop_ci_id = :ci AND a.decommissioned_at IS NULL"
@@ -156,6 +157,14 @@ class AssetDetail:
     cpu: str | None = None
     ram: str | None = None
     software: tuple[AssetSoftware, ...] = ()
+    # F18.6: the CI's inventory fields, the same values `GET /api/inventory/assets` gives for it
+    criticality: str | None = None
+    exposed: bool | None = None
+    personal_data: bool | None = None
+    os: str | None = None
+    service: str | None = None
+    synced_at: datetime | None = None
+    itop_url: str | None = None
 
 
 def _top(rows: Sequence[ScoredFinding]) -> ScoredFinding:
@@ -307,8 +316,10 @@ def group_detail(
     return _group(rows), assets
 
 
-def asset_detail(session: Session, itop_ci_id: str) -> AssetDetail | None:
-    """A live CI with its scored findings, highest score first; None if the CI is unknown or decommissioned."""
+def asset_detail(session: Session, itop_ci_id: str, itop_base_url: str | None = None) -> AssetDetail | None:
+    """A live CI with its scored findings, highest score first; None if the CI is unknown or decommissioned.
+
+    Its inventory fields and link to iTop are the ones the inventory list gives (F18.6)."""
     if "\x00" in itop_ci_id:  # PostgreSQL text cannot hold it, so no CI has it
         return None
     asset = session.execute(_ASSET, {"ci": itop_ci_id}).one_or_none()
@@ -333,6 +344,13 @@ def asset_detail(session: Session, itop_ci_id: str) -> AssetDetail | None:
         cpu=asset.cpu,
         ram=asset.ram,
         software=asset_software(session, asset.id),
+        criticality=asset.criticality,
+        exposed=asset.exposed,
+        personal_data=asset.personal_data,
+        os=asset.os,
+        service=asset.service,
+        synced_at=asset.synced_at,
+        itop_url=ci_url(itop_base_url, asset.itop_class, asset.itop_ci_id),
     )
 
 

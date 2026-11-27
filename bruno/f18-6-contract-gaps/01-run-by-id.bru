@@ -1,0 +1,47 @@
+meta {
+  name: run-by-id
+  type: http
+  seq: 1
+}
+
+get {
+  url: {{baseUrl}}/api/runs/{{latestRunId}}
+  body: none
+  auth: bearer
+}
+
+auth:bearer {
+  token: {{readerToken}}
+}
+
+script:pre-request {
+  const hermes = require("./lib/hermes");
+  const page = await hermes.api(bru, "GET", "/api/runs?limit=1", "readerToken");
+  const first = page.items[0] || null;
+  bru.setVar("latestRunId", first ? first.id : "");
+  bru.setVar("latestRunKind", first ? first.kind : "");
+  if (!hermes.needData(bru, first, "a run")) return;
+}
+
+assert {
+  res.status: eq 200
+  res.body.id: eq {{latestRunId}}
+  res.body.kind: eq {{latestRunKind}}
+}
+
+tests {
+  test("the run has the model of a list item", function () {
+    for (const key of ["id", "kind", "status", "started_at", "finished_at", "progress", "trigger_reason", "triggered_by"]) {
+      expect(res.body).to.have.property(key);
+    }
+    expect(["queued", "running", "succeeded", "failed"]).to.include(res.body.status);
+    expect(res.body.progress).to.be.within(0, 100);
+  });
+}
+
+docs {
+  The newest run read by its id (F18.6): the same model as each item of GET /api/runs, with its current state (the
+  final one once it ends). Skipped on an installation without runs.
+
+  operationId: get_run
+}

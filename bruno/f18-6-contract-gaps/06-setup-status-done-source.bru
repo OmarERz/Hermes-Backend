@@ -1,0 +1,35 @@
+meta {
+  name: setup-status-done-source
+  type: http
+  seq: 6
+}
+
+get {
+  url: {{baseUrl}}/api/setup/status
+  body: none
+  auth: bearer
+}
+
+auth:bearer {
+  token: {{token}}
+}
+
+assert {
+  res.status: eq 200
+}
+
+tests {
+  test("a done step says where its done comes from; a pending one has none", function () {
+    expect(res.body).to.have.length(7);
+    for (const step of res.body) {
+      if (step.done) expect(["data", "manual"]).to.include(step.done_source);
+      else expect(step.done_source).to.equal(null);
+    }
+  });
+}
+
+docs {
+  Each setup step says whether its "done" comes from the data or from an admin's mark (F18.6). Admin only.
+
+  operationId: get_setup_status
+}

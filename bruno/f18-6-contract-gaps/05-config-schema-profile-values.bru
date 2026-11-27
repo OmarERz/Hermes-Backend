@@ -1,0 +1,46 @@
+meta {
+  name: config-schema-profile-values
+  type: http
+  seq: 5
+}
+
+get {
+  url: {{baseUrl}}/api/config/schema
+  body: none
+  auth: bearer
+}
+
+auth:bearer {
+  token: {{readerToken}}
+}
+
+assert {
+  res.status: eq 200
+}
+
+tests {
+  test("each sensitivity profile publishes what it sets (docs/07 §12)", function () {
+    const profile = res.body.find((p) => p.key === "sensitivity_profile");
+    expect(Object.keys(profile.option_values).sort()).to.deep.equal([...profile.options].sort());
+    expect(profile.option_values.minimal.dead_zone).to.equal("6");
+    expect(profile.option_values.normal.dead_zone).to.equal("4");
+    expect(profile.option_values.broad.dead_zone).to.equal("2");
+    for (const values of Object.values(profile.option_values)) {
+      expect(Object.keys(values).sort()).to.deep.equal(
+        ["dead_zone", "judge.allow_lowering", "judge.range_multiplier", "mode2.min_confidence"]
+      );
+    }
+  });
+
+  test("no other parameter has option values", function () {
+    for (const parameter of res.body.filter((p) => p.key !== "sensitivity_profile")) {
+      expect(parameter.option_values).to.deep.equal({});
+    }
+  });
+}
+
+docs {
+  The parameter schema publishes the values of each sensitivity profile (F18.6), so the front does not repeat them.
+
+  operationId: get_config_schema
+}

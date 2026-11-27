@@ -42,12 +42,35 @@ from core.stix.export import ExportOptions, ExportScope, StixExportError, export
 router = APIRouter(tags=["operations"])
 PROGRESS_ES = {"queued": "En cola", "running": "En curso", "succeeded": "Terminado", "failed": "Falló"}
 
-# Schema of one parsed event: `event` is the event name and `data` a JSON text {run_id, progress, message}.
+# Schema of one parsed event: `event` is the event name and `data` a JSON text {run_id, progress, status, message}.
+# `contentSchema` (JSON Schema 2020-12, OpenAPI 3.1) describes the object inside that text (F18.6).
+SSE_EVENT_DATA_SCHEMA = {
+    "type": "object",
+    "properties": {
+        "run_id": {"type": "string", "description": "Id (UUID) de la corrida."},
+        "progress": {"type": "integer", "minimum": 0, "maximum": 100, "description": "Avance de 0 a 100."},
+        "status": {
+            "type": "string",
+            "enum": ["queued", "running", "succeeded", "failed"],
+            "description": "Estado de la corrida, el mismo de `GET /api/runs/{id}`; `succeeded` y `failed` son "
+            "finales y cierran el flujo.",
+        },
+        "message": {"type": "string", "description": "El estado para la persona, en español."},
+    },
+    "required": ["run_id", "progress", "status", "message"],
+}
 SSE_EVENT_SCHEMA = {
     "type": "object",
     "properties": {
-        "event": {"type": "string", "enum": ["progress"]},
-        "data": {"type": "string", "description": "JSON text: run_id, progress (0-100) and message"},
+        "event": {"type": "string", "enum": ["progress"], "description": "Nombre del evento: siempre `progress`."},
+        "data": {
+            "type": "string",
+            "contentMediaType": "application/json",
+            "contentSchema": SSE_EVENT_DATA_SCHEMA,
+            "description": "Texto JSON con `run_id`, `progress` (0 a 100), `status` (`queued`, `running`, "
+            "`succeeded` o `failed`) y `message` (el estado en español). El flujo termina después del evento con "
+            "estado final (`succeeded` o `failed`).",
+        },
     },
     "required": ["event", "data"],
 }
@@ -67,6 +90,13 @@ def list_runs(params: PageQuery, signer: Signer, runs: Runs, filters: Annotated[
     key = decode_key(params, "runs", ("int", "time", "str"))
     items, next_key = runs.page(None if key is None else (key[0], key[1], key[2]), params.limit, filters)
     return Page[Run](items=items, next_cursor=encode_key(signer, "runs", next_key))
+
+
+@router.get("/api/runs/{id}", dependencies=[guard("GET", "/api/runs/{id}")])
+def get_run(id: UuidId, runs: Runs) -> Run:  # noqa: A002 - path parameter name of API-06
+    """One run as the list shows it, with its current state (the final one once it ends), why it was launched and
+    by whom (F18.6): the frontend reads it by id instead of searching the list."""
+    return runs.get(id)
 
 
 @router.get(

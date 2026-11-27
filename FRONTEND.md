@@ -81,7 +81,7 @@ Los requisitos de cada pantalla (FRO-xx) están en la especificación del produc
 | Comparación crudo vs. procesado y cascada del Δ | `GET /api/comparison/summary`, `GET /api/comparison/table`, `GET /api/assessments/{id}/breakdown` | reader |
 | Historial de recomendaciones y feedback | `GET /api/recommendations` (filtros `group_id`, `ci_id`, `ticket_itop_id`, `level`, `verdict`, `without_feedback`), `GET /api/recommendations/{assessment_id}`, `GET /api/recommendations/{assessment_id}/judge`, `GET /api/recommendations/{id}/feedback`, `POST /api/feedback` | reader ver; analyst dar feedback |
 | Tickets y alertas | `GET /api/tickets` (cada ticket trae `itop_id` para mostrar y `ticket_itop_id` para filtrar), `GET /api/tickets/summary`, `GET /api/tickets/updates` (filtros `ticket_itop_id`, `action`), `GET /api/alerts` | reader |
-| Corridas (lanzar escaneo y ver progreso en vivo) | `POST /api/scans`, `GET /api/runs` (filtros `kind`, `status`, `date_from`, `date_to`), `GET /api/runs/{id}/events` (SSE) | analyst lanzar; reader ver |
+| Corridas (lanzar escaneo y ver progreso en vivo) | `POST /api/scans`, `GET /api/runs` (filtros `kind`, `status`, `date_from`, `date_to`), `GET /api/runs/{id}` (una corrida), `GET /api/runs/{id}/events` (SSE) | analyst lanzar; reader ver |
 | Historial (línea de tiempo de corridas, revisiones LLM y cambios de configuración) | `GET /api/history` (filtros `type`, `status`, `date_from`, `date_to`) | reader |
 | Telemetría de agentes (analistas y juez) | `GET /api/telemetry/summary?window=24h\|7d\|30d`, `GET /api/telemetry/daily?days=1..90`, `GET /api/telemetry/reviews` (filtros `agent`, `status`, `date_from`, `date_to`) | reader |
 | Inventario de activos y software (solo lectura; iTop es el inventario) | `GET /api/inventory/assets` (filtros `q`, `itop_class`, `criticality`, `exposed`, `classification`, `owner`, `custodian`, `with_findings`), `GET /api/inventory/summary`, `GET /api/inventory/software` (filtros `q`, `has_cpe`, `worst_level`, `with_vulnerabilities`, `category`), `GET /api/inventory/assets/{ci_id}/software` | reader |
@@ -152,7 +152,10 @@ Todo error responde con:
   motivo que el juez no propuso nunca aparece; si hubo doble revisión ciega, combina las dos con su regla). La zona
   muerta se resuelve como al guardar: la que mandes o la actual (guardar solo el perfil no la cambia). Cada perfil
   trae su zona muerta (mínima 6, normal 4, amplia 2): **al cambiar de perfil, manda también su `dead_zone`, igual en
-  la simulación y al guardar**, para que la vista previa sea lo que se guarda. Cualquier otro parámetro conocido (por
+  la simulación y al guardar**, para que la vista previa sea lo que se guarda. **Desde F18.6** no repitas esos
+  valores en el front: `GET /api/config/schema` los publica en `option_values` del parámetro `sensitivity_profile`
+  (por perfil: `judge.range_multiplier`, `judge.allow_lowering`, `dead_zone` y `mode2.min_confidence`, como texto),
+  leídos de la misma tabla que usa el juez. Cualquier otro parámetro conocido (por
   ejemplo `judge_model`) se
   ignora y vuelve en `not_simulable`: avisa a la persona que ese cambio no tiene vista previa. Una clave desconocida
   o un valor inválido siguen dando 422. Compara cada hallazgo abierto con su última evaluación
@@ -211,8 +214,22 @@ Todo error responde con:
   pudieron validar (`kind`: `notification`, `itop`, `llm_validation`). Solo los que traen `retryable: true` (hoy, los
   eventos de notificación) se reintentan, con `POST /api/notifications/events/{id}/retry`. `error` es un texto corto
   (máximo 500 caracteres): muéstralo como dato.
+- **Estado de la escritura en iTop (`TicketUpdateEntry.itop_status`, `GET /api/tickets/updates`):** `pending`,
+  `in_progress`, `done` o `failed` mientras exista la escritura. Nulo en dos casos: la escritura terminó bien y ya se
+  purgó (90 días), o la acción no escribió nada en iTop (una `suggest` que solo queda en la bitácora: una persona
+  cambió la urgencia y las sugerencias están apagadas, en ese ticket o en general). Con una acción distinta de
+  `suggest`, nulo siempre significa «hecha y purgada»; en `suggest` el backend no puede distinguir los dos casos (no
+  guarda ese dato), así que muéstralo como «sin estado» sin afirmar que se escribió.
 - **Inventario:** es de solo lectura; un activo, su dueño o su software se registran o cambian en iTop. Los totales
   y porcentajes del resumen ya vienen calculados.
+- **Pendientes de inventario (FRO-17, F18.6):** `GET /api/pending/inventory` no pagina: cada lista trae **a lo más
+  200** elementos y `totals` trae el total real de cada tipo (si `totals.<lista>` es mayor que la lista, está
+  cortada; muestra «200 de N»). En `software_without_cpe` el id del producto va en `software_product_id`: es el
+  `{software}` de `PUT /api/mappings/{software}` y de la respuesta `Mapping.software` (un id, no el nombre). `ci_id`
+  sigue trayendo ese mismo id en el software por compatibilidad, pero úsalo solo para los CIs. Cada CI pendiente
+  trae su `itop_class` para enlazarlo en iTop. `outside_delivery_model` (equipos custodios fuera del modelo de
+  entrega de iTop) **siempre llega vacía** y su total en 0: Hermes aún no lee el modelo de entrega de iTop; no la
+  muestres como «0 pendientes».
 - **Historial de un hallazgo:** abre el detalle `GET /api/vulnerabilities/{group_id}`; cada activo trae su
   `finding_id`, que es el `{id}` de `GET /api/findings/{id}/history` (puntaje de ese CI en cada evaluación del
   grupo, del más antiguo al más reciente). En las recomendaciones `asset.finding_id` llega nulo: su CI puede ser
@@ -230,6 +247,10 @@ Todo error responde con:
   perpetua). CPU y RAM son texto libre de iTop: muéstralos tal cual, sin convertir. Cualquiera puede llegar nulo
   (sin dato en iTop o aún no sincronizado); la descripción es texto de iTop: muéstrala como texto, nunca como
   HTML. GPU y almacenamiento no existen en iTop. Editar cualquiera de estos datos es un enlace a iTop.
+  **Desde F18.6** el detalle trae también los datos del CI que ya tenía la lista del inventario, con los mismos
+  valores: `criticality`, `exposed` (expuesto a internet; nulo sin dato), `personal_data`, `os`, `service`,
+  `synced_at` e `itop_url` (enlace al CI en iTop para editarlo; vacío si el backend no tiene la URL de iTop). El
+  detalle ya no necesita una segunda lectura de `GET /api/inventory/assets`.
   Las rutas de inventario traen lo mismo (F18.4): cada CI de `GET /api/inventory/assets` trae `description`,
   `cpu` y `ram` (además de `itop_class`); cada instalación de `GET /api/inventory/assets/{ci_id}/software` trae
   `category`, `status`, `description` y `licence`; cada producto de `GET /api/inventory/software` trae, sobre
@@ -239,6 +260,10 @@ Todo error responde con:
   cada una con `instances`: cuántas de sus instalaciones la tienen) y `licensed_instances` (instalaciones con
   alguna licencia asignada). La lista acepta `?category=` (incluye el producto si **alguna** de sus instalaciones
   la tiene). Las gráficas «por categoría», «por estado» y «por licencia» cuentan instalaciones: suma esos conteos.
+- **Asistente de primera configuración (F18.6):** cada paso de `GET /api/setup/status` (y la respuesta de
+  `PUT /api/setup/steps/{n}`) trae `done_source`: `data` si los datos ya muestran el paso hecho (desmarcarlo no
+  cambia nada: no ofrezcas «desmarcar»), `manual` si solo lo marcó un admin (`PUT` con `{"done": false}` lo
+  desmarca) y nulo si no está hecho.
 - **Privacidad:** el backend no devuelve correos de otros usuarios en vistas de lectura; usa el nombre que venga.
 - **Secretos:** ninguna respuesta trae una llave. El asistente y la pantalla de conexiones solo **verifican**; las
   llaves se configuran en el servidor (`.env` / Docker secrets), nunca desde el front.
@@ -246,10 +271,18 @@ Todo error responde con:
 ## 6. Tiempo real (SSE)
 
 `GET /api/runs/{id}/events` es un *Server-Sent Events* (`text/event-stream`) con eventos `progress` mientras la
-corrida avanza, leídos de la tabla de corridas. `POST /api/scans` deja la corrida en cola y el worker la toma;
-el stream refleja su avance real y `GET /api/runs` su estado final. `EventSource` del navegador no permite cabecera `Authorization`: usa un cliente SSE que acepte
-cabeceras (por ejemplo `@microsoft/fetch-event-source`) y manda el Bearer. Si la conexión se corta, reconecta y
-consulta `GET /api/runs` para el estado final.
+corrida avanza, leídos de la tabla de corridas: uno cada vez que cambia el estado o el avance. El `data` de cada
+evento es un texto JSON con `run_id`, `progress` (0 a 100), `status` (`queued`, `running`, `succeeded` o `failed`,
+el mismo de `GET /api/runs`) y `message` (el estado en español); el flujo termina después del evento con estado
+final (`succeeded` o `failed`), o a los 15 minutos aunque la corrida siga (reconecta). `POST /api/scans` deja la
+corrida en cola y el worker la toma; el stream refleja su avance real. `EventSource` del navegador no permite cabecera `Authorization`:
+usa un cliente SSE que acepte cabeceras (por ejemplo `@microsoft/fetch-event-source`) y manda el Bearer.
+
+**Una corrida por su id (F18.6):** `GET /api/runs/{id}` (rol `reader`, como la lista) devuelve esa corrida con el
+mismo modelo que cada elemento de `GET /api/runs` (incluidos `trigger_reason` y `triggered_by`), con su estado
+actual: el final cuando ya terminó. 404 `not_found` si no existe. Úsala para el detalle y, si la conexión del
+stream se corta, para leer el estado final (o reconecta el stream), en lugar de buscar la corrida en la lista por
+tipo y fecha de inicio.
 
 ## 7. Idioma, formato y despliegue
 

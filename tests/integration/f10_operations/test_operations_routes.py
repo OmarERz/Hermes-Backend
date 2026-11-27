@@ -45,11 +45,13 @@ def test_setup_steps_follow_the_data_and_the_marks(client: TestClient, engine: E
     steps = client.get("/api/setup/status").json()
     assert [s["name"] for s in steps][:2] == ["Conexiones", "Perfil de la empresa"]
     assert [(s["n"], s["done"], s["skipped"]) for s in steps] == [(n, False, False) for n in range(1, 8)]
+    assert all(s["done_source"] is None for s in steps)  # F18.6: nothing is done yet
 
     skipped = client.put("/api/setup/steps/3", json={"done": True, "skipped": True}).json()
     assert (skipped["n"], skipped["done"], skipped["skipped"]) == (3, False, True)  # skipping wins
+    assert skipped["done_source"] is None
     done = client.put("/api/setup/steps/4", json={}).json()
-    assert (done["done"], done["skipped"]) == (True, False)
+    assert (done["done"], done["skipped"], done["done_source"]) == (True, False, "manual")  # only the mark
     assert client.put("/api/setup/steps/8", json={}).status_code == 404
     assert client.put("/api/setup/steps/0", json={}).status_code == 404
 
@@ -77,6 +79,9 @@ def test_setup_steps_follow_the_data_and_the_marks(client: TestClient, engine: E
         6: (False, False),
         7: (True, False),
     }
+    # F18.6: the data makes steps 1, 3, 5 and 7 done; step 4 only has its mark
+    sources = {s["n"]: s["done_source"] for s in client.get("/api/setup/status").json()}
+    assert sources == {1: "data", 2: None, 3: "data", 4: "manual", 5: "data", 6: None, 7: "data"}
     with engine.connect() as conn:
         marks = conn.execute(
             text(
@@ -88,6 +93,11 @@ def test_setup_steps_follow_the_data_and_the_marks(client: TestClient, engine: E
         ("3", {"done": False, "skipped": True}, "luis@example.test"),
         ("4", {"done": True, "skipped": False}, "luis@example.test"),
     ]
+    # F18.6: marking a step not done undoes a mark, never what the data shows
+    unmarked = client.put("/api/setup/steps/4", json={"done": False}).json()
+    assert (unmarked["done"], unmarked["done_source"]) == (False, None)
+    kept = client.put("/api/setup/steps/5", json={"done": False}).json()
+    assert (kept["done"], kept["done_source"]) == (True, "data")
 
 
 @pytest.fixture

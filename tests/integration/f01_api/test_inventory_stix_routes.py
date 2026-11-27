@@ -9,7 +9,7 @@ from typing import Any
 import pytest
 from fastapi.testclient import TestClient
 from pydantic import SecretStr
-from sqlalchemy import Engine, text
+from sqlalchemy import Engine, event, text
 from sqlalchemy.orm import Session, sessionmaker
 
 from api.app import create_app
@@ -254,3 +254,55 @@ def test_every_stix_export_is_audited(client: TestClient, engine: Engine) -> Non
             len(bundle["objects"]),
         )
     ]
+
+
+def test_pending_rows_carry_their_own_ids_classes_and_the_totals(client: TestClient, engine: Engine) -> None:
+    """F18.6: software rows name the product in `software_product_id` (and keep it in `ci_id`), CI rows carry their
+    iTop class, and `totals` counts each type past the cap of 200 per list."""
+    product = seed_inventory(engine)
+    run(
+        engine,
+        "INSERT INTO software_product (itop_name, first_seen_at) "
+        "SELECT 'tool-' || n, now() FROM generate_series(1, 205) n",
+    )
+    as_role(client, Role.READER)
+    body = client.get("/api/pending/inventory").json()
+    software = body["software_without_cpe"]
+    assert len(software) == 200  # each list is capped (MAX_PAGE)
+    assert body["totals"] == {
+        "software_without_cpe": 206,
+        "without_classification": 1,
+        "without_exposure": 1,
+        "without_owner": 1,
+        "without_custodian": 1,
+        "outside_delivery_model": 0,
+    }
+    nginx = next(i for i in software if i["name"] == "nginx")
+    assert (nginx["software_product_id"], nginx["ci_id"], nginx["itop_class"]) == (str(product), str(product), None)
+    assert all(i["software_product_id"] == i["ci_id"] and i["itop_class"] is None for i in software)
+    for kind in ("without_classification", "without_exposure", "without_owner", "without_custodian"):
+        assert [(i["ci_id"], i["itop_class"], i["software_product_id"]) for i in body[kind]] == [
+            ("CI-77", "Server", None)
+        ]
+    assert body["outside_delivery_model"] == []
+
+
+def test_each_pending_total_is_read_by_the_statement_of_its_list(client: TestClient, engine: Engine) -> None:
+    """F18.6 (feature review P1): a list and its total come from one statement, one snapshot, so a CPE mapped or a
+    CI synced between two reads can never give a list that contradicts its total."""
+    seed_inventory(engine)
+    as_role(client, Role.READER)
+    reads: list[str] = []
+
+    def record(_conn: Any, _cursor: Any, statement: str, *_args: Any) -> None:
+        if "inventory_issue" in statement:
+            reads.append(statement)
+
+    event.listen(engine, "before_cursor_execute", record)
+    try:
+        body = client.get("/api/pending/inventory").json()
+    finally:
+        event.remove(engine, "before_cursor_execute", record)
+    assert len(reads) == 5  # one per list, no separate count
+    assert all("count(*) OVER ()" in statement for statement in reads)
+    assert body["totals"]["software_without_cpe"] == len(body["software_without_cpe"]) == 1

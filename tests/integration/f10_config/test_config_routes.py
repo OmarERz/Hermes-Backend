@@ -792,3 +792,19 @@ def test_changing_only_the_dead_zone_also_queues_a_recalculation(client: TestCli
     assert rows(engine, "SELECT status, formula_version_id IS NOT NULL FROM run WHERE kind = 'recalculation'") == [
         ("queued", True)
     ]
+
+
+def test_the_schema_publishes_what_each_sensitivity_profile_sets(client: TestClient) -> None:
+    """F18.6 (pendientes F12 #199): the front reads each profile's values instead of repeating 6/4/2."""
+    as_role(client, Role.READER)
+    schema = {p["key"]: p for p in client.get("/api/config/schema").json()}
+    values = schema["sensitivity_profile"]["option_values"]
+    assert sorted(values) == schema["sensitivity_profile"]["options"]
+    assert {name: v["dead_zone"] for name, v in values.items()} == {"broad": "2", "minimal": "6", "normal": "4"}
+    assert values["minimal"] == {
+        "judge.range_multiplier": "0.5",
+        "judge.allow_lowering": "false",
+        "dead_zone": "6",
+        "mode2.min_confidence": "0.8",
+    }
+    assert all(p["option_values"] == {} for key, p in schema.items() if key != "sensitivity_profile")

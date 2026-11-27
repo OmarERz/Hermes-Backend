@@ -258,7 +258,11 @@ OPERATIONS: Final[dict[tuple[str, str], Op]] = {
         "get_pending_inventory",
         "sources",
         "Pendientes de inventario",
-        "Activos y software con datos faltantes: sin CPE, sin clasificación, sin exposición o sin responsable.",
+        "Activos y software con datos faltantes: software sin CPE y CIs sin clasificación, sin dato de exposición, "
+        "sin responsable o sin custodio. Cada lista trae a lo más 200 elementos, sin paginación; `totals` da el total "
+        "de cada tipo. En el software, el id del producto va en `software_product_id`; en los CIs, `itop_class` "
+        "trae su clase de iTop. `outside_delivery_model` siempre llega vacía (Hermes aún no lee el modelo de entrega "
+        "de iTop).",
     ),
     ("GET", "/api/cpe/candidates"): Op(
         "list_cpe_candidates",
@@ -286,12 +290,21 @@ OPERATIONS: Final[dict[tuple[str, str], Op]] = {
         "Corridas de escaneo, ingesta, recálculo y nocturnas, las más recientes primero. Filtros opcionales por "
         "tipo, estado y fecha de inicio; cada corrida dice por qué se lanzó y quién la lanzó.",
     ),
+    ("GET", "/api/runs/{id}"): Op(
+        "get_run",
+        "runs",
+        "Una corrida",
+        "Una corrida por su id, con el mismo modelo que cada elemento de `GET /api/runs`: tipo, estado actual (el "
+        "final cuando termina), avance, fechas, por qué se lanzó y quién la lanzó. 404 si no existe. Rol mínimo: "
+        "`reader`.",
+    ),
     ("GET", "/api/runs/{id}/events"): Op(
         "stream_run_events",
         "runs",
         "Progreso de una corrida (SSE)",
-        "Flujo `text/event-stream` con el progreso hasta que la corrida termina. Si se corta, "
-        "reconecta con `Last-Event-ID`.",
+        "Flujo `text/event-stream` con un evento `progress` cada vez que cambia el estado o el avance, hasta que la "
+        "corrida termina. Cada evento trae `run_id`, `progress`, `status` y `message`. Si se corta, reconecta y "
+        "consulta `GET /api/runs/{id}` para el estado final.",
     ),
     ("POST", "/api/stix/export"): Op(
         "export_stix",
@@ -345,13 +358,15 @@ OPERATIONS: Final[dict[tuple[str, str], Op]] = {
         "get_setup_status",
         "operations",
         "Estado de la instalación",
-        "Pasos del asistente de instalación y cuáles están hechos. Solo `admin`.",
+        "Pasos del asistente de instalación y cuáles están hechos u omitidos; `done_source` dice si un paso hecho "
+        "sale de los datos o de la marca de un admin. Solo `admin`.",
     ),
     ("PUT", "/api/setup/steps/{n}"): Op(
         "update_setup_step",
         "operations",
         "Marcar un paso de instalación",
-        "Marca un paso del asistente como hecho u omitido. Solo `admin`.",
+        "Marca un paso del asistente como hecho u omitido, o lo desmarca con `done: false` (desmarcar solo tiene "
+        "efecto si su `done_source` es `manual`). Solo `admin`.",
     ),
     ("GET", "/api/audit"): Op(
         "list_audit_entries",
@@ -550,6 +565,10 @@ ENUMS: Final[dict[tuple[str, ...], dict[str, str]]] = {
         "ingestion": "Ingesta y análisis de noticias",
         "recalculation": "Recálculo por un cambio de fórmula, sin juez",
         "nightly": "Recálculo nocturno por el paso del tiempo",
+    },
+    ("data", "manual"): {
+        "data": "Los datos ya muestran el paso hecho",
+        "manual": "Solo lo marcó un admin; se puede desmarcar",
     },
     ("queued", "running", "succeeded", "failed"): {
         "queued": "En cola; el worker aún no la toma",
@@ -827,7 +846,10 @@ FIELDS: Final[dict[str, str]] = {
     "objects": "Objetos STIX del bundle.",
     "ok": "Si la conexión funciona.",
     "on_older_version": "Si el feedback se dio sobre una versión anterior de la evaluación.",
-    "outside_delivery_model": "Activos fuera del modelo de entrega de Hermes.",
+    "outside_delivery_model": "Equipos custodios fuera del modelo de entrega de la organización en iTop (los equipos "
+    "a los que iTop deja asignar sus tickets). Siempre vacía por ahora: Hermes no lee el modelo de entrega de iTop, "
+    "así que no puede saber qué equipo queda fuera; si iTop rechaza un equipo, el ticket se crea con el equipo por "
+    "defecto (TIC-09).",
     "owner": "Responsable del activo.",
     "owners": "Responsables de los activos afectados.",
     "previous_final": "Puntaje final de la evaluación anterior, si hubo.",
@@ -1015,6 +1037,16 @@ OVERRIDES: Final[dict[str, str]] = {
     "FeedbackEntry.proposed_score": "Puntaje propuesto por la persona.",
     "FeedbackEntry.comment": "Comentario de la persona.",
     "InventoryItem.name": "Nombre del activo o del software.",
+    "InventoryItem.ci_id": "Id del CI en iTop. En `software_without_cpe` trae el id (UUID) del producto de software, "
+    "como antes de F18.6: usa `software_product_id` para el software y `ci_id` solo para los CIs.",
+    "InventoryPendingTotals.software_without_cpe": "Productos de software sin CPE.",
+    "InventoryPendingTotals.without_classification": "CIs sin clasificación de datos.",
+    "InventoryPendingTotals.without_exposure": "CIs sin dato de exposición a internet.",
+    "InventoryPendingTotals.without_owner": "CIs sin responsable.",
+    "InventoryPendingTotals.without_custodian": "CIs sin equipo custodio.",
+    "InventoryPendingTotals.outside_delivery_model": "Siempre 0 por ahora (ver `outside_delivery_model`).",
+    "Mapping.software": "Id (UUID) del producto de software mapeado: el mismo `{software}` de la ruta, no su nombre.",
+    "Mapping.cpe": "CPE 2.3 guardado para el producto, tal como se mandó.",
     "Metric.key": "Clave estable de la métrica.",
     "Metric.label": "Nombre de la métrica, en español.",
     "NotificationEventRow.id": "Id del evento.",
@@ -1138,7 +1170,11 @@ OVERRIDES: Final[dict[str, str]] = {
     "(F18.5); nulo mientras no se crea o si no es numérico (los de demostración, `DEMO-n`): para mostrarlo usa "
     "`ticket_ref`.",
     "TicketUpdateEntry.ticket_ref": "Referencia del ticket en iTop (por ejemplo `R-000123`).",
-    "TicketUpdateEntry.itop_status": "Estado de la escritura en iTop; nulo si ya se purgó (90 días).",
+    "TicketUpdateEntry.itop_status": "Estado de la escritura en iTop. Nulo en dos casos: la escritura terminó bien "
+    "y ya se purgó (retención de 90 días), o la acción no escribió nada en iTop (una `suggest` que solo queda en la "
+    "bitácora: una persona cambió la urgencia y las sugerencias están apagadas, en ese ticket o en general). Con una "
+    "acción distinta de `suggest`, nulo siempre es una escritura hecha y purgada; en `suggest` los dos casos no se "
+    "distinguen.",
     "Run.trigger_reason": "Por qué se lanzó la corrida.",
     "Run.triggered_by": "Nombre de quien la lanzó; nulo si la lanzó la agenda.",
     "HistoryEvent.id": "Id del evento (el de la corrida, la revisión o el registro del cambio).",

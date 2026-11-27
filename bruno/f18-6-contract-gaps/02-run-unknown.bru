@@ -1,0 +1,26 @@
+meta {
+  name: run-unknown
+  type: http
+  seq: 2
+}
+
+get {
+  url: {{baseUrl}}/api/runs/0196a6f0-0000-7000-8000-000000000999
+  body: none
+  auth: bearer
+}
+
+auth:bearer {
+  token: {{readerToken}}
+}
+
+assert {
+  res.status: eq 404
+  res.body.error.code: eq not_found
+}
+
+docs {
+  A run that does not exist is a 404 in the error envelope.
+
+  operationId: get_run
+}

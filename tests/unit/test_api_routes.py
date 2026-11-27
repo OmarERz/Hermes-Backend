@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import json
 import uuid
 from collections.abc import Iterator
 from datetime import UTC, datetime
@@ -66,6 +67,12 @@ class SampleRuns:
     def queue_scan(self, firebase_uid: str | None) -> Run:
         run = Run(id=str(uuid.uuid4()), kind="scan", status="queued", started_at="t", finished_at=None, progress=0)
         self.runs.insert(0, run)
+        return run
+
+    def get(self, run_id: str) -> Run:
+        run = next((r for r in self.runs if r.id == run_id), None)
+        if run is None:
+            raise ApiError(404, "not_found", "La corrida no existe.")
         return run
 
     def progress(self, run_id: str) -> Iterator[Run]:
@@ -178,10 +185,32 @@ def test_scan_run_is_listed_and_streams_its_progress(client: TestClient) -> None
     assert events.status_code == 200
     assert f'"run_id": "{run_id}"' in events.text
     assert '"progress": 100' in events.text
+    payloads = [json.loads(line[len("data: ") :]) for line in events.text.splitlines() if line.startswith("data: ")]
+    documented = APP.openapi()["paths"]["/api/runs/{id}/events"]["get"]["responses"]["200"]["content"]
+    keys = set(documented["text/event-stream"]["schema"]["properties"]["data"]["contentSchema"]["properties"])
+    assert payloads and all(set(p) == keys for p in payloads)  # what the stream sends is what the schema says
+    assert payloads[-1]["status"] == "succeeded"
     other = client.post("/api/scans", json={}).json()["id"]
     assert other != run_id
     assert client.get("/api/runs/0196a6f0-0000-7000-8000-00000000beef/events").status_code == 404
     assert client.get("/api/runs/run-zzz/events").status_code == 422  # F12.3: run ids are UUIDs
+
+
+def test_one_run_is_read_by_its_id_with_the_model_of_the_list(client: TestClient) -> None:
+    """F18.6: GET /api/runs/{id} gives the list item of that run; readers see it, like the list and its events."""
+    as_role(Role.READER)
+    listed = {r["id"]: r for r in client.get("/api/runs").json()["items"]}
+    one = client.get(f"/api/runs/{RUN_1}")
+    assert one.status_code == 200, one.text
+    assert one.json() == listed[RUN_1]
+    assert one.json()["status"] == "succeeded"
+    missing = client.get("/api/runs/0196a6f0-0000-7000-8000-00000000beef")
+    assert (missing.status_code, missing.json()["error"]["code"]) == (404, "not_found")
+    malformed = client.get("/api/runs/run-zzz")
+    assert malformed.status_code == 422  # run ids are UUIDs, checked before any lookup
+    assert malformed.json()["error"]["details"][0]["field"] == "path.id"
+    schema = APP.openapi()["paths"]["/api/runs/{id}"]["get"]["responses"]["200"]["content"]["application/json"]
+    assert schema["schema"] == {"$ref": "#/components/schemas/Run"}
 
 
 def test_vulnerability_filters_are_validated_before_the_database(client: TestClient) -> None:
@@ -243,6 +272,11 @@ def test_cursor_and_sse_are_documented() -> None:
     assert operation["responses"]["400"]["description"].startswith("Cursor inválido")
     sse = APP.openapi()["paths"]["/api/runs/{id}/events"]["get"]["responses"]["200"]["content"]["text/event-stream"]
     assert sse["schema"]["required"] == ["event", "data"]
+    # F18.6: the payload documents every key the stream sends, `status` included
+    data = sse["schema"]["properties"]["data"]
+    assert "`status`" in data["description"]
+    assert data["contentSchema"]["required"] == ["run_id", "progress", "status", "message"]
+    assert data["contentSchema"]["properties"]["status"]["enum"] == ["queued", "running", "succeeded", "failed"]
 
 
 def test_metrics_come_from_the_dashboard_service(client: TestClient) -> None:

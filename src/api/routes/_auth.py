@@ -80,6 +80,7 @@ FRONT_ROUTE_ROLES: dict[tuple[str, str], Role] = {
     ("GET", "/api/tickets/summary"): Role.READER,
     ("GET", "/api/tickets/updates"): Role.READER,
     ("GET", "/api/recommendations/{assessment_id}/judge"): Role.READER,
+    ("GET", "/api/runs/{id}"): Role.READER,  # F18.6: the same role as the run list and its events
 }
 ROUTE_ROLES.update(FRONT_ROUTE_ROLES)
 

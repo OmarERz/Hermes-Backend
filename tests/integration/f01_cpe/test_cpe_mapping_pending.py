@@ -14,7 +14,7 @@ from sqlalchemy.orm import Session
 
 from core.cpe.candidates import CpeDictionaryClient, find_candidates, local_candidates
 from core.cpe.mapping import MappingError, MappingInput, remove_mapping, set_mapping
-from core.inventory.pending import count_pending, list_pending
+from core.inventory.pending import count_pending, first_pending, list_pending
 from core.vulndata.http import JsonSource
 
 pytestmark = pytest.mark.integration
@@ -94,6 +94,20 @@ def test_pending_list_counts_and_filters(engine: Engine) -> None:
         assert [p.software_name for p in list_pending(session, "software_unmapped", limit=1, offset=1)] == ["OpenSSL"]
         counts = count_pending(session)
     assert counts["software_unmapped"] == 2 and counts["custodian_missing"] == 1 and counts["exposure_unknown"] == 1
+
+
+def test_the_first_page_of_a_type_comes_with_its_total(engine: Engine) -> None:
+    """F18.6: the list and its total come from one statement, so they always agree (feature review P1)."""
+    seed_inventory(engine)
+    with Session(engine) as session:
+        items, total = first_pending(session, "software_unmapped", limit=1)
+        assert ([p.software_name for p in items], total) == (["nginx"], 2)  # cut at the limit, total past it
+        everything, all_total = first_pending(session, "software_unmapped")
+        assert (len(everything), all_total) == (2, 2)
+        run(engine, "UPDATE asset SET exposed = true")
+        assert first_pending(session, "exposure_unknown") == ([], 0)  # an empty type totals 0
+        with pytest.raises(ValueError):
+            first_pending(session, "nope")
 
 
 @pytest.mark.parametrize("kwargs", [{"issue": "nope"}, {"limit": 0}, {"limit": 201}, {"offset": -1}])

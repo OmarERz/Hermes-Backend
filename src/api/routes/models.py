@@ -12,6 +12,7 @@ from notifications_api.models import DateTimeString
 
 Level = Literal["critical", "high", "medium", "low"]
 Classification = Literal["public", "classified", "highly_classified", "unclassified"]
+Criticality = Literal["high", "medium", "low", "unknown"]  # of a CI in iTop
 FindingStatus = Literal["new", "persistent", "reopened", "fixed", "no_data"]
 ReviewStatus = Literal[
     "applied", "suggestion", "partial_review", "judge_disagreement", "no_judge_review", "rejected", "queued"
@@ -82,6 +83,14 @@ class ConfigParameter(_Model):
     description: str
     validations: list[str] = Field(default_factory=list)
     options: list[str] = Field(default_factory=list, description="Allowed values of an enum parameter")
+    option_values: dict[str, dict[str, str]] = Field(
+        default_factory=dict,
+        description="Lo que fija cada opción de un parámetro `enum`: por opción, cada parámetro y su valor como texto. "
+        "Hoy solo `sensitivity_profile` (docs/07 §12), con `judge.range_multiplier` y `judge.allow_lowering` (fijos "
+        "del perfil), `dead_zone` (la zona muerta del perfil: mándala junto con el perfil al simular y al guardar, "
+        "D-091) y `mode2.min_confidence` (la usa el juez mientras un admin no la fije). Vacío en los demás "
+        "parámetros.",
+    )
 
 
 class ConfigDocument(_Model):
@@ -189,6 +198,28 @@ class InventoryItem(_Model):
     ci_id: str
     name: str
     detail: str
+    # F18.6: the proper id of each kind of row; `ci_id` stays as it was for clients already generated
+    software_product_id: str | None = Field(
+        default=None,
+        description="Id (UUID) del producto de software, el `{software}` de `PUT /api/mappings/{software}`. Solo en "
+        "`software_without_cpe`; nulo en las listas de activos.",
+    )
+    itop_class: str | None = Field(
+        default=None,
+        description="Clase del CI en iTop (Server, VirtualMachine…), para enlazarlo en la consola de iTop. Solo en las "
+        "listas de activos; nula en `software_without_cpe`.",
+    )
+
+
+class InventoryPendingTotals(_Model):
+    """How many items of each type wait for a person, whatever the cap of each list (F18.6)."""
+
+    software_without_cpe: int = Field(ge=0)
+    without_classification: int = Field(ge=0)
+    without_exposure: int = Field(ge=0)
+    without_owner: int = Field(ge=0)
+    without_custodian: int = Field(ge=0)
+    outside_delivery_model: int = Field(ge=0)
 
 
 class InventoryPending(_Model):
@@ -198,6 +229,11 @@ class InventoryPending(_Model):
     without_owner: list[InventoryItem]
     without_custodian: list[InventoryItem]
     outside_delivery_model: list[InventoryItem]
+    totals: InventoryPendingTotals | None = Field(
+        default=None,
+        description="Total de pendientes de cada tipo. Cada lista trae a lo más 200 elementos (sin paginación): si "
+        "su total es mayor, la lista está cortada.",
+    )
 
 
 class CpeCandidate(_Model):
@@ -342,6 +378,26 @@ class AssetDetail(_Model):
     )
     software: list[AssetSoftware] = Field(
         default_factory=list, description="Software instalado vivo del CI, por producto y versión."
+    )
+    # F18.6: the CI's inventory fields, the same values `GET /api/inventory/assets` gives for it
+    criticality: Criticality | None = Field(
+        default=None,
+        description="Criticidad del CI en iTop (`unknown` si iTop no la tiene); igual que en el inventario.",
+    )
+    exposed: bool | None = Field(
+        default=None,
+        description="Si el CI está expuesto a internet; nulo si iTop no lo dice. Igual que en el inventario.",
+    )
+    personal_data: bool | None = Field(
+        default=None, description="Si el CI guarda datos personales; nulo si iTop no lo dice."
+    )
+    os: str | None = Field(default=None, description="Sistema operativo del CI, según iTop; nulo sin dato.")
+    service: str | None = Field(default=None, description="Servicio de negocio del CI, según iTop; nulo sin dato.")
+    synced_at: str | None = Field(default=None, description="Última sincronización del CI con iTop (UTC).")
+    itop_url: str | None = Field(
+        default=None,
+        description="Enlace al CI en la consola de iTop (para editarlo allá); vacío si el backend no tiene la URL de "
+        "iTop configurada, igual que en el inventario.",
     )
 
 
@@ -599,6 +655,12 @@ class SetupStep(_Model):
     name: str
     done: bool
     skipped: bool
+    done_source: Literal["data", "manual"] | None = Field(
+        default=None,
+        description="De dónde sale `done` (F18.6): `data` si los datos ya lo muestran (desmarcarlo no cambia nada), "
+        "`manual` si solo lo marcó un admin (`PUT /api/setup/steps/{n}` con `done: false` lo desmarca). Nulo si el "
+        "paso no está hecho.",
+    )
 
 
 class SetupStepUpdate(_Model):
@@ -856,7 +918,6 @@ class HistoryEvent(_Model):
 
 
 # --- inventory and software (D-088, F18.1) -----------------------------------------------------------------------
-Criticality = Literal["high", "medium", "low", "unknown"]
 FilterText = Annotated[str, Field(min_length=1, max_length=100)]
 
 
