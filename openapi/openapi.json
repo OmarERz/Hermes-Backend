@@ -6293,7 +6293,7 @@
                 "type": "null"
               }
             ],
-            "description": "Estado de la escritura en iTop; nulo si ya se purgó (90 días). Valores: `pending`: Espera su envío a iTop; `in_progress`: Enviándose a iTop; `done`: Escrito en iTop; `failed`: Falló; está en la cola de error.",
+            "description": "Estado de la escritura en iTop. Nulo en dos casos: la escritura terminó bien y ya se purgó (retención de 90 días), o la acción no escribió nada en iTop (una `suggest` que solo queda en la bitácora: una persona cambió la urgencia y las sugerencias están apagadas, en ese ticket o en general). Con una acción distinta de `suggest`, nulo siempre es una escritura hecha y purgada; en `suggest` los dos casos no se distinguen. Valores: `pending`: Espera su envío a iTop; `in_progress`: Enviándose a iTop; `done`: Escrito en iTop; `failed`: Falló; está en la cola de error.",
             "title": "Itop Status"
           },
           "label": {

@@ -1162,7 +1162,11 @@ OVERRIDES: Final[dict[str, str]] = {
     "TicketUpdateEntry.assessment_id": "Evaluación que lo motivó, si la hay.",
     "TicketUpdateEntry.ticket_itop_id": "Id numérico del ticket en iTop; nulo mientras no se crea.",
     "TicketUpdateEntry.ticket_ref": "Referencia del ticket en iTop (por ejemplo `R-000123`).",
-    "TicketUpdateEntry.itop_status": "Estado de la escritura en iTop; nulo si ya se purgó (90 días).",
+    "TicketUpdateEntry.itop_status": "Estado de la escritura en iTop. Nulo en dos casos: la escritura terminó bien "
+    "y ya se purgó (retención de 90 días), o la acción no escribió nada en iTop (una `suggest` que solo queda en la "
+    "bitácora: una persona cambió la urgencia y las sugerencias están apagadas, en ese ticket o en general). Con una "
+    "acción distinta de `suggest`, nulo siempre es una escritura hecha y purgada; en `suggest` los dos casos no se "
+    "distinguen.",
     "Run.trigger_reason": "Por qué se lanzó la corrida.",
     "Run.triggered_by": "Nombre de quien la lanzó; nulo si la lanzó la agenda.",
     "HistoryEvent.id": "Id del evento (el de la corrida, la revisión o el registro del cambio).",

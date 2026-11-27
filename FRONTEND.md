@@ -198,6 +198,12 @@ Todo error responde con:
   pudieron validar (`kind`: `notification`, `itop`, `llm_validation`). Solo los que traen `retryable: true` (hoy, los
   eventos de notificación) se reintentan, con `POST /api/notifications/events/{id}/retry`. `error` es un texto corto
   (máximo 500 caracteres): muéstralo como dato.
+- **Estado de la escritura en iTop (`TicketUpdateEntry.itop_status`, `GET /api/tickets/updates`):** `pending`,
+  `in_progress`, `done` o `failed` mientras exista la escritura. Nulo en dos casos: la escritura terminó bien y ya se
+  purgó (90 días), o la acción no escribió nada en iTop (una `suggest` que solo queda en la bitácora: una persona
+  cambió la urgencia y las sugerencias están apagadas, en ese ticket o en general). Con una acción distinta de
+  `suggest`, nulo siempre significa «hecha y purgada»; en `suggest` el backend no puede distinguir los dos casos (no
+  guarda ese dato), así que muéstralo como «sin estado» sin afirmar que se escribió.
 - **Inventario:** es de solo lectura; un activo, su dueño o su software se registran o cambian en iTop. Los totales
   y porcentajes del resumen ya vienen calculados.
 - **Pendientes de inventario (FRO-17, F18.6):** `GET /api/pending/inventory` no pagina: cada lista trae **a lo más
