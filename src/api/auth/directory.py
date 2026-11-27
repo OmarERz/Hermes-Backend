@@ -2,29 +2,66 @@
 
 The role stored here is a copy: the custom claim stays the master (D-030). ``active`` is owned by the database
 (an admin can deactivate a user without touching Firebase). Creating a user and assigning a role leave an
-``audit_log`` row (docs/13: every configuration change is audited).
+``audit_log`` row (docs/13: every configuration change is audited). An admin can also create an account from the app
+and switch one off and on (``AccountDirectory``, D-105): Firebase first, then the copy and the audit row.
 """
 
 from __future__ import annotations
 
+import logging
 import threading
-from collections.abc import Callable
+from collections.abc import Callable, Iterator
+from contextlib import contextmanager, suppress
 from dataclasses import dataclass, field, replace
 from datetime import UTC, datetime
 from typing import Any, Protocol
 from uuid import UUID, uuid4
 
-from sqlalchemy import Boolean, func, literal_column, select
+from sqlalchemy import Boolean, func, literal_column, select, update
 from sqlalchemy.dialects.postgresql import insert
-from sqlalchemy.exc import IntegrityError
+from sqlalchemy.exc import IntegrityError, SQLAlchemyError
 from sqlalchemy.orm import Session, sessionmaker
 from sqlalchemy.sql.dml import ReturningInsert
 
-from api.auth.identity import VerifiedIdentity
+from api.auth.identity import AuthUnavailableError, VerifiedIdentity
 from api.auth.roles import Role
 from core.db.models import AppUser, AuditLog
 
+logger = logging.getLogger(__name__)
+
 ENTITY = "app_user"
+# Audit actions of the accounts an admin manages from the app (D-105).
+CREATE_REQUESTED = "user.create_requested"
+CREATE = "user.create"
+CREATE_FAILED = "user.create_failed"
+SETUP_EMAIL_SENT = "user.password_email_sent"
+SETUP_EMAIL_FAILED = "user.password_email_failed"
+
+
+def _create_failure(role: Role, discarded: bool | None) -> dict[str, Any]:
+    """The ``after`` of ``user.create_failed``: ``discarded`` says whether an account Firebase may hold was deleted
+    again (absent when Firebase was never asked or refused the account)."""
+    return {"role": role.value} if discarded is None else {"role": role.value, "discarded": discarded}
+
+
+def _discarded(discard: Callable[[str], None], uid: str) -> bool:
+    """Delete the account ``uid`` if Firebase made it; whether that worked (a failure is logged by uid)."""
+    try:
+        discard(uid)
+    except AuthUnavailableError:
+        logger.warning("new account %s could not be deleted; an admin can remove it in Firebase", uid)
+        return False
+    return True
+
+
+def _status_action(disabled: bool) -> str:
+    return "user.disable" if disabled else "user.enable"
+
+
+def _password_email_entry(uid: str, actor_uid: str, failure: str | None) -> AuditEntry:
+    if failure is None:
+        return AuditEntry(actor_uid, SETUP_EMAIL_SENT, uid, None, None)
+    return AuditEntry(actor_uid, SETUP_EMAIL_FAILED, uid, None, {"reason": failure})
 
 
 @dataclass(frozen=True, slots=True)
@@ -90,6 +127,65 @@ class UserConflictError(RuntimeError):
 
 
 @dataclass(frozen=True, slots=True)
+class AccountRequest:
+    """An account an admin asked for (D-105): the uid Hermes picked for it, the e-mail and the role."""
+
+    uid: str
+    email: str
+    role: Role
+
+
+class AccountNotCreatedError(Exception):
+    """Firebase refused to create the account (e-mail taken or refused, uid taken): nothing exists to clean up."""
+
+
+@dataclass(frozen=True, slots=True)
+class NewAccount:
+    """A Firebase account just created by an admin (D-105): its uid and the e-mail as Firebase stored it."""
+
+    uid: str
+    email: str
+
+
+class AccountDirectory(Protocol):
+    """Accounts an admin creates and switches off or on from the app (D-105, F18.8)."""
+
+    def create_account(
+        self, request: AccountRequest, actor_uid: str, create: Callable[[], NewAccount], discard: Callable[[str], None]
+    ) -> UserRecord:
+        """Create the account ``request.uid`` through ``create`` (Firebase) and its copy, audited as ``user.create``.
+
+        ``user.create_requested`` (with the uid) is committed before Firebase is touched. Then, under the same global
+        lock as role changes, it is refused before Firebase when the actor is no longer an active admin
+        (``RoleConflictError("actor_not_admin")``) or a stored copy already owns the e-mail (``UserConflictError``).
+        If anything fails once ``create`` was called (except ``AccountNotCreatedError``: Firebase refused and nothing
+        exists), ``discard`` deletes the account ``request.uid`` if Firebase made it; ``user.create_failed`` records
+        whether that worked and the error propagates, so the admin can simply retry.
+        """
+        ...
+
+    def change_status(self, uid: str, disabled: bool, actor_uid: str, apply: Callable[[], bool]) -> UserRecord | None:
+        """Switch a user off (``disabled``) or on through ``apply`` (Firebase; it returns whether the sessions were
+        revoked), then set ``active`` on the copy, audited as ``user.disable`` or ``user.enable``.
+
+        As ``change_role``: ``user.disable_requested`` (or ``user.enable_requested``) is committed before Firebase is
+        touched, so the trail shows a change even if it stops half way; then, serialized with role changes, the actor
+        must still be an active admin (``RoleConflictError("actor_not_admin")``) and an active admin is never switched
+        off while no other active admin has ever signed in (``RoleConflictError("last_admin")``), both before
+        Firebase. Switching off writes the copy first and Firebase second (if Firebase fails, the copy stays off);
+        switching on writes Firebase first; status changes of one account never interleave. Either way a half-done
+        change fails closed (an account off in Firebase cannot sign in; a copy that is not active is refused with 403
+        ``user_inactive``) and repeating the request completes it. A failure is recorded as ``user.disable_failed`` (or
+        ``user.enable_failed``) and propagates. Returns the copy, or ``None`` if the user never logged in.
+        """
+        ...
+
+    def audit_password_email(self, uid: str, actor_uid: str, failure: str | None) -> None:
+        """Record that the password e-mail was sent (``failure`` None) or not (its short reason code)."""
+        ...
+
+
+@dataclass(frozen=True, slots=True)
 class BootstrapResult:
     """Outcome of ``SqlUserDirectory.bootstrap_role``: the copy, and what the call changed."""
 
@@ -107,16 +203,28 @@ def _lock_role_change(session: Session, uid: str) -> None:
     """Serialize role changes, from the API (change_role) and the command line (bootstrap_role) alike: globally first,
     then per user, always in this order, so two admins demoting each other cannot leave the system without an admin
     and a change never interleaves with another change of the same user (pending #19, #20)."""
-    session.execute(select(func.pg_advisory_xact_lock(func.hashtextextended("role:admins", 0))))
+    _lock_admins(session)
     session.execute(select(func.pg_advisory_xact_lock(func.hashtextextended(f"role:{uid}", 0))))
 
 
+def _lock_admins(session: Session) -> None:
+    """The global lock of every change to who is an active admin (role changes, account creation and status)."""
+    session.execute(select(func.pg_advisory_xact_lock(func.hashtextextended("role:admins", 0))))
+
+
 def _other_active_admins(session: Session, uid: str) -> int:
-    """Active admins other than ``uid``: the last-admin rule of ``_check_change``."""
+    """Active admins other than ``uid`` who have signed in at least once: the last-admin rule of ``_check_change`` and
+    of switching an admin off. An admin created from the app (D-105) or by the command line has no session until it
+    signs in (from the app, not even a password until it follows its e-mail), so it is no backup yet."""
     count = session.scalar(
         select(func.count())
         .select_from(AppUser)
-        .where(AppUser.firebase_uid != uid, AppUser.active, AppUser.role == Role.ADMIN.value)
+        .where(
+            AppUser.firebase_uid != uid,
+            AppUser.active,
+            AppUser.role == Role.ADMIN.value,
+            AppUser.last_login_at.is_not(None),
+        )
     )
     return int(count or 0)
 
@@ -130,6 +238,25 @@ def _refuse_bootstrap(session: Session, identity: VerifiedIdentity, current: str
     ):
         raise UserConflictError(identity.uid)
     _check_change(True, current, identity.role, None, _other_active_admins(session, identity.uid))
+
+
+def _refuse_last_admin(session: Session, uid: str) -> None:
+    """``RoleConflictError("last_admin")`` when ``uid`` is an active admin and no other active admin has ever signed
+    in (``_other_active_admins``): switching it off would leave nobody to switch it back on from the app."""
+    target = session.execute(select(AppUser.role, AppUser.active).where(AppUser.firebase_uid == uid)).one_or_none()
+    if (
+        target is not None
+        and target.active
+        and target.role == Role.ADMIN.value
+        and not _other_active_admins(session, uid)
+    ):
+        raise RoleConflictError("last_admin")
+
+
+def _refuse_stored_email(session: Session, email: str, actor_uid: str) -> None:
+    """``UserConflictError`` when a stored copy already owns the e-mail (``app_user.email`` is citext)."""
+    if session.scalar(select(AppUser.id).where(AppUser.email == email)) is not None:
+        raise UserConflictError(actor_uid)
 
 
 @dataclass(frozen=True, slots=True)
@@ -181,9 +308,7 @@ class InMemoryUserDirectory:
             try:
                 with self._lock:
                     target, actor = self._users.get(uid), self._users.get(actor_uid)
-                    others = sum(
-                        1 for u in self._users.values() if u.firebase_uid != uid and u.active and u.role is Role.ADMIN
-                    )
+                    others = self._backups(uid)
                 actor_is_admin = actor is not None and actor.active and actor.role is Role.ADMIN
                 _check_change(actor_is_admin, target.role.value if target else None, role, expected_role, others)
                 revoked = apply()
@@ -200,6 +325,101 @@ class InMemoryUserDirectory:
                 done = {**after, "sessions_revoked": revoked}
                 self.audit.append(AuditEntry(actor_uid, "role_assigned", uid, before, done))
                 return updated
+
+    def _require_admin(self, uid: str) -> None:
+        with self._lock:
+            actor = self._users.get(uid)
+        if actor is None or not actor.active or actor.role is not Role.ADMIN:
+            raise RoleConflictError("actor_not_admin")
+
+    def _backups(self, uid: str) -> int:
+        """Active admins other than ``uid`` who have signed in (call it holding ``_lock``)."""
+        return sum(
+            1
+            for u in self._users.values()
+            if u.firebase_uid != uid and u.active and u.role is Role.ADMIN and u.last_login_at is not None
+        )
+
+    def _refuse_last_admin(self, uid: str) -> None:
+        with self._lock:
+            target = self._users.get(uid)
+            backups = self._backups(uid)
+        if target is not None and target.active and target.role is Role.ADMIN and backups == 0:
+            raise RoleConflictError("last_admin")
+
+    def create_account(
+        self, request: AccountRequest, actor_uid: str, create: Callable[[], NewAccount], discard: Callable[[str], None]
+    ) -> UserRecord:
+        uid, role = request.uid, request.role
+        with self._lock:
+            self.audit.append(AuditEntry(actor_uid, CREATE_REQUESTED, uid, None, {"role": role.value}))
+        with self._role_lock:
+            try:
+                self._require_admin(actor_uid)
+                self._refuse_taken(request.email, actor_uid)
+            except Exception:
+                self._create_failed(actor_uid, uid, role, None)
+                raise
+            try:
+                account = create()
+            except AccountNotCreatedError:
+                self._create_failed(actor_uid, uid, role, None)
+                raise
+            except Exception:
+                self._create_failed(actor_uid, uid, role, _discarded(discard, uid))
+                raise
+            record = UserRecord(
+                id=uuid4(),
+                firebase_uid=account.uid,
+                email=account.email,
+                display_name=None,
+                role=role,
+                active=True,
+                created_at=datetime.now(UTC),
+                last_login_at=None,
+            )
+            with self._lock:
+                self._users[account.uid] = record
+                self.audit.append(AuditEntry(actor_uid, CREATE, account.uid, None, _snapshot(record)))
+            return record
+
+    def _refuse_taken(self, email: str, actor_uid: str) -> None:
+        with self._lock:
+            taken = any(user.email.lower() == email.lower() for user in self._users.values())
+        if taken:
+            raise UserConflictError(actor_uid)
+
+    def _create_failed(self, actor_uid: str, uid: str, role: Role, discarded: bool | None) -> None:
+        with self._lock:
+            self.audit.append(AuditEntry(actor_uid, CREATE_FAILED, uid, None, _create_failure(role, discarded)))
+
+    def change_status(self, uid: str, disabled: bool, actor_uid: str, apply: Callable[[], bool]) -> UserRecord | None:
+        action = _status_action(disabled)
+        with self._lock:
+            self.audit.append(AuditEntry(actor_uid, f"{action}_requested", uid, None, {"active": not disabled}))
+        with self._role_lock:
+            try:
+                self._require_admin(actor_uid)
+                if disabled:
+                    self._refuse_last_admin(uid)
+                revoked = apply()
+            except Exception:
+                with self._lock:
+                    self.audit.append(AuditEntry(actor_uid, f"{action}_failed", uid, None, {"active": not disabled}))
+                raise
+            with self._lock:
+                current = self._users.get(uid)
+                updated = replace(current, active=not disabled) if current else None
+                if updated:
+                    self._users[uid] = updated
+                before = {"active": current.active} if current else None
+                after = {"active": not disabled, "sessions_revoked": revoked}
+                self.audit.append(AuditEntry(actor_uid, action, uid, before, after))
+                return updated
+
+    def audit_password_email(self, uid: str, actor_uid: str, failure: str | None) -> None:
+        with self._lock:
+            self.audit.append(_password_email_entry(uid, actor_uid, failure))
 
     def get(self, uid: str) -> UserRecord | None:
         """Read a user without touching it."""
@@ -359,6 +579,154 @@ class SqlUserDirectory:
             self._audit_failed(uid, after)
             raise
         return result
+
+    def create_account(
+        self, request: AccountRequest, actor_uid: str, create: Callable[[], NewAccount], discard: Callable[[str], None]
+    ) -> UserRecord:
+        uid, role = request.uid, request.role
+        with self._sessions.begin() as session:
+            entry = AuditEntry(actor_uid, CREATE_REQUESTED, uid, None, {"role": role.value})
+            session.add(_audit(entry, self._actor(session, actor_uid), _now()))
+        called = False  # whether Firebase may hold the account now
+        try:
+            with self._sessions.begin() as session:
+                # The global lock of role changes: an admin demoted meanwhile cannot create accounts any more, and two
+                # requests for the same e-mail reach Firebase one after the other.
+                _lock_admins(session)
+                actor_id = self._active_admin(session, actor_uid)
+                _refuse_stored_email(session, request.email, actor_uid)
+                called = True
+                created = create()
+                now = _now()
+                row = session.scalars(
+                    insert(AppUser)
+                    .values(
+                        firebase_uid=created.uid,
+                        email=created.email,
+                        display_name=None,
+                        role=role.value,
+                        active=True,
+                        created_at=now,
+                        last_login_at=None,
+                    )
+                    .returning(AppUser)
+                ).one()
+                record = _record(row)
+                session.add(_audit(AuditEntry(actor_uid, CREATE, created.uid, None, _snapshot(record)), actor_id, now))
+                session.flush()
+        except AccountNotCreatedError:
+            self._create_failed(actor_uid, uid, role, None)
+            raise
+        except IntegrityError as exc:
+            # Only the e-mail can collide here (another copy took it while Firebase answered).
+            self._create_failed(actor_uid, uid, role, _discarded(discard, uid))
+            raise UserConflictError(actor_uid) from exc
+        except Exception:
+            self._create_failed(actor_uid, uid, role, _discarded(discard, uid) if called else None)
+            raise
+        return record
+
+    def _create_failed(self, actor_uid: str, uid: str, role: Role, discarded: bool | None) -> None:
+        with self._sessions.begin() as session:
+            entry = AuditEntry(actor_uid, CREATE_FAILED, uid, None, _create_failure(role, discarded))
+            session.add(_audit(entry, self._actor(session, actor_uid), _now()))
+
+    def change_status(self, uid: str, disabled: bool, actor_uid: str, apply: Callable[[], bool]) -> UserRecord | None:
+        action = _status_action(disabled)
+        with self._sessions.begin() as session:
+            entry = AuditEntry(actor_uid, f"{action}_requested", uid, None, {"active": not disabled})
+            session.add(_audit(entry, self._actor(session, actor_uid), _now()))
+        with self._account_lock(uid) as sessions:
+            try:
+                if disabled:
+                    return self._switch_off(sessions, uid, actor_uid, apply)
+                return self._switch_on(sessions, uid, actor_uid, apply)
+            except Exception:
+                with sessions.begin() as session:
+                    entry = AuditEntry(actor_uid, f"{action}_failed", uid, None, {"active": not disabled})
+                    session.add(_audit(entry, self._actor(session, actor_uid), _now()))
+                raise
+
+    @contextmanager
+    def _account_lock(self, uid: str) -> Iterator[sessionmaker[Session]]:
+        """One status change per account at a time, from its checks to its last audit row: a switch-off and a switch-on
+        of the same account never interleave. The lock (session level) and every transaction of the change share one
+        connection, so a change never waits for a second connection of the pool while it holds the lock (and requests
+        waiting for the lock cannot starve it). Closing the connection releases the lock even after a crash."""
+        key = func.hashtextextended(f"status:{uid}", 0)
+        with self._sessions.kw["bind"].connect() as connection:
+            connection.execute(select(func.pg_advisory_lock(key)))
+            connection.commit()
+            try:
+                yield sessionmaker(bind=connection, expire_on_commit=False)
+            finally:
+                with suppress(SQLAlchemyError):  # a broken connection releases the lock when it closes
+                    connection.rollback()
+                    connection.execute(select(func.pg_advisory_unlock(key)))
+                    connection.commit()
+
+    @staticmethod
+    def _switch_off(
+        sessions: sessionmaker[Session], uid: str, actor_uid: str, apply: Callable[[], bool]
+    ) -> UserRecord | None:
+        """The copy goes off first, committed under the role lock, then Firebase: a concurrent change (two admins
+        switching each other off) sees the switch-off under that lock, and every request of the user is refused from
+        then on. If Firebase fails the copy stays off (Firebase may have switched the account off before failing):
+        the change fails closed and switching the account on again fixes both sides."""
+        with sessions.begin() as session:
+            # Serialized with role changes, so two admins switching each other off cannot both succeed.
+            _lock_role_change(session, uid)
+            actor_id = SqlUserDirectory._active_admin(session, actor_uid)
+            _refuse_last_admin(session, uid)
+            was_active = session.scalar(
+                select(AppUser.active).where(AppUser.firebase_uid == uid).with_for_update(key_share=True)
+            )
+            session.execute(update(AppUser).where(AppUser.firebase_uid == uid).values(active=False))
+        revoked = apply()
+        with sessions.begin() as session:
+            # Again: a first sign-in may have created the copy (active) while Firebase answered.
+            session.execute(update(AppUser).where(AppUser.firebase_uid == uid).values(active=False))
+            before = None if was_active is None else {"active": was_active}
+            after = {"active": False, "sessions_revoked": revoked}
+            session.add(_audit(AuditEntry(actor_uid, "user.disable", uid, before, after), actor_id, _now()))
+            current = session.scalar(select(AppUser).where(AppUser.firebase_uid == uid))
+            return _record(current) if current else None
+
+    @staticmethod
+    def _switch_on(
+        sessions: sessionmaker[Session], uid: str, actor_uid: str, apply: Callable[[], bool]
+    ) -> UserRecord | None:
+        """Firebase first, then the copy, under the role lock: if the database fails after Firebase, the copy still
+        refuses the user (403 ``user_inactive``) until the request is repeated."""
+        with sessions.begin() as session:
+            _lock_role_change(session, uid)
+            actor_id = SqlUserDirectory._active_admin(session, actor_uid)
+            revoked = apply()
+            # As in change_role: the row lock only for the local write, after Firebase answered.
+            user = session.scalar(select(AppUser).where(AppUser.firebase_uid == uid).with_for_update(key_share=True))
+            before = {"active": user.active} if user else None
+            if user:
+                user.active = True
+            after = {"active": True, "sessions_revoked": revoked}
+            session.add(_audit(AuditEntry(actor_uid, "user.enable", uid, before, after), actor_id, _now()))
+            session.flush()
+            return _record(user) if user else None
+
+    def audit_password_email(self, uid: str, actor_uid: str, failure: str | None) -> None:
+        with self._sessions.begin() as session:
+            session.add(_audit(_password_email_entry(uid, actor_uid, failure), self._actor(session, actor_uid), _now()))
+
+    @staticmethod
+    def _active_admin(session: Session, actor_uid: str) -> UUID:
+        """The actor's ``app_user.id``; ``RoleConflictError("actor_not_admin")`` unless it is an active admin now."""
+        actor_id = session.scalar(
+            select(AppUser.id).where(
+                AppUser.firebase_uid == actor_uid, AppUser.active, AppUser.role == Role.ADMIN.value
+            )
+        )
+        if actor_id is None:
+            raise RoleConflictError("actor_not_admin")
+        return actor_id
 
     def _audit_failed(self, uid: str, after: dict[str, Any]) -> None:
         with self._sessions.begin() as session:

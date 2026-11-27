@@ -184,7 +184,10 @@ def _refusal(error: Exception) -> str:
     if isinstance(error, AuthUnavailableError):
         return "Firebase could not be reached or rejected the credentials; the Hermes copy was not changed"
     if isinstance(error, RoleConflictError) and error.code == "last_admin":
-        return "refused: this is the last active admin; give another user the admin role first"
+        return (
+            "refused: no other active admin has signed in yet; give another user the admin role and let them sign in "
+            "first"
+        )
     if isinstance(error, RoleConflictError):
         return f"refused: {error.code}"
     return "another Hermes user already has that e-mail with a different Firebase account; the copy was not changed"
