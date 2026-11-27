@@ -90,6 +90,49 @@ class UserConflictError(RuntimeError):
 
 
 @dataclass(frozen=True, slots=True)
+class BootstrapResult:
+    """Outcome of ``SqlUserDirectory.bootstrap_role``: the copy, and what the call changed."""
+
+    record: UserRecord
+    changed: bool
+    created: bool
+    sessions_revoked: bool
+
+
+# The command-line bootstrap (api.auth.bootstrap, D-087) has no signed-in actor: its audit rows name their source.
+CLI = "cli"
+
+
+def _lock_role_change(session: Session, uid: str) -> None:
+    """Serialize role changes, from the API (change_role) and the command line (bootstrap_role) alike: globally first,
+    then per user, always in this order, so two admins demoting each other cannot leave the system without an admin
+    and a change never interleaves with another change of the same user (pending #19, #20)."""
+    session.execute(select(func.pg_advisory_xact_lock(func.hashtextextended("role:admins", 0))))
+    session.execute(select(func.pg_advisory_xact_lock(func.hashtextextended(f"role:{uid}", 0))))
+
+
+def _other_active_admins(session: Session, uid: str) -> int:
+    """Active admins other than ``uid``: the last-admin rule of ``_check_change``."""
+    count = session.scalar(
+        select(func.count())
+        .select_from(AppUser)
+        .where(AppUser.firebase_uid != uid, AppUser.active, AppUser.role == Role.ADMIN.value)
+    )
+    return int(count or 0)
+
+
+def _refuse_bootstrap(session: Session, identity: VerifiedIdentity, current: str | None) -> None:
+    """The checks ``bootstrap_role`` makes before touching Firebase: a new copy whose e-mail another account's copy
+    already owns (``UserConflictError``), and the API's rules (``_check_change``: never demote the last active admin)
+    with the operator in place of a signed-in admin."""
+    if current is None and session.scalar(
+        select(AppUser.id).where(AppUser.email == identity.email, AppUser.firebase_uid != identity.uid)
+    ):
+        raise UserConflictError(identity.uid)
+    _check_change(True, current, identity.role, None, _other_active_admins(session, identity.uid))
+
+
+@dataclass(frozen=True, slots=True)
 class AuditEntry:
     """In-memory mirror of an ``audit_log`` row (tests and local runs)."""
 
@@ -215,20 +258,13 @@ class SqlUserDirectory:
         try:
             with self._sessions.begin() as session:
                 # One role change per user at a time, from before the Firebase write until the audit commits,
-                # so Firebase, the copy and the audit trail see concurrent changes in the same order.
-                # Role changes are serialized globally (always before the per-user lock, so no deadlock): two admins
-                # demoting each other at once can never leave the system without an admin, and an actor demoted
-                # meanwhile is seen as such (pending #19).
-                session.execute(select(func.pg_advisory_xact_lock(func.hashtextextended("role:admins", 0))))
-                session.execute(select(func.pg_advisory_xact_lock(func.hashtextextended(f"role:{uid}", 0))))
+                # so Firebase, the copy and the audit trail see concurrent changes in the same order; an actor
+                # demoted meanwhile is seen as such (pending #19).
+                _lock_role_change(session, uid)
                 # The checks read without a row lock: the advisory locks already serialize role changes, and a row
                 # lock held while Firebase answers would make every request of the user wait in `sync_login`.
                 current = session.scalar(select(AppUser.role).where(AppUser.firebase_uid == uid))
-                others = session.scalar(
-                    select(func.count())
-                    .select_from(AppUser)
-                    .where(AppUser.firebase_uid != uid, AppUser.active, AppUser.role == Role.ADMIN.value)
-                )
+                others = _other_active_admins(session, uid)
                 actor_is_admin = bool(
                     session.scalar(
                         select(func.count())
@@ -236,7 +272,7 @@ class SqlUserDirectory:
                         .where(AppUser.firebase_uid == actor_uid, AppUser.active, AppUser.role == Role.ADMIN.value)
                     )
                 )
-                _check_change(actor_is_admin, current, role, expected_role, int(others or 0))
+                _check_change(actor_is_admin, current, role, expected_role, others)
                 revoked = apply()
                 # FOR NO KEY UPDATE only for the local write (it also sees a row a first login created meanwhile):
                 # compatible with the KEY SHARE lock the audit_log foreign key check takes, so two admins changing
@@ -254,6 +290,79 @@ class SqlUserDirectory:
             with self._sessions.begin() as session:
                 session.add(_audit(AuditEntry(actor_uid, "role_assignment_failed", uid, None, after), actor_id, _now()))
             raise
+
+    def bootstrap_role(
+        self, identity: VerifiedIdentity, apply: Callable[[], bool], claim_holds_role: bool
+    ) -> BootstrapResult:
+        """Give ``identity.uid`` the role ``identity.role`` from the command line (api.auth.bootstrap, D-087).
+
+        Like ``change_role`` but without a signed-in actor (the audit rows carry ``"via": "cli"`` and no user) and for
+        a user who may never have logged in: the copy is created from ``identity`` (``user_created``) when missing.
+        ``apply`` sets the Firebase claim unless it already holds the role (it decides under the locks) and returns
+        whether the sessions were revoked. Nothing happens, and nothing is audited, when ``claim_holds_role`` and the
+        copy already holds the role. Refused before Firebase is touched: demoting the last active admin
+        (``RoleConflictError``) and an e-mail that another account's copy already owns (``UserConflictError``).
+        ``active`` is never changed.
+        """
+        uid, role = identity.uid, identity.role
+        with self._sessions.begin() as session:
+            user = session.scalar(select(AppUser).where(AppUser.firebase_uid == uid))
+            if claim_holds_role and user is not None and user.role == role.value:
+                return BootstrapResult(_record(user), changed=False, created=False, sessions_revoked=False)
+        after = {"role": role.value, "via": CLI}
+        with self._sessions.begin() as session:
+            session.add(_audit(AuditEntry(None, "role_assignment_requested", uid, None, after), None, _now()))
+        try:
+            with self._sessions.begin() as session:
+                # The same serialization as change_role. As there, the checks read without a row lock: a row lock held
+                # while Firebase answers would make every request of the user wait in `sync_login`.
+                _lock_role_change(session, uid)
+                _refuse_bootstrap(
+                    session, identity, session.scalar(select(AppUser.role).where(AppUser.firebase_uid == uid))
+                )
+                revoked = apply()
+                now = _now()
+                # The role the copy has now (a first login may have created it while Firebase answered), for the audit.
+                current = session.scalar(
+                    select(AppUser.role).where(AppUser.firebase_uid == uid).with_for_update(key_share=True)
+                )
+                # One statement after Firebase answered: creates the copy, or sets the role on the one that exists,
+                # including a copy a first login created meanwhile (xmax = 0 marks a fresh insert).
+                upsert: ReturningInsert[AppUser, bool] = (
+                    insert(AppUser)
+                    .values(
+                        firebase_uid=uid,
+                        email=identity.email,
+                        display_name=identity.display_name,
+                        role=role.value,
+                        active=True,
+                        created_at=now,
+                        last_login_at=None,
+                    )
+                    .on_conflict_do_update(index_elements=[AppUser.firebase_uid], set_={"role": role.value})
+                    .returning(AppUser, literal_column("xmax = 0", Boolean).label("created"))
+                )
+                row, created = session.execute(upsert).one()
+                record = _record(row)
+                if created:
+                    session.add(_audit(AuditEntry(None, "user_created", uid, None, _snapshot(record)), None, now))
+                before = {"role": current} if current is not None else None
+                done = {**after, "sessions_revoked": revoked}
+                session.add(_audit(AuditEntry(None, "role_assigned", uid, before, done), None, now))
+                result = BootstrapResult(record, changed=True, created=bool(created), sessions_revoked=revoked)
+        except IntegrityError as exc:
+            # Only the e-mail can still collide (another account's copy took it after the check above); the Firebase
+            # claim may already be set, the copy is not changed.
+            self._audit_failed(uid, after)
+            raise UserConflictError(uid) from exc
+        except Exception:
+            self._audit_failed(uid, after)
+            raise
+        return result
+
+    def _audit_failed(self, uid: str, after: dict[str, Any]) -> None:
+        with self._sessions.begin() as session:
+            session.add(_audit(AuditEntry(None, "role_assignment_failed", uid, None, after), None, _now()))
 
     @staticmethod
     def _actor(session: Session, actor_uid: str) -> UUID | None:

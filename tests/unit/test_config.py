@@ -208,7 +208,8 @@ EXAMPLE_EXTRAS = {
     "FORWARDED_ALLOW_IPS",  # read by uvicorn (trusted proxies for X-Forwarded-For)
     "ITOP_PORT",  # compose.itop.yaml interpolation (persistent iTop)
     "ITOP_WEBHOOK_URL",
-    "COMPOSE_FILE",  # read by docker compose itself (compose.itop-link.yaml)
+    "COMPOSE_FILE",  # read by docker compose itself (compose.itop-link.yaml, compose.firebase.yaml)
+    "FIREBASE_SERVICE_ACCOUNT_FILE",  # compose.firebase.yaml: host path of the service account secret (D-087)
 }
 NOT_IN_EXAMPLE = {"PGPASSWORD"}  # the app role's password reaches Settings as the pgpassword secret file only
 
