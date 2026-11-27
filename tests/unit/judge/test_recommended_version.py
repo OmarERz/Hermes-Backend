@@ -130,6 +130,27 @@ def recommended(action: str) -> list[str]:
         ("OpenSSL 3.0.22 is the fixed version.", ["3.0.22"]),
         ("3.0.23 es la primera versión corregida.", ["3.0.23"]),
         ("Actualizar OpenSSL en los equipos con 3.0.0 a 3.0.22.", ["3.0.22"]),  # no target yet: read as a move
+        ("Reemplazar Chrome 125 por 126.", ["126"]),  # forced findings of T2
+        ("Actualizar Chrome hasta 126.", ["126"]),
+        ("La versión corregida es 126.", ["126"]),
+        ("Ejecutar `pip install --upgrade cryptography==43.0.1`.", ["43.0.1"]),
+        ("Revisar las versiones afectadas y comprobar que los equipos ejecuten 3.0.22 o posterior.", ["3.0.22"]),
+        ("Las versiones afectadas son 3.0.0 o posteriores.", []),
+        ("Actualizar a 3.0.23 los servidores con las versiones instaladas 3.0.0 a 3.0.22.", ["3.0.23"]),
+        ("Actualizar a 3.0.23 los servidores afectados y los clientes de 3.1.0 a 3.1.5.", ["3.0.23", "3.1.5"]),
+        ("Re-install OpenSSL 3.0.22.", ["3.0.22"]),  # T3 round 1 findings
+        ("Las versiones afectadas de OpenSSL son 3.0.0 o posteriores.", []),
+        ("126 is the fixed version.", ["126"]),
+        ("126 es la primera versión corregida.", ["126"]),
+        ("Actualizar Chrome hasta 126 como mínimo.", ["126"]),  # T3 round 2 findings
+        ("Reemplazar Chrome 125 por 126 antes del reinicio.", ["126"]),
+        ("Ejecutar `pip install --upgrade package==126`.", ["126"]),
+        ("Revisar las versiones afectadas de OpenSSL y ejecutar 3.0.22 o posterior.", ["3.0.22"]),
+        ("Actualizar a 3.0.23 los equipos con OpenSSL en 3.0.0 a 3.0.22.", ["3.0.23"]),
+        ("Upgrade the web servers to 3.0.23 and affected clients on release 3.1.0 to 3.1.5.", ["3.0.23", "3.1.5"]),
+        ("Fixed version for On-Premises Data Gateway is 3.0.22.", ["3.0.22"]),  # T3 round 3 findings
+        ("Revisar las versiones afectadas de OpenSSL, comprobar 3.0.22 o posterior.", ["3.0.22"]),
+        ("Actualizar Chrome hasta 126 según el aviso.", ["126"]),
         ("Validar que todos los servidores afectados ejecuten 3.0.22 o posterior.", ["3.0.22"]),
         ("Affected versions: 3.0.0 and later.", []),
         ("La versión corregida de OpenSSL es 3.0.22.", ["3.0.22"]),
@@ -311,6 +332,48 @@ def test_round_3_findings_are_checked() -> None:
         "OpenSSL 3.0.22 is the fixed version.",
     ):
         assert check(action, "Fixed in 3.0.22.", openssl) == OUTSIDE_RULE, action
+
+
+def test_forced_t2_findings_are_checked() -> None:
+    chrome = package("google:chrome", ["google:chrome [125,127)"], " Chrome 126 ships the first fix.")
+    quote = "Chrome 126 ships the first fix."
+    for action in ("Reemplazar Chrome por 126.", "Actualizar Chrome hasta 126.", "La versión corregida es 126."):
+        assert check(action, quote, chrome) == OUTSIDE_RULE, action
+    command = "`pip install --upgrade cryptography==43.0.1`"
+    pip = package("cryptography:cryptography", ["cryptography:cryptography [43.0.0,43.0.2)"], f" Run {command}.")
+    assert check(f"Ejecutar {command}.", f"Run {command}.", pip) == OUTSIDE_RULE
+    floor = package("openssl:openssl", ["openssl:openssl [3.0.0,3.0.23)"], " Fixed in 3.0.22.")
+    action = "Revisar las versiones afectadas y comprobar que los equipos ejecuten 3.0.22 o posterior."
+    assert check(action, "Fixed in 3.0.22.", floor) == OUTSIDE_RULE
+    note = " Versions 3.0.0 to 3.0.22 are affected; 3.0.23 fixes it."
+    one = package("openssl:openssl", ["openssl:openssl [3.0.0,3.0.23)"], note)
+    action = "Actualizar a 3.0.23 los servidores con las versiones instaladas 3.0.0 a 3.0.22."
+    assert check(action, note.strip(), one) == ACCEPTED
+
+
+def test_t3_round_1_findings_are_checked() -> None:
+    lines = ["openssl:openssl [3.0.0,3.0.23)", "openssl:openssl [3.1.0,3.1.6)"]
+    note = " Fixed in 3.0.23; clients from 3.1.0 to 3.1.5 are affected."
+    both = package("openssl:openssl", lines, note)
+    action = "Actualizar a 3.0.23 los servidores afectados y los clientes de 3.1.0 a 3.1.5."
+    assert check(action, note.strip(), both) == OUTSIDE_RULE
+    floor = package("openssl:openssl", ["openssl:openssl [3.0.0,3.0.23)"], " Fixed in 3.0.22.")
+    assert check("Re-install OpenSSL 3.0.22.", "Fixed in 3.0.22.", floor) == OUTSIDE_RULE
+    chrome = package("google:chrome", ["google:chrome [125,127)"], " Chrome 126 ships the first fix.")
+    assert check("126 is the fixed version.", "Chrome 126 ships the first fix.", chrome) == OUTSIDE_RULE
+
+
+def test_t3_round_2_findings_are_checked() -> None:
+    chrome = package("google:chrome", ["google:chrome [125,127)"], " Chrome 126 ships the first fix.")
+    quote = "Chrome 126 ships the first fix."
+    for action in ("Actualizar Chrome hasta 126 como mínimo.", "Reemplazar Chrome 125 por 126 antes del reinicio."):
+        assert check(action, quote, chrome) == OUTSIDE_RULE, action
+    command = "`pip install --upgrade package==126`"
+    pinned = package("example:package", ["example:package [125,127)"], f" Run {command}.")
+    assert check(f"Ejecutar {command}.", f"Run {command}.", pinned) == OUTSIDE_RULE
+    floor = package("openssl:openssl", ["openssl:openssl [3.0.0,3.0.23)"], " Fixed in 3.0.22.")
+    action = "Revisar las versiones afectadas de OpenSSL y ejecutar 3.0.22 o posterior."
+    assert check(action, "Fixed in 3.0.22.", floor) == OUTSIDE_RULE
 
 
 def test_without_a_cpe_or_a_range_of_the_product_nothing_is_checked() -> None:

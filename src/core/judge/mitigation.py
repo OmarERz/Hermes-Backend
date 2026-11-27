@@ -127,8 +127,8 @@ _INSTALL = (
     r"(?:re)?instalar\w*|instal(?:e|en|a|an|ando)|aplicar\w*|apli(?:que|quen|ca|can|cando)|desplegar\w*"
     r"|desplieg(?:ue|uen|a|an)|(?:re)?install(?:ing)?|apply(?:ing)?|deploy(?:ing)?"
 )
-_VERB = re.compile(
-    r"\b(?:(?P<replace>reempla[zc]\w*|sustitu\w*|cambi(?:ar|e|en|a|an)|replac\w*|swap\w*)"
+_VERB = re.compile(  # a command flag is no verb (`pip install --upgrade x==1.2`); 'Re-install' still is one
+    r"(?<!--)(?<![\s`'\"]-)\b(?:(?P<replace>reempla[zc]\w*|sustitu\w*|cambi(?:ar|e|en|a|an)|replac\w*|swap\w*)"
     r"|(?P<move>actuali[zc]\w*|migr\w*|pas(?:ar|e|en|a|an|ando)|sub(?:ir|a|an|e|en|iendo)|llev(?:ar|e|en|a|an)"
     r"|mov(?:er|e|ed|ing)|upgrad\w*|updat\w*|bump\w*|switch\w*|patch\w*)"
     rf"|(?P<install>{_INSTALL}))\b",
@@ -152,7 +152,9 @@ _OBJECT_LEAD = re.compile(
 # every host'); never 'a 3 equipos', 'el 15 de', 'Instalar 2 parches', 'Aplicar el parche 2'
 _BARE_NUMBER = re.compile(r"(?<![\w.,:/+~-])\d+(?![\w:/+~*-]|[.,]\d)")
 _BARE_LEAD = re.compile(
-    rf"\b(?:a|al|to|into|{_INSTALL})\s+(?:(?:la|el|the)\s+)?(?:(?-i:[A-Z])[\w.+-]*\s+)?{_OPENER}$", re.IGNORECASE
+    rf"\b(?:a|al|to|into|hasta|por|with|by|{_INSTALL})\s+(?:(?:la|el|the)\s+)?(?:(?-i:[A-Z])[\w.+-]*\s+)?{_OPENER}$"
+    rf"|\b(?:{_INSTALL})\s+(?:\S+\s+){{0,5}}?['\"]?[\w.-]+(?:==?|>=|@)$",  # `pip install --upgrade x==126`
+    re.IGNORECASE,
 )
 # a bare floor needs a product name or a verb of running or having before it: 'Chrome 126 o posterior', 'ejecuten 126
 # o posterior'; never 'nivel 3 o superior'
@@ -161,12 +163,18 @@ _BARE_FLOOR_LEAD = re.compile(
     re.IGNORECASE,
 )
 _BARE_REACH = 120  # the lead is a few words long: look no further back
-_BARE_TAIL = re.compile(rf"{_CLOSER}(?:\s*$|\s*[,;.!?)]|\s+{_STOP}\b)", re.IGNORECASE)
+_BARE_TAIL = re.compile(
+    rf"{_CLOSER}(?:\s*$|\s*[,;.!?)]|\s+{_STOP}\b|\s+(?:como|al|antes|despu[eé]s|cuanto|tan|lo|de\s+inmediato"
+    r"|inmediatamente|ya|ahora|hoy|seg[uú]n|conforme|siguiendo|at|before|after|as|immediately|now|asap|today|per"
+    r"|according|following)\b)",
+    re.IGNORECASE,
+)
 # the end of a set of installed versions once the verb has its target: 'Actualizar a 3.0.23 los equipos con 3.0.0 a
 # 3.0.22' (before any target it is where the move goes: 'Upgrade hosts running 3.0.22 to 3.0.23')
 _SET_END_LEAD = re.compile(
-    r"\b(?:con|entre|with|between|running|ejecutando|afectad\w*|vulnerables?|affected|impacted)\s+"
-    rf"(?:{_NO_VERSION}\S+\s+){{0,2}}{_OPENER}[vV]?\d\S*\s+(?:a|al|hasta|to|through|y|and|-)\s+{_ARTICLES}{_OPENER}$",
+    r"\b(?:con|entre|with|between|running|ejecutando)\s+"
+    rf"(?:(?!(?:y|e|o|u|and|or)\b){_NO_VERSION}\S+\s+){{0,4}}{_OPENER}[vV]?\d\S*\s+(?:a|al|hasta|to|through|y|and|-)\s+"
+    rf"{_ARTICLES}{_OPENER}$",
     re.IGNORECASE,
 )
 # 'con' and 'with' name what is installed, except as the replacement ('Replace 3.0.17 with 3.0.18')
@@ -194,8 +202,9 @@ _FLOOR_TAIL = re.compile(
     r"|later|higher|newer|above|greater)|en\s+adelante|onwards?)",
     re.IGNORECASE,
 )
-# a floor of affected versions: it is the subject of 'están afectadas' / 'are affected', or 'versiones afectadas' /
-# 'affected versions' comes before it ('… is deployed to affected hosts' is still a floor)
+# a floor of affected versions: it is the subject of 'están afectadas' / 'are affected', or comes right after
+# 'versiones afectadas:' / 'affected versions are' ('… is deployed to affected hosts' and 'Revisar las versiones
+# afectadas y comprobar que los equipos ejecuten 3.0.22 o posterior' are still floors)
 _AFFECTED = re.compile(
     r"\b(?:est[aá]n?|son|es|siguen?|quedan?|are|is|were|was|remains?)\s+(?:(?:also|still|todav[ií]a|a[uú]n|tambi[eé]n)\s+)?"
     r"(?:afectad\w*|vulnerables?|affected|impacted)\b",
@@ -203,13 +212,15 @@ _AFFECTED = re.compile(
 )
 _AFFECTED_VERSIONS = re.compile(
     r"\b(?:(?:versi[oó]n(?:es)?|versions?|releases?)\s+(?:afectad\w*|vulnerables?|affected|impacted)"
-    r"|(?:affected|vulnerable|impacted)\s+(?:versions?|releases?))\b",
+    r"|(?:affected|vulnerable|impacted)\s+(?:versions?|releases?))"
+    rf"(?:\s+(?:de|del|of|for|para)(?:\s+(?!{_STOP}(?:\s|$))[^\s,;]+){{1,3}}?)?"
+    rf"\s*(?::|\s(?:son|es|incluyen|are|is|include)\b)?\s*{_ARTICLES}{_OPENER}$",
     re.IGNORECASE,
 )
 _FIXED_LEAD = re.compile(
     r"\b(?:versi[oó]n(?:es)?\s+(?:corregidas?|parcheadas?|seguras?|recomendadas?|m[ií]nimas?)"
     r"|(?:fixed|patched|safe|recommended|minimum)\s+(?:versions?|releases?))"
-    r"(?:\s+(?:de|del|para|of|for)(?:\s+\S+){1,3}?)?\s*(?::|\s(?:es|son|is|are)\b)?\s*(?:la\s+|the\s+)?"
+    rf"(?:\s+(?:de|del|para|of|for)(?:\s+(?!{_STOP}(?:\s|$))[^\s,;]+){{1,3}}?)?\s*(?::|\s(?:es|son|is|are)\b)?\s*(?:la\s+|the\s+)?"
     rf"{_OPENER}$",
     re.IGNORECASE,
 )
@@ -415,18 +426,23 @@ def traceable_facts(action: str) -> list[TraceableFact]:
 
 
 def _bare_numbers(text: str, masked: str, spans: Sequence[tuple[int, int]]) -> list[tuple[int, int]]:
-    """The bare numbers that may be a recommended version: a move target or an install object ('a 126', 'Instalar
-    Chrome 126'), a floor ('126 o posterior') or the next item of a list after a version ('to 128 or 126')."""
+    """The bare numbers that may be a recommended version: a move target, a replacement or an install object ('a 126',
+    'hasta 126', 'por 126', 'Instalar Chrome 126'), a floor ('126 o posterior'), the fixed version ('La versión
+    corregida es 126') or the next item of a list after a version ('to 128 or 126')."""
     found: list[tuple[int, int]] = []
     for match in _BARE_NUMBER.finditer(masked):
         start, end = match.span()
+        if _FIXED_TAIL.match(text, end):  # '126 is the fixed version'
+            found.append((start, end))
+            continue
         if not _BARE_TAIL.match(text, end):
             continue
         before = [span for span in (*spans, *found) if span[1] <= start]
         listed = bool(before) and _LIST_GAP.fullmatch(text, max(before, key=_end)[1], start) is not None
         lead = _BARE_LEAD.search(text, max(0, start - _BARE_REACH), start) is not None
         floor = _FLOOR_TAIL.match(text, end) and _BARE_FLOOR_LEAD.search(text, max(0, start - _BARE_REACH), start)
-        if lead or listed or floor:
+        fixed = _FIXED_LEAD.search(text, max(0, start - _BARE_REACH), start)
+        if lead or listed or floor or fixed:
             found.append((start, end))
     return found
 
