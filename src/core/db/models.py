@@ -314,6 +314,8 @@ class Asset(Base):
         UUID(as_uuid=True), ForeignKey("team.id"), nullable=True
     )
     description: Mapped[str | None] = mapped_column(Text, nullable=True)
+    cpu: Mapped[str | None] = mapped_column(Text, nullable=True)
+    ram: Mapped[str | None] = mapped_column(Text, nullable=True)
     synced_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
     decommissioned_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
 
@@ -324,6 +326,23 @@ class SoftwareProduct(Base):
     id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, server_default=text("uuidv7()"))
     itop_name: Mapped[str] = mapped_column(Text, nullable=False, unique=True)
     first_seen_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+
+
+class SoftwareLicence(Base):
+    __tablename__ = "software_licence"
+
+    id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, server_default=text("uuidv7()"))
+    itop_licence_id: Mapped[str] = mapped_column(Text, nullable=False, unique=True)
+    software_product_id: Mapped[uuid.UUID | None] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("software_product.id"), nullable=True
+    )
+    name: Mapped[str] = mapped_column(Text, nullable=False)
+    usage_limit: Mapped[str | None] = mapped_column(Text, nullable=True)
+    start_date: Mapped[date | None] = mapped_column(Date, nullable=True)
+    end_date: Mapped[date | None] = mapped_column(Date, nullable=True)
+    perpetual: Mapped[bool] = mapped_column(Boolean, nullable=False)
+    synced_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+    removed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
 
 
 class CpeMapping(Base):
@@ -355,6 +374,12 @@ class InstalledSoftware(Base):
     package_name: Mapped[str | None] = mapped_column(Text, nullable=True)
     package_version: Mapped[str | None] = mapped_column(Text, nullable=True)
     package_ecosystem: Mapped[str | None] = mapped_column(Text, nullable=True)
+    itop_class: Mapped[str | None] = mapped_column(Text, nullable=True)
+    status: Mapped[str | None] = mapped_column(Text, nullable=True)
+    description: Mapped[str | None] = mapped_column(Text, nullable=True)
+    software_licence_id: Mapped[uuid.UUID | None] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("software_licence.id"), nullable=True
+    )
     synced_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
     removed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
 

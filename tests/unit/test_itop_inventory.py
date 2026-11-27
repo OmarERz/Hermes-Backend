@@ -136,3 +136,18 @@ def test_reads_the_recorded_fixture() -> None:
     result = read(ItopDouble.from_fixture())
     assert len(result.assets) == 4
     assert {i.itop_class for i in result.instances} == {"WebServer", "DBServer", "OtherSoftware"}
+    # F18.3 (D-088): host CPU and RAM, installation status, description and licence, the licence itself
+    assert {a.name: (a.cpu, a.ram) for a in result.assets if a.cpu} == {
+        "web-frontend-01": ("4 vCPU", "16 GB"),
+        "db-host-01": ("2 x Xeon Gold 6338", "256 GB"),
+        "vm-legacy-01": ("2 vCPU", "4096"),
+    }
+    assert {(i.itop_id, i.category, i.status, i.licence_itop_id) for i in result.instances} == {
+        ("300", "WebServer", "active", "400"),
+        ("301", "DBServer", "active", None),
+        ("302", "OtherSoftware", "inactive", None),
+    }
+    assert [(lic.itop_id, lic.name, lic.software_itop_id, lic.perpetual) for lic in result.licences] == [
+        ("400", "NGINX Plus subscription", "200", False)
+    ]
+    assert result.warnings == []

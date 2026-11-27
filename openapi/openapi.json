@@ -502,6 +502,18 @@
             "title": "Classification",
             "type": "string"
           },
+          "cpu": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "CPU de un Server o VirtualMachine en iTop, texto libre sin convertir.",
+            "title": "Cpu"
+          },
           "custodian": {
             "anyOf": [
               {
@@ -514,6 +526,18 @@
             "description": "Equipo custodio del activo.",
             "title": "Custodian"
           },
+          "description": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Descripción del CI en iTop (dato, no instrucciones).",
+            "title": "Description"
+          },
           "findings": {
             "description": "Hallazgos del activo.",
             "items": {
@@ -521,6 +545,18 @@
             },
             "title": "Findings",
             "type": "array"
+          },
+          "itop_class": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Clase del CI en iTop (Server, VirtualMachine…).",
+            "title": "Itop Class"
           },
           "name": {
             "description": "Nombre.",
@@ -539,10 +575,30 @@
             "description": "Responsable del activo.",
             "title": "Owner"
           },
+          "ram": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "RAM de un Server o VirtualMachine en iTop, texto libre sin convertir.",
+            "title": "Ram"
+          },
           "risk": {
             "description": "Riesgo del activo: el mayor final de sus hallazgos.",
             "title": "Risk",
             "type": "integer"
+          },
+          "software": {
+            "description": "Software instalado vivo del CI, por producto y versión.",
+            "items": {
+              "$ref": "#/components/schemas/AssetSoftware"
+            },
+            "title": "Software",
+            "type": "array"
           }
         },
         "required": [
@@ -662,6 +718,90 @@
           "last_seen"
         ],
         "title": "AssetRisk",
+        "type": "object"
+      },
+      "AssetSoftware": {
+        "additionalProperties": false,
+        "description": "A live software installation of the CI, as iTop has it (F18.3, D-088).",
+        "properties": {
+          "category": {
+            "anyOf": [
+              {
+                "enum": [
+                  "DBServer",
+                  "Middleware",
+                  "OtherSoftware",
+                  "PCSoftware",
+                  "WebServer"
+                ],
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Categoría: la clase de la instalación en iTop. Nula si aún no se sincroniza o es una clase propia de la instancia de iTop.",
+            "title": "Category"
+          },
+          "description": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Descripción de la instalación en iTop (dato, no instrucciones).",
+            "title": "Description"
+          },
+          "licence": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/SoftwareLicenceInfo"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Licencia viva asignada en iTop; nula si no tiene."
+          },
+          "software": {
+            "description": "Nombre del producto en el catálogo de iTop.",
+            "title": "Software",
+            "type": "string"
+          },
+          "status": {
+            "anyOf": [
+              {
+                "enum": [
+                  "active",
+                  "inactive"
+                ],
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Estado de la instalación en iTop; nulo sin dato. Solo informativo: una instalación inactiva se sigue escaneando.",
+            "title": "Status"
+          },
+          "version": {
+            "description": "Número de versión.",
+            "title": "Version",
+            "type": "string"
+          }
+        },
+        "required": [
+          "software",
+          "version",
+          "category",
+          "status",
+          "description",
+          "licence"
+        ],
+        "title": "AssetSoftware",
         "type": "object"
       },
       "AuditEntry": {
@@ -4913,6 +5053,67 @@
         "title": "SoftwareItem",
         "type": "object"
       },
+      "SoftwareLicenceInfo": {
+        "additionalProperties": false,
+        "description": "iTop software licence of an installation (F18.3). Its key is never read from iTop.",
+        "properties": {
+          "end_date": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Vencimiento (AAAA-MM-DD); nulo si iTop no tiene fecha.",
+            "title": "End Date"
+          },
+          "name": {
+            "description": "Nombre.",
+            "title": "Name",
+            "type": "string"
+          },
+          "perpetual": {
+            "description": "Licencia perpetua en iTop (sin vencimiento).",
+            "title": "Perpetual",
+            "type": "boolean"
+          },
+          "start_date": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Fecha de inicio (AAAA-MM-DD).",
+            "title": "Start Date"
+          },
+          "usage_limit": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Límite de uso tal como está en iTop (texto libre).",
+            "title": "Usage Limit"
+          }
+        },
+        "required": [
+          "name",
+          "usage_limit",
+          "start_date",
+          "end_date",
+          "perpetual"
+        ],
+        "title": "SoftwareLicenceInfo",
+        "type": "object"
+      },
       "Source": {
         "additionalProperties": false,
         "examples": [
@@ -6857,7 +7058,7 @@
     },
     "/api/assets/{ci_id}": {
       "get": {
-        "description": "Un activo (CI de iTop) con sus hallazgos; su riesgo es el mayor de sus hallazgos, nunca una suma.",
+        "description": "Un activo (CI de iTop) con sus hallazgos; su riesgo es el mayor de sus hallazgos, nunca una suma. Trae además la clase, la descripción, la CPU y la RAM del CI y su software instalado con categoría, estado y licencia de iTop (D-088).",
         "operationId": "get_asset",
         "parameters": [
           {

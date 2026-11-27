@@ -93,3 +93,23 @@ def test_seeding_twice_is_refused(migrated: str) -> None:
 def test_unknown_scenario() -> None:
     with pytest.raises(ValueError, match="Unknown scenario"):
         seed(None, "nope")  # type: ignore[arg-type]
+
+
+def test_demo_inventory_carries_an_itop_licence(migrated: str) -> None:
+    """F18.3 (D-088): without iTop the front still sees one installation with its licence."""
+    engine = make_engine(migrated)
+    try:
+        with Session(engine) as session, session.begin():
+            seed(session, "demo")
+        with engine.connect() as conn:
+            licensed = conn.execute(
+                text(
+                    "SELECT a.itop_ci_id, i.itop_instance_id, l.name, l.perpetual, l.removed_at "
+                    "FROM installed_software i JOIN asset a ON a.id = i.asset_id "
+                    "JOIN software_licence l ON l.id = i.software_licence_id "
+                    "WHERE l.software_product_id = i.software_product_id"
+                )
+            ).all()
+        assert [tuple(r) for r in licensed] == [("CI-1", "SI-1", "Soporte OpenSSL", False, None)]
+    finally:
+        engine.dispose()

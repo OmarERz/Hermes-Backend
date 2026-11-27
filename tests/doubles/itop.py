@@ -40,7 +40,8 @@ CHILDREN: Final[dict[str, tuple[str, ...]]] = {
     "PhysicalDevice": ("Server",),
     "VirtualDevice": ("VirtualHost", "VirtualMachine"),
     "VirtualHost": ("Hypervisor", "Farm"),
-    "SoftwareInstance": ("DBServer", "WebServer", "Middleware", "OtherSoftware"),
+    "SoftwareInstance": ("DBServer", "WebServer", "Middleware", "OtherSoftware", "PCSoftware"),
+    "Licence": ("SoftwareLicence", "OSLicence"),
     "Ticket": ("UserRequest",),
 }
 

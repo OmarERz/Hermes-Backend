@@ -5,6 +5,8 @@ Rows are matched by their iTop id. Whatever disappears from iTop is soft-deleted
 The caller owns the transaction. Fields that are ours and not iTop's are never overwritten:
 `team.is_default` (P-020), `installed_software.package_name` and `package_ecosystem` (OSV, F1.4) and the whole
 `cpe_mapping`.
+Licences (F18.3) link to a product only when it is already known from an installation: a licence never creates a
+product, so licensed but uninstalled software does not show up as pending CPE mapping (ESC-07).
 """
 
 from __future__ import annotations
@@ -44,6 +46,7 @@ class SyncResult:
     assets: Counts = field(default_factory=Counts)
     products: Counts = field(default_factory=Counts)
     instances: Counts = field(default_factory=Counts)
+    licences: Counts = field(default_factory=Counts)
     warnings: list[str] = field(default_factory=list)
 
 
@@ -76,7 +79,9 @@ def sync_inventory(
     team_ids = _sync_teams(run)
     person_ids = _sync_persons(run)
     asset_ids = _sync_assets(run, person_ids, team_ids)
-    _sync_instances(run, asset_ids)
+    installed = _sync_instances(run, asset_ids)
+    licences = _sync_licences(run)
+    _link_licences(run, installed, licences)
     session.flush()
     return run.result
 
@@ -188,18 +193,21 @@ def _sync_assets(run: _Run, person_ids: dict[str, uuid.UUID], team_ids: dict[str
         row.confidentiality, row.personal_data = item.confidentiality, item.personal_data
         row.owner_person_id = _reference("owner", item.itop_id, item.owner_itop_id, person_ids, run)
         row.custodian_team_id = _reference("custodian", item.itop_id, item.custodian_itop_id, team_ids, run)
-        row.description, row.synced_at, row.decommissioned_at = item.description, run.now, None
+        row.description, row.cpu, row.ram = item.description, item.cpu, item.ram
+        row.synced_at, row.decommissioned_at = run.now, None
     _soft_delete(rows, {a.itop_id for a in run.snapshot.assets}, "decommissioned_at", run, counts)
     run.session.flush()
     return {key: row.id for key, row in rows.items() if row.decommissioned_at is None}
 
 
-def _sync_instances(run: _Run, asset_ids: dict[str, uuid.UUID]) -> None:
+def _sync_instances(run: _Run, asset_ids: dict[str, uuid.UUID]) -> dict[str, m.InstalledSoftware]:
+    """Apply the instances; returns the rows iTop still has, by iTop id (for the licence link)."""
     snapshot, session = run.snapshot, run.session
     catalogue = {s.itop_id: s for s in snapshot.software}
     products = {p.itop_name: p for p in session.scalars(select(m.SoftwareProduct))}
     rows = {i.itop_instance_id: i for i in session.scalars(select(m.InstalledSoftware))}
     seen: set[str] = set()
+    written: dict[str, m.InstalledSoftware] = {}
     for item in snapshot.instances:
         software = catalogue.get(item.software_itop_id or "")
         asset_id = asset_ids.get(item.system_itop_id or "")
@@ -214,11 +222,14 @@ def _sync_instances(run: _Run, asset_ids: dict[str, uuid.UUID]) -> None:
             run.result.products.created += 1
             session.flush()
         version = normalize_version(software.version or "")
+        row = rows.get(item.itop_id)
         if version is None:
             seen.add(item.itop_id)  # still in iTop: an unknown version is no evidence that it was uninstalled
             run.result.warnings.append(f"Software instance {item.itop_id}: no version, skipped (ESC-12)")
+            if row is not None:  # its last version stays, but what iTop says of it now is shown (F18.3)
+                row.itop_class, row.status, row.description = item.category, item.status, item.description
+                written[item.itop_id] = row
             continue
-        row = rows.get(item.itop_id)
         if row is None:
             row = m.InstalledSoftware(itop_instance_id=item.itop_id)
             session.add(row)
@@ -233,9 +244,65 @@ def _sync_instances(run: _Run, asset_ids: dict[str, uuid.UUID]) -> None:
             else:  # the product is locked once findings exist (trigger check_product_locked)
                 run.result.warnings.append(f"Software instance {item.itop_id}: product changed in iTop, kept")
         row.version, row.package_version = version.version, version.package_version
+        row.itop_class, row.status, row.description = item.category, item.status, item.description
         row.synced_at, row.removed_at = run.now, None
         seen.add(item.itop_id)
+        written[item.itop_id] = row
     _soft_delete(rows, seen, "removed_at", run, run.result.instances)
+    session.flush()
+    return written
+
+
+def _sync_licences(run: _Run) -> dict[str, m.SoftwareLicence]:
+    """Apply the licences; returns the live ones by iTop id. The product comes from the catalogue by name."""
+    session, counts = run.session, run.result.licences
+    catalogue = {s.itop_id: s.name for s in run.snapshot.software}
+    products = {p.itop_name: p.id for p in session.scalars(select(m.SoftwareProduct))}
+    rows = {lic.itop_licence_id: lic for lic in session.scalars(select(m.SoftwareLicence))}
+    for item in run.snapshot.licences:
+        row = rows.get(item.itop_id)
+        if row is None:
+            row = m.SoftwareLicence(itop_licence_id=item.itop_id)
+            session.add(row)
+            rows[item.itop_id] = row
+            counts.created += 1
+        else:
+            counts.updated += 1
+        row.software_product_id = products.get(catalogue.get(item.software_itop_id or "", ""))
+        row.name, row.usage_limit, row.perpetual = item.name, item.usage_limit, item.perpetual
+        row.start_date, row.end_date = item.start_date, item.end_date
+        row.synced_at, row.removed_at = run.now, None
+    _soft_delete(rows, {lic.itop_id for lic in run.snapshot.licences}, "removed_at", run, counts)
+    session.flush()
+    return {key: row for key, row in rows.items() if row.removed_at is None}
+
+
+def _link_licences(
+    run: _Run, installed: dict[str, m.InstalledSoftware], licences: dict[str, m.SoftwareLicence]
+) -> None:
+    """Point each installation iTop still has at its live licence, as iTop says (X-3); a mismatch is only warned.
+
+    The mismatch compares iTop's own Software records, as iTop does: two records with one name share a product here.
+    """
+    licensed_software = {lic.itop_id: lic.software_itop_id for lic in run.snapshot.licences}
+    for item in run.snapshot.instances:
+        row = installed.get(item.itop_id)
+        if row is None:
+            continue
+        licence = licences.get(item.licence_itop_id or "")
+        if item.licence_itop_id is not None and licence is None:
+            run.result.warnings.append(
+                f"Software instance {item.itop_id}: licence {item.licence_itop_id} is not in the inventory read, "
+                "left empty"
+            )
+        elif licence is not None and licensed_software.get(item.licence_itop_id or "") not in (
+            None,
+            item.software_itop_id,
+        ):
+            run.result.warnings.append(
+                f"Software instance {item.itop_id}: licence {item.licence_itop_id} is for another software, kept"
+            )
+        row.software_licence_id = licence.id if licence is not None else None
 
 
 def _has_findings(session: Session, instance: m.InstalledSoftware) -> bool:

@@ -103,7 +103,9 @@ OPERATIONS: Final[dict[tuple[str, str], Op]] = {
         "get_asset",
         "vulnerabilities",
         "Detalle de un activo",
-        "Un activo (CI de iTop) con sus hallazgos; su riesgo es el mayor de sus hallazgos, nunca una suma.",
+        "Un activo (CI de iTop) con sus hallazgos; su riesgo es el mayor de sus hallazgos, nunca una suma. Trae "
+        "además la clase, la descripción, la CPU y la RAM del CI y su software instalado con categoría, estado y "
+        "licencia de iTop (D-088).",
     ),
     ("GET", "/api/findings/{id}/history"): Op(
         "get_finding_history",

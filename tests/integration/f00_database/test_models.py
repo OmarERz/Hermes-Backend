@@ -30,9 +30,9 @@ def scratch_engine(postgres_url: str) -> Iterator[Engine]:
 
 def test_model_counts_match_data_model_v1() -> None:
     tables = Base.metadata.tables
-    assert len(tables) == 75
-    assert sum(len(t.foreign_keys) for t in tables.values()) == 118
-    assert sum(len(t.columns) for t in tables.values()) == 519
+    assert len(tables) == 76
+    assert sum(len(t.foreign_keys) for t in tables.values()) == 120
+    assert sum(len(t.columns) for t in tables.values()) == 535
 
 
 def test_create_all_on_postgres_18(scratch_engine: Engine) -> None:

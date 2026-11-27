@@ -28,6 +28,7 @@ from api.routes.models import (
     Alert,
     AssetDetail,
     AssetRisk,
+    AssetSoftware,
     Breakdown,
     Classification,
     ComparisonRow,
@@ -43,6 +44,8 @@ from api.routes.models import (
     RecommendationFilters,
     ReviewStatus,
     ScoreHistoryPoint,
+    SoftwareCategory,
+    SoftwareLicenceInfo,
     Ticket,
     TicketAction,
     TicketSummary,
@@ -216,6 +219,31 @@ def asset_detail(ci_id: CiId, session: SessionDep) -> AssetDetail:
         owner=found.owner,
         custodian=found.custodian,
         findings=[_group_model(g) for g in found.findings],
+        itop_class=found.itop_class,
+        description=found.description,
+        cpu=found.cpu,
+        ram=found.ram,
+        software=[_asset_software(s) for s in found.software],
+    )
+
+
+def _asset_software(item: views.AssetSoftware) -> AssetSoftware:
+    licence = item.licence
+    return AssetSoftware(
+        software=item.software,
+        version=item.version,
+        category=cast(SoftwareCategory | None, item.category),
+        status=cast(Literal["active", "inactive"] | None, item.status),
+        description=item.description,
+        licence=None
+        if licence is None
+        else SoftwareLicenceInfo(
+            name=licence.name,
+            usage_limit=licence.usage_limit,
+            start_date=licence.start_date.isoformat() if licence.start_date else None,
+            end_date=licence.end_date.isoformat() if licence.end_date else None,
+            perpetual=licence.perpetual,
+        ),
     )
 
 

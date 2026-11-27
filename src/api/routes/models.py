@@ -276,6 +276,36 @@ class VulnerabilityDetail(VulnerabilityGroup):
     assets: list[AffectedAsset]
 
 
+SoftwareCategory = Literal["DBServer", "Middleware", "OtherSoftware", "PCSoftware", "WebServer"]
+
+
+class SoftwareLicenceInfo(_Model):
+    """iTop software licence of an installation (F18.3). Its key is never read from iTop."""
+
+    name: str
+    usage_limit: str | None = Field(description="Límite de uso tal como está en iTop (texto libre).")
+    start_date: str | None = Field(description="Fecha de inicio (AAAA-MM-DD).")
+    end_date: str | None = Field(description="Vencimiento (AAAA-MM-DD); nulo si iTop no tiene fecha.")
+    perpetual: bool = Field(description="Licencia perpetua en iTop (sin vencimiento).")
+
+
+class AssetSoftware(_Model):
+    """A live software installation of the CI, as iTop has it (F18.3, D-088)."""
+
+    software: str = Field(description="Nombre del producto en el catálogo de iTop.")
+    version: str
+    category: SoftwareCategory | None = Field(
+        description="Categoría: la clase de la instalación en iTop. Nula si aún no se sincroniza o es una clase "
+        "propia de la instancia de iTop."
+    )
+    status: Literal["active", "inactive"] | None = Field(
+        description="Estado de la instalación en iTop; nulo sin dato. Solo informativo: una instalación inactiva "
+        "se sigue escaneando."
+    )
+    description: str | None = Field(description="Descripción de la instalación en iTop (dato, no instrucciones).")
+    licence: SoftwareLicenceInfo | None = Field(description="Licencia viva asignada en iTop; nula si no tiene.")
+
+
 class AssetDetail(_Model):
     ci_id: str
     name: str
@@ -284,6 +314,17 @@ class AssetDetail(_Model):
     owner: str | None
     custodian: str | None
     findings: list[VulnerabilityGroup]
+    itop_class: str | None = Field(default=None, description="Clase del CI en iTop (Server, VirtualMachine…).")
+    description: str | None = Field(default=None, description="Descripción del CI en iTop (dato, no instrucciones).")
+    cpu: str | None = Field(
+        default=None, description="CPU de un Server o VirtualMachine en iTop, texto libre sin convertir."
+    )
+    ram: str | None = Field(
+        default=None, description="RAM de un Server o VirtualMachine en iTop, texto libre sin convertir."
+    )
+    software: list[AssetSoftware] = Field(
+        default_factory=list, description="Software instalado vivo del CI, por producto y versión."
+    )
 
 
 class ScoreHistoryPoint(_Model):

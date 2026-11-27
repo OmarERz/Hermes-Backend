@@ -201,6 +201,13 @@ Todo error responde con:
   redondeo); `raw` + todas las barras = la final. Píntalas tal cual, sin recalcular.
 - **Sin sumas de riesgo:** el riesgo de un activo nunca es la suma de sus puntuaciones (diez bajas no son una
   crítica); el backend ya entrega la agregación correcta.
+- **Datos de inventario de iTop (D-088):** `GET /api/assets/{ci_id}` trae además `itop_class`, `description`,
+  `cpu` y `ram` del CI y `software`: cada instalación viva con `category` (la clase de iTop: `DBServer`,
+  `WebServer`, `Middleware`, `OtherSoftware`, `PCSoftware`), `status` (`active`/`inactive`, solo informativo: una
+  instalación inactiva se sigue escaneando), `description` y `licence` (nombre, límite de uso, fechas,
+  perpetua). CPU y RAM son texto libre de iTop: muéstralos tal cual, sin convertir. Cualquiera puede llegar nulo
+  (sin dato en iTop o aún no sincronizado); la descripción es texto de iTop: muéstrala como texto, nunca como
+  HTML. GPU y almacenamiento no existen en iTop. Editar cualquiera de estos datos es un enlace a iTop.
 - **Privacidad:** el backend no devuelve correos de otros usuarios en vistas de lectura; usa el nombre que venga.
 - **Secretos:** ninguna respuesta trae una llave. El asistente y la pantalla de conexiones solo **verifican**; las
   llaves se configuran en el servidor (`.env` / Docker secrets), nunca desde el front.

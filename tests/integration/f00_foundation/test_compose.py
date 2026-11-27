@@ -108,7 +108,7 @@ def test_all_services_running(stack: dict[str, str]) -> None:
 def test_migrations_ran_as_migrator(stack: dict[str, str]) -> None:
     query = "SELECT tableowner, count(*) FROM pg_tables WHERE schemaname = 'public' GROUP BY 1"
     out = compose(stack, "exec", "-T", "db", "psql", "-U", "hermes", "-d", "hermes", "-tAc", query)
-    assert out.stdout.strip() == "migrator|76"  # 75 model tables + alembic_version
+    assert out.stdout.strip() == "migrator|77"  # 76 model tables + alembic_version
 
 
 def test_factory_values_were_loaded_once_by_the_bootstrap(stack: dict[str, str]) -> None:

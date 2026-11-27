@@ -18,18 +18,18 @@
   "Server": [
     {"id": 100, "name": "web-frontend-01", "org_id": "1", "status": "production", "business_criticity": "medium",
      "managementip": "10.0.0.11", "internet_exposed": "yes", "confidentiality": "public", "personal_data": "no",
-     "owner_id": "20", "custodian_id": "10"},
+     "owner_id": "20", "custodian_id": "10", "cpu": "4 vCPU", "ram": "16 GB"},
     {"id": 101, "name": "k8s-node-01", "org_id": "1", "status": "production", "business_criticity": "high",
      "managementip": "10.0.0.12", "internet_exposed": "no", "confidentiality": "classified", "personal_data": "unknown",
      "owner_id": "20", "custodian_id": "10"},
     {"id": 102, "name": "db-host-01", "org_id": "1", "status": "production", "business_criticity": "high",
      "managementip": "10.0.0.13", "internet_exposed": "no", "confidentiality": "highly_classified",
-     "personal_data": "yes", "owner_id": "21", "custodian_id": "11"}
+     "personal_data": "yes", "owner_id": "21", "custodian_id": "11", "cpu": "2 x Xeon Gold 6338", "ram": "256 GB"}
   ],
   "VirtualMachine": [
     {"id": 110, "name": "vm-legacy-01", "org_id": "1", "status": "production", "business_criticity": "low",
      "internet_exposed": "no", "confidentiality": "unclassified", "personal_data": "unknown",
-     "owner_id": "", "custodian_id": ""}
+     "owner_id": "", "custodian_id": "", "cpu": "2 vCPU", "ram": "4096"}
   ],
   "Software": [
     {"id": 200, "name": "nginx", "vendor": "F5", "version": "1.24.0", "type": "WebServer"},
@@ -38,7 +38,7 @@
   ],
   "WebServer": [
     {"id": 300, "name": "nginx 1.24.0 @ web-frontend-01", "org_id": "1", "system_id": "100", "software_id": "200",
-     "status": "active"}
+     "status": "active", "description": "Public web front", "softwarelicence_id": "400"}
   ],
   "DBServer": [
     {"id": 301, "name": "PostgreSQL 15.4 @ db-host-01", "org_id": "1", "system_id": "102", "software_id": "201",
@@ -46,6 +46,10 @@
   ],
   "OtherSoftware": [
     {"id": 302, "name": "OpenSSL 3.0.2 @ k8s-node-01", "org_id": "1", "system_id": "101", "software_id": "202",
-     "status": "active"}
+     "status": "inactive"}
+  ],
+  "SoftwareLicence": [
+    {"id": 400, "name": "NGINX Plus subscription", "org_id": "1", "software_id": "200", "usage_limit": "10 instances",
+     "start_date": "2026-01-01", "end_date": "2026-12-31", "perpetual": "no", "licence_key": ""}
   ]
 }

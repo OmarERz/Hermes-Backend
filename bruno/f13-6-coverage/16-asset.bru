@@ -25,10 +25,12 @@ assert {
   res.status: eq 200
   res.body.ci_id: eq {{assetCiId}}
   res.body.findings: isArray
+  res.body.software: isArray
 }
 
 docs {
-  The CI of that recommendation with its vulnerabilities (D-035).
+  The CI of that recommendation with its vulnerabilities (D-035), plus its iTop class, description, CPU, RAM
+  and live software with category, status and licence (F18.3, D-088).
 
   operationId: get_asset
 }
