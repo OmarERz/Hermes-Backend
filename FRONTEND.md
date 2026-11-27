@@ -84,7 +84,7 @@ Los requisitos de cada pantalla (FRO-xx) están en la especificación del produc
 | Corridas (lanzar escaneo y ver progreso en vivo) | `POST /api/scans`, `GET /api/runs` (filtros `kind`, `status`, `date_from`, `date_to`), `GET /api/runs/{id}/events` (SSE) | analyst lanzar; reader ver |
 | Historial (línea de tiempo de corridas, revisiones LLM y cambios de configuración) | `GET /api/history` (filtros `type`, `status`, `date_from`, `date_to`) | reader |
 | Telemetría de agentes (analistas y juez) | `GET /api/telemetry/summary?window=24h\|7d\|30d`, `GET /api/telemetry/daily?days=1..90`, `GET /api/telemetry/reviews` (filtros `agent`, `status`, `date_from`, `date_to`) | reader |
-| Inventario de activos y software (solo lectura; iTop es el inventario) | `GET /api/inventory/assets` (filtros `q`, `itop_class`, `criticality`, `exposed`, `classification`, `owner`, `custodian`, `with_findings`), `GET /api/inventory/summary`, `GET /api/inventory/software` (filtros `q`, `has_cpe`, `worst_level`, `with_vulnerabilities`), `GET /api/inventory/assets/{ci_id}/software` | reader |
+| Inventario de activos y software (solo lectura; iTop es el inventario) | `GET /api/inventory/assets` (filtros `q`, `itop_class`, `criticality`, `exposed`, `classification`, `owner`, `custodian`, `with_findings`), `GET /api/inventory/summary`, `GET /api/inventory/software` (filtros `q`, `has_cpe`, `worst_level`, `with_vulnerabilities`, `category`), `GET /api/inventory/assets/{ci_id}/software` | reader |
 | Exportación STIX | `POST /api/stix/export` | analyst |
 | Propuestas de calibración (modo supervisado) | `GET /api/calibration/proposals`, `POST .../{id}/approve`, `POST .../{id}/reject` | reader ver; admin decidir |
 | Métricas | `GET /api/metrics` | reader |
@@ -208,6 +208,11 @@ Todo error responde con:
   perpetua). CPU y RAM son texto libre de iTop: muéstralos tal cual, sin convertir. Cualquiera puede llegar nulo
   (sin dato en iTop o aún no sincronizado); la descripción es texto de iTop: muéstrala como texto, nunca como
   HTML. GPU y almacenamiento no existen en iTop. Editar cualquiera de estos datos es un enlace a iTop.
+  Las rutas de inventario traen lo mismo (F18.4): cada CI de `GET /api/inventory/assets` trae `description`,
+  `cpu` y `ram` (además de `itop_class`); cada instalación de `GET /api/inventory/assets/{ci_id}/software` trae
+  `category`, `status`, `description` y `licence`; cada producto de `GET /api/inventory/software` trae
+  `categories` (las categorías distintas de sus instalaciones vivas, en orden alfabético; vacía si ninguna está
+  sincronizada) y la lista acepta `?category=` (incluye el producto si **alguna** de sus instalaciones la tiene).
 - **Privacidad:** el backend no devuelve correos de otros usuarios en vistas de lectura; usa el nombre que venga.
 - **Secretos:** ninguna respuesta trae una llave. El asistente y la pantalla de conexiones solo **verifican**; las
   llaves se configuran en el servidor (`.env` / Docker secrets), nunca desde el front.

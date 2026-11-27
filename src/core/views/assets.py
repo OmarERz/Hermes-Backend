@@ -7,6 +7,10 @@ A CI's open findings are its current scored findings (not fixed, D-035); its ris
 never a sum (FRO-11). Software counts only installations not removed, on live CIs. A version is known unless iTop
 left it empty or with a placeholder (`UNKNOWN_VERSIONS`). The inventory is aggregated in memory, like the grouped
 views: one query per table, then plain Python, enough for the prototype's inventory.
+
+The iTop fields of F18.3 (D-088) are shown as iTop gives them: the CI's description, CPU and RAM, and each
+installation's category (its iTop class), status, description and live licence. The catalogue shows, per product,
+the categories of its live installations (user decision 1 of the F18.3 proposal).
 """
 
 from __future__ import annotations
@@ -23,6 +27,7 @@ from sqlalchemy.orm import Session
 
 from core.cpe.candidates import cpe_uri
 from core.views.common import LEVELS, ci_url, scored_findings
+from core.views.groups import Licence
 
 NameKey = tuple[str, str]  # (case-folded name, id) of the last row of a page, alphabetical
 UNKNOWN_VERSIONS: Final = frozenset(
@@ -33,7 +38,7 @@ MAX_VERSIONS: Final = 20
 _ASSETS: Final = text(
     """
     SELECT a.id, a.itop_ci_id, a.itop_class, a.name, a.criticality, a.exposed, a.confidentiality, a.personal_data,
-           a.service, a.os, a.synced_at, pe.name AS owner, t.name AS custodian
+           a.service, a.os, a.description, a.cpu, a.ram, a.synced_at, pe.name AS owner, t.name AS custodian
       FROM asset a
       LEFT JOIN person pe ON pe.id = a.owner_person_id
       LEFT JOIN team t ON t.id = a.custodian_team_id
@@ -44,10 +49,13 @@ _ASSETS: Final = text(
 _INSTALLS: Final = text(
     """
     SELECT i.asset_id, i.software_product_id AS product_id, p.itop_name AS product, i.version,
+           i.itop_class AS category, i.status, i.description,
+           l.name AS licence_name, l.usage_limit, l.start_date, l.end_date, l.perpetual,
            c.nvd_vendor, c.nvd_product, c.cna_vendor, c.cna_product
       FROM installed_software i
       JOIN asset a ON a.id = i.asset_id AND a.decommissioned_at IS NULL
       JOIN software_product p ON p.id = i.software_product_id
+      LEFT JOIN software_licence l ON l.id = i.software_licence_id AND l.removed_at IS NULL
       LEFT JOIN cpe_mapping c ON c.software_product_id = p.id
      WHERE i.removed_at IS NULL
        AND (CAST(:asset AS uuid) IS NULL OR i.asset_id = CAST(:asset AS uuid))
@@ -70,6 +78,13 @@ def _cpe(row: Any) -> str | None:
     if row.cna_vendor and row.cna_product:
         return cpe_uri(row.cna_vendor, row.cna_product)
     return None
+
+
+def _licence(row: Any) -> Licence | None:
+    """The live iTop licence of an installation row, or None (a removed licence is not shown)."""
+    if row.licence_name is None:
+        return None
+    return Licence(row.licence_name, row.usage_limit, row.start_date, row.end_date, row.perpetual)
 
 
 @dataclass
@@ -110,6 +125,10 @@ class InventoryAsset:
     risk: int | None
     level: str | None
     software_count: int
+    # F18.3 (D-088): iTop free text, shown as given (data, never instructions); None without data in iTop
+    description: str | None = None
+    cpu: str | None = None
+    ram: str | None = None
 
 
 @dataclass(frozen=True)
@@ -164,6 +183,9 @@ def _assets(session: Session, itop_base_url: str | None, ci: str | None = None) 
                 risk=risk,
                 level=_worst(level for _g, level, _k, _f in current),
                 software_count=software.get(row.id, 0),
+                description=row.description,
+                cpu=row.cpu,
+                ram=row.ram,
             )
         )
     return out
@@ -203,6 +225,7 @@ class SoftwareItem:
     cpe: str | None
     open_vulnerabilities: int
     worst_level: str | None
+    categories: list[str] = field(default_factory=list)  # distinct iTop classes of its live installations, sorted
 
 
 @dataclass(frozen=True)
@@ -211,6 +234,7 @@ class SoftwareQuery:
     has_cpe: bool | None = None
     worst_level: str | None = None
     with_vulnerabilities: bool | None = None
+    category: str | None = None  # the product counts when any of its live installations has it
 
     def matches(self, s: SoftwareItem) -> bool:
         return (
@@ -218,6 +242,7 @@ class SoftwareQuery:
             and (self.has_cpe is None or self.has_cpe == (s.cpe is not None))
             and (self.worst_level is None or self.worst_level == s.worst_level)
             and (self.with_vulnerabilities is None or self.with_vulnerabilities == (s.open_vulnerabilities > 0))
+            and (self.category is None or self.category in s.categories)
         )
 
 
@@ -242,6 +267,7 @@ def _software(session: Session) -> list[SoftwareItem]:
                 cpe=_cpe(first),
                 open_vulnerabilities=len({group for group, _l, _a in current}),
                 worst_level=_worst(level for _g, level, _a in current),
+                categories=sorted({r.category for r in installs if r.category is not None}),
             )
         )
     return out
@@ -267,6 +293,11 @@ class InstalledItem:
     cpe: str | None
     open_vulnerabilities: int
     worst_level: str | None
+    # F18.3 (D-088): the installation as iTop has it; None until synced (category also for a custom class)
+    category: str | None = None
+    status: str | None = None  # active | inactive; only shown, an inactive installation is still scanned
+    description: str | None = None
+    licence: Licence | None = None
 
 
 def asset_software(session: Session, ci_id: str) -> list[InstalledItem] | None:
@@ -294,6 +325,10 @@ def asset_software(session: Session, ci_id: str) -> list[InstalledItem] | None:
                 cpe=_cpe(row),
                 open_vulnerabilities=len({group for group, _l in current}),
                 worst_level=_worst(level for _g, level in current),
+                category=row.category,
+                status=row.status,
+                description=row.description,
+                licence=_licence(row),
             )
         )
     return sorted(out, key=lambda i: (i.name.casefold(), i.version, str(i.software_id)))

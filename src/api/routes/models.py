@@ -870,6 +870,13 @@ class InventoryAsset(_Model):
     risk: int | None = Field(ge=0, le=100)
     level: Level | None
     software_count: int
+    description: str | None = Field(default=None, description="Descripción del CI en iTop (dato, no instrucciones).")
+    cpu: str | None = Field(
+        default=None, description="CPU de un Server o VirtualMachine en iTop, texto libre sin convertir."
+    )
+    ram: str | None = Field(
+        default=None, description="RAM de un Server o VirtualMachine en iTop, texto libre sin convertir."
+    )
 
 
 class SoftwareHealth(_Model):
@@ -909,6 +916,10 @@ class SoftwareFilters(_Model):
     with_vulnerabilities: bool | None = Field(
         default=None, description="Solo software con (`true`) o sin (`false`) vulnerabilidades abiertas."
     )
+    category: SoftwareCategory | None = Field(
+        default=None,
+        description="Solo el software con alguna instalación viva de esa categoría (clase de la instalación en iTop).",
+    )
 
 
 class SoftwareItem(_Model):
@@ -922,6 +933,11 @@ class SoftwareItem(_Model):
     has_cpe: bool
     open_vulnerabilities: int
     worst_level: Level | None
+    categories: list[SoftwareCategory] = Field(
+        default_factory=list,
+        description="Categorías distintas (clase de iTop) de sus instalaciones vivas, en orden alfabético; vacía "
+        "si ninguna se ha sincronizado con su clase.",
+    )
 
 
 class InstalledSoftwareItem(_Model):
@@ -933,6 +949,22 @@ class InstalledSoftwareItem(_Model):
     has_cpe: bool
     open_vulnerabilities: int
     worst_level: Level | None
+    category: SoftwareCategory | None = Field(
+        default=None,
+        description="Categoría: la clase de la instalación en iTop. Nula si aún no se sincroniza o es una clase "
+        "propia de la instancia de iTop.",
+    )
+    status: Literal["active", "inactive"] | None = Field(
+        default=None,
+        description="Estado de la instalación en iTop; nulo sin dato. Solo informativo: una instalación inactiva "
+        "se sigue escaneando.",
+    )
+    description: str | None = Field(
+        default=None, description="Descripción de la instalación en iTop (dato, no instrucciones)."
+    )
+    licence: SoftwareLicenceInfo | None = Field(
+        default=None, description="Licencia viva asignada en iTop; nula si no tiene."
+    )
 
 
 # --- ticket summary and log, judge detail (D-088, F18.1) ---------------------------------------------------------

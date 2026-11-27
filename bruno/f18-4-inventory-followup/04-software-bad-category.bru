@@ -1,0 +1,26 @@
+meta {
+  name: software-bad-category
+  type: http
+  seq: 4
+}
+
+get {
+  url: {{baseUrl}}/api/inventory/software?category=Laptop
+  body: none
+  auth: bearer
+}
+
+auth:bearer {
+  token: {{readerToken}}
+}
+
+assert {
+  res.status: eq 422
+  res.body.error.code: eq validation_error
+}
+
+docs {
+  A category outside the five iTop classes is a 422 with the error envelope.
+
+  operationId: list_inventory_software
+}

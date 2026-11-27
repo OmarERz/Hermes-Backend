@@ -227,23 +227,27 @@ def asset_detail(ci_id: CiId, session: SessionDep) -> AssetDetail:
     )
 
 
+def licence_info(licence: views.Licence | None) -> SoftwareLicenceInfo | None:
+    """The iTop licence of an installation as the API shows it (F18.3); dates as AAAA-MM-DD."""
+    if licence is None:
+        return None
+    return SoftwareLicenceInfo(
+        name=licence.name,
+        usage_limit=licence.usage_limit,
+        start_date=licence.start_date.isoformat() if licence.start_date else None,
+        end_date=licence.end_date.isoformat() if licence.end_date else None,
+        perpetual=licence.perpetual,
+    )
+
+
 def _asset_software(item: views.AssetSoftware) -> AssetSoftware:
-    licence = item.licence
     return AssetSoftware(
         software=item.software,
         version=item.version,
         category=cast(SoftwareCategory | None, item.category),
         status=cast(Literal["active", "inactive"] | None, item.status),
         description=item.description,
-        licence=None
-        if licence is None
-        else SoftwareLicenceInfo(
-            name=licence.name,
-            usage_limit=licence.usage_limit,
-            start_date=licence.start_date.isoformat() if licence.start_date else None,
-            end_date=licence.end_date.isoformat() if licence.end_date else None,
-            perpetual=licence.perpetual,
-        ),
+        licence=licence_info(item.licence),
     )
 
 

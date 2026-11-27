@@ -417,9 +417,9 @@ OPERATIONS: Final[dict[tuple[str, str], Op]] = {
         "inventory",
         "Inventario de activos",
         "Todos los CIs vigentes de la réplica de iTop, con o sin hallazgos, en orden alfabético: clase, criticidad, "
-        "exposición, clasificación, dueño, custodio, liga a iTop, hallazgos abiertos, en KEV y su riesgo (el mayor "
-        "final de sus hallazgos abiertos, nunca una suma). Búsqueda y filtros. Pagina por cursor. "
-        "Rol mínimo: `reader`.",
+        "exposición, clasificación, dueño, custodio, descripción, CPU y RAM de iTop (D-088), liga a iTop, hallazgos "
+        "abiertos, en KEV y su riesgo (el mayor final de sus hallazgos abiertos, nunca una suma). Búsqueda y "
+        "filtros. Pagina por cursor. Rol mínimo: `reader`.",
     ),
     ("GET", "/api/inventory/summary"): Op(
         "get_inventory_summary",
@@ -433,15 +433,18 @@ OPERATIONS: Final[dict[tuple[str, str], Op]] = {
         "list_inventory_software",
         "inventory",
         "Software del inventario",
-        "El software instalado en CIs vigentes, en orden alfabético: versiones, instancias, CIs, CPE y el peor nivel "
-        "de sus vulnerabilidades abiertas. Filtros. Pagina por cursor. Rol mínimo: `reader`.",
+        "El software instalado en CIs vigentes, en orden alfabético: versiones, instancias, CIs, CPE, el peor nivel "
+        "de sus vulnerabilidades abiertas y las categorías de iTop de sus instalaciones vivas (D-088). Filtros, "
+        "entre ellos la categoría (incluye el producto si alguna instalación la tiene). Pagina por cursor. "
+        "Rol mínimo: `reader`.",
     ),
     ("GET", "/api/inventory/assets/{ci_id}/software"): Op(
         "list_asset_software",
         "inventory",
         "Software instalado en un activo",
-        "El software de un CI vigente con su versión, su CPE y el peor nivel de sus vulnerabilidades abiertas en ese "
-        "CI; 404 si el CI no está en el inventario vigente. Rol mínimo: `reader`.",
+        "El software de un CI vigente con su versión, su CPE, el peor nivel de sus vulnerabilidades abiertas en ese "
+        "CI y, de iTop, su categoría, estado, descripción y licencia viva (D-088); 404 si el CI no está en el "
+        "inventario vigente. Rol mínimo: `reader`.",
     ),
     ("GET", "/api/tickets/summary"): Op(
         "get_ticket_summary",
@@ -1327,6 +1330,9 @@ EXAMPLES: Final[dict[str, list[dict[str, Any]]]] = {
             "risk": 90,
             "level": "critical",
             "software_count": 4,
+            "description": "Servidor del front de pagos",
+            "cpu": "16 vCPU",
+            "ram": "64 GB",
         }
     ],
     "SoftwareItem": [
@@ -1341,6 +1347,7 @@ EXAMPLES: Final[dict[str, list[dict[str, Any]]]] = {
             "has_cpe": True,
             "open_vulnerabilities": 2,
             "worst_level": "critical",
+            "categories": ["OtherSoftware"],
         }
     ],
     "JudgeDetail": [

@@ -1,0 +1,32 @@
+meta {
+  name: software-by-category
+  type: http
+  seq: 3
+}
+
+get {
+  url: {{baseUrl}}/api/inventory/software?category=OtherSoftware&limit=50
+  body: none
+  auth: bearer
+}
+
+auth:bearer {
+  token: {{readerToken}}
+}
+
+assert {
+  res.status: eq 200
+  res.body.items: isArray
+}
+
+tests {
+  test("every product kept has an installation of that category", function () {
+    for (const item of res.body.items) expect(item.categories).to.include("OtherSoftware");
+  });
+}
+
+docs {
+  The category filter keeps a product when any of its live installations has that iTop class.
+
+  operationId: list_inventory_software
+}
