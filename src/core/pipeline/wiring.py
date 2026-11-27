@@ -9,8 +9,8 @@ from __future__ import annotations
 
 import logging
 import uuid
-from collections.abc import Callable, Iterable
-from datetime import UTC, datetime, timedelta
+from collections.abc import Callable, Iterable, Sequence
+from datetime import UTC, date, datetime, timedelta
 from typing import Any, Protocol
 
 from sqlalchemy import select
@@ -156,7 +156,7 @@ def engine_dismissal_package(session: Session, story_id: uuid.UUID) -> dict[str,
 
 NVD_BATCH = 200  # CVEs stored per transaction while the NVD pages are read
 ROW_BATCH = 2_000  # KEV entries or EPSS rows stored per transaction
-KEV_LAG_DAYS = 7  # a CISA entry NVD does not flag yet is looked up by id during its first week in KEV
+KEV_RECENT_DAYS = 7  # CISA entries of the last week without an NVD record are looked up by id first
 KEV_LAG_MAX = 20  # at most this many lookups by id per refresh (the public NVD limit is 5 requests per 30 s)
 
 
@@ -174,8 +174,10 @@ def refresh_vulndata(
         end = datetime.now(UTC)
         nvd_result = _load_nvd(factory, nvd.iter_published(end - timedelta(days=RECENCY_DAYS), end))
         kev_result = _in_batches(factory, load_kev, fetch_catalogue(source), KevResult())
+        # Before EPSS: an EPSS outage must not keep the ranges of old KEV CVEs out of the next scan.
+        kev_records = _load_kev_records(factory, nvd, end.date())
         epss_result = _load_epss(factory, fetch_daily(source))
-        return nvd_result, kev_result, epss_result, _load_kev_records(factory, nvd)
+        return nvd_result, kev_result, epss_result, kev_records
 
     return run
 
@@ -202,15 +204,15 @@ def _load_nvd(
     return result
 
 
-def _load_kev_records(factory: sessionmaker[Session], nvd: NvdClient) -> LoadResult:
+def _load_kev_records(factory: sessionmaker[Session], nvd: NvdClient, today: date) -> LoadResult:
     """The NVD record of every KEV CVE, so the scan can compare its ranges whatever its age (F20 dry run, P0-1).
 
     One query (`hasKev`, 2,000 records a page; about 1,800 in Nov 2026) brings them all, so the number of requests
     does not grow with the inventory; a record whose `lastModified` we already hold is not written again. Every KEV
     record is kept, not only those of mapped products: a product mapped later then matches at its next scan instead
     of after the next refresh. NVD mirrors CISA with a lag (the two entries CISA added on 27 Nov 2026 were not
-    flagged yet that evening), so a CISA entry still without an NVD record is looked up by id during its first
-    `KEV_LAG_DAYS` in the catalogue, at most `KEV_LAG_MAX` per refresh.
+    flagged yet that evening), so CISA entries still without an NVD record are looked up by id, at most
+    `KEV_LAG_MAX` per refresh, in the order of `lookup_order`.
     """
     held = _held_versions(factory)
 
@@ -218,7 +220,7 @@ def _load_kev_records(factory: sessionmaker[Session], nvd: NvdClient) -> LoadRes
         return record.last_modified_at is not None and held.get(record.cve_id) == record.last_modified_at
 
     result = _load_nvd(factory, nvd.iter_kev(), skip=unchanged)
-    for cve_id in _kev_lagging(factory):
+    for cve_id in _kev_pending(factory, today):
         found = _load_nvd(factory, nvd.iter_cve(cve_id))
         result.stored, result.skipped = result.stored + found.stored, result.skipped + found.skipped
     return result
@@ -231,19 +233,28 @@ def _held_versions(factory: sessionmaker[Session]) -> dict[str, datetime]:
         return {cve_id: modified for cve_id, modified in rows if modified is not None}
 
 
-def _kev_lagging(factory: sessionmaker[Session]) -> list[str]:
-    """CISA entries of the last `KEV_LAG_DAYS` that still have no NVD record, newest first."""
-    since = datetime.now(UTC).date() - timedelta(days=KEV_LAG_DAYS)
+def _kev_pending(factory: sessionmaker[Session], today: date) -> list[str]:
+    """The CISA entries without an NVD record to look up by id in this refresh."""
     with factory() as session:
-        return list(
-            session.scalars(
-                select(m.KevEntry.cve_id)
-                .join(m.Cve, m.Cve.id == m.KevEntry.cve_id)
-                .where(m.Cve.fetched_at.is_(None), m.KevEntry.date_added >= since)
-                .order_by(m.KevEntry.date_added.desc(), m.KevEntry.cve_id)
-                .limit(KEV_LAG_MAX)
-            )
-        )
+        rows = session.execute(
+            select(m.KevEntry.cve_id, m.KevEntry.date_added)
+            .join(m.Cve, m.Cve.id == m.KevEntry.cve_id)
+            .where(m.Cve.fetched_at.is_(None))
+        ).all()
+    return lookup_order([(cve_id, added) for cve_id, added in rows], today)
+
+
+def lookup_order(pending: Sequence[tuple[str, date]], today: date, limit: int = KEV_LAG_MAX) -> list[str]:
+    """At most `limit` CVE ids: the entries of the last `KEV_RECENT_DAYS` first (newest first, the usual NVD lag),
+    then the older ones, never excluded: they rotate by day, so a stable list of n is fully asked in n / `limit`
+    days (a fresh install or an outage can leave old entries NVD does not flag yet)."""
+    since = today - timedelta(days=KEV_RECENT_DAYS)
+    recent = sorted(((-added.toordinal(), cve) for cve, added in pending if added >= since))
+    older = sorted(cve for cve, added in pending if added < since)
+    if older:
+        start = today.toordinal() * limit % len(older)
+        older = older[start:] + older[:start]
+    return ([cve for _, cve in recent] + older)[:limit]
 
 
 class _Counted(Protocol):

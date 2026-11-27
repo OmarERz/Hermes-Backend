@@ -152,7 +152,7 @@ def test_the_vulnerability_refresh_downloads_outside_transactions(
         "core.pipeline.wiring.fetch_daily", download("epss", [{"cve": "CVE-2026-10001"}, {"cve": "CVE-1999-0001"}])
     )
     monkeypatch.setattr("core.pipeline.wiring.load_epss", loader("epss-load", EpssResult))
-    monkeypatch.setattr("core.pipeline.wiring._kev_lagging", lambda _factory: ["CVE-2026-0777"])
+    monkeypatch.setattr("core.pipeline.wiring._kev_pending", lambda _factory, _today: ["CVE-2026-0777"])
     nvd, kev, epss, kev_records = refresh_vulndata(
         cast("sessionmaker[Session]", tracking), cast("Any", Nvd()), cast("Any", None)
     )()
@@ -166,11 +166,11 @@ def test_the_vulnerability_refresh_downloads_outside_transactions(
         "kev",
         ("kev-load", 1, ["k1", "k2"]),
         ("kev-load", 1, ["k3"]),
-        "epss",
-        ("epss-load", 1, [{"cve": "CVE-2026-10001"}]),  # only the CVEs of the local catalogue
-        ("cve", 1, 10),  # every KEV record NVD holds, whatever its age (ESC-09/10)
+        ("cve", 1, 10),  # every KEV record NVD holds, whatever its age (ESC-09/10), before EPSS
         ("cve", 1, 11),
         ("by id", "CVE-2026-0777"),  # a CISA entry NVD does not flag yet
+        "epss",
+        ("epss-load", 1, [{"cve": "CVE-2026-10001"}]),  # only the CVEs of the local catalogue
     ]
 
 

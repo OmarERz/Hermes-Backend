@@ -25,7 +25,7 @@ from sqlalchemy.orm import Session, sessionmaker
 from core.pipeline.wiring import refresh_vulndata
 from core.scan.engine import ScanOptions, run_scan
 from core.vulndata.epss import EPSS_DAILY_URL
-from core.vulndata.http import JsonSource
+from core.vulndata.http import JsonSource, SourceUnavailableError
 from core.vulndata.kev import KEV_URL
 from core.vulndata.nvd import NVD_URL, NvdClient
 
@@ -69,13 +69,14 @@ class Sources:
     def __init__(self, kev_page: dict[str, Any], catalogue: dict[str, Any], by_id: dict[str, Any] | None = None):
         self.kev_page, self.catalogue, self.by_id = kev_page, catalogue, by_id or {}
         self.nvd_queries: list[dict[str, str]] = []
+        self.epss_broken = False
 
     def handler(self, request: httpx.Request) -> httpx.Response:
         url = f"{request.url.scheme}://{request.url.host}{request.url.path}"
         if url == KEV_URL:
             return httpx.Response(200, json=self.catalogue)
         if url == EPSS_DAILY_URL:
-            return httpx.Response(200, content=epss_file("2026-11-27"))
+            return httpx.Response(200, content=b"not the EPSS file" if self.epss_broken else epss_file("2026-11-27"))
         assert url == NVD_URL, url
         params = dict(request.url.params)
         self.nvd_queries.append(params)
@@ -202,7 +203,7 @@ def test_a_cve_cisa_just_added_and_nvd_does_not_flag_yet_is_looked_up_by_id(
         "requiredAction": "Apply mitigations per vendor instructions.",
         "knownRansomwareCampaignUse": "Unknown",
     }
-    stale = entry | {"cveID": "CVE-2020-0001", "dateAdded": "2025-01-01"}  # NVD never had it: not asked forever
+    stale = entry | {"cveID": "CVE-2020-0001", "dateAdded": "2025-01-01"}  # older: asked too, in the daily rotation
     unknown = entry | {"cveID": "CVE-2026-120706"}  # NVD does not know it yet: asked, nothing stored
     catalogue["vulnerabilities"] += [entry, stale, unknown]
     record = {
@@ -235,9 +236,22 @@ def test_a_cve_cisa_just_added_and_nvd_does_not_flag_yet_is_looked_up_by_id(
     *_, kev_records = sources.refresh(world)
 
     asked = [q["cveId"] for q in sources.nvd_queries if "cveId" in q]
-    assert sorted(asked) == ["CVE-2026-120705", "CVE-2026-120706"]
+    assert asked[:2] == ["CVE-2026-120705", "CVE-2026-120706"]  # the recent ones first
+    assert sorted(asked) == ["CVE-2020-0001", "CVE-2026-120705", "CVE-2026-120706"]
     assert rows(
         engine, "SELECT vendor, product, version_end FROM cve_affected_range WHERE cve_id = 'CVE-2026-120705'"
     ) == [("osgeo", "geoserver", "2.25.6")]
     assert rows(engine, "SELECT fetched_at IS NULL FROM cve WHERE id = 'CVE-2026-120706'") == [(True,)]
     assert kev_records.stored == recorded("nvd_kev_page.json")["totalResults"] + 1
+
+
+def test_an_epss_outage_does_not_keep_the_kev_records_out(engine: Engine, world: sessionmaker[Session]) -> None:
+    """Feature review: the KEV records load before EPSS, so a broken EPSS file does not hide old KEV CVEs."""
+    sources = Sources(recorded("nvd_kev_page.json"), recorded("kev_any_age.json"))
+    sources.epss_broken = True
+
+    with pytest.raises(SourceUnavailableError, match="EPSS"):
+        sources.refresh(world)
+    run_scan(world, ScanOptions(), now=SCAN_AT)
+
+    assert set(findings(engine)) == EXPECTED
