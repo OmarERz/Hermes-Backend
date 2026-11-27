@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import pytest
 
-from core.scan.versions import compare_versions, in_range, parse_version
+from core.scan.versions import compare_versions, in_range, known_order, parse_version, release_of
 
 
 @pytest.mark.parametrize(
@@ -54,3 +54,45 @@ def test_range_membership() -> None:
 def test_range_with_an_incomparable_version_is_unknown() -> None:
     assert in_range("weird", "1.0", True, None, None) is None
     assert in_range("1.0", None, None, "latest", False) is None
+
+
+@pytest.mark.parametrize(
+    ("raw", "release"),
+    [
+        ("3.0.18", (3, 0, 18)),
+        ("1.1.1zd", (1, 1, 1)),  # an OpenSSL letter release the scale cannot place
+        ("V1.0.2ZM", (1, 0, 2)),
+        ("1.1.0zd", (1, 1)),  # trailing zeros do not count, as in parse_version
+        ("2.0.0-rc1", (2,)),
+        ("1.2x", None),  # a wildcard names a line, not one version
+        ("1.2.x", None),
+        ("3.0.23-fips", None),  # an unknown label after a separator stays unknown
+        ("3.0.11-1~deb12u2", None),
+        ("latest", None),
+        ("1" + "a" * 100, None),  # too long, as in parse_version
+    ],
+)
+def test_release_of_reads_numbers_before_an_unknown_letter_suffix(raw: str, release: tuple[int, ...] | None) -> None:
+    assert release_of(raw) == release
+
+
+@pytest.mark.parametrize(
+    ("left", "right", "expected"),
+    [
+        ("3.0.18", "1.1.1zd", 1),  # the release decides, whatever "zd" means
+        ("1.1.1zd", "3.0.18", -1),
+        ("1.0.2zm", "1.1.1", -1),
+        ("1.1.1w", "1.1.1w", 0),  # the same text is the same version
+        ("v1.1.1W", "1.1.1w", 0),
+        ("3.0.23-fips", "3.0.23-FIPS", 0),
+        ("1.1.1w", "1.1.1zd", None),  # same release, letters off the scale: unknown
+        ("1.1.1", "1.1.1w", None),
+        ("1.1.1-rc1", "1.1.1w", None),
+        ("3.0.23-fips", "3.0.0", None),  # not a letter release: never guessed
+        ("1.2.x", "1.3.0", None),
+        ("3.0.18", "latest", None),
+        ("2.0.0-rc1", "2.0.0", -1),  # readable versions keep the comparator's order
+    ],
+)
+def test_known_order_decides_only_what_the_scale_decides(left: str, right: str, expected: int | None) -> None:
+    assert known_order(left, right) == expected

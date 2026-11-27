@@ -5,7 +5,15 @@ from __future__ import annotations
 from hypothesis import assume, given
 from hypothesis import strategies as st
 
-from core.scan.versions import POST_RELEASE, PRE_RELEASE, compare_versions, in_range, parse_version
+from core.scan.versions import (
+    POST_RELEASE,
+    PRE_RELEASE,
+    compare_versions,
+    in_range,
+    known_order,
+    parse_version,
+    release_of,
+)
 
 numbers = st.integers(min_value=0, max_value=10_000)
 release = st.lists(numbers, min_size=1, max_size=5).map(lambda parts: ".".join(map(str, parts)))
@@ -108,3 +116,32 @@ def test_digits_of_other_scripts_are_not_version_numbers(text: str) -> None:
 def test_arabic_indic_digits_are_not_a_version() -> None:
     assert parse_version("\u0661.\u0662") is None
     assert compare_versions("\u0661.\u0662", "1.2") is None
+
+
+letters = st.text(alphabet="abcdefghijklmnopqrstuvwyz", min_size=1, max_size=3)  # no "x": a wildcard
+letter_releases = st.builds(lambda base, tail: base + tail, release, letters)
+off_scale = letter_releases.filter(lambda v: parse_version(v) is None)  # `1.1.1zd`, not `1.0a` (alpha) or `2.0p` (post)
+
+
+@given(st.one_of(versions, letter_releases), st.one_of(versions, letter_releases))
+def test_known_order_agrees_with_the_comparator_and_is_antisymmetric(a: str, b: str) -> None:
+    order = known_order(a, b)
+    if compare_versions(a, b) is not None:
+        assert order == compare_versions(a, b)
+    assert known_order(b, a) == (None if order is None else -order)
+
+
+@given(off_scale, st.one_of(versions, letter_releases))
+def test_a_letter_release_is_ordered_only_by_its_release(a: str, b: str) -> None:
+    release_a, release_b = release_of(a), release_of(b)
+    assert release_a is not None and release_b is not None
+    order = known_order(a, b)
+    if release_a != release_b:
+        assert order == (release_a > release_b) - (release_a < release_b)
+    elif a.lower() != b.lower():
+        assert order is None
+
+
+@given(st.text(max_size=150), st.text(max_size=150))
+def test_known_order_never_raises(a: str, b: str) -> None:
+    assert known_order(a, b) in (-1, 0, 1, None)
