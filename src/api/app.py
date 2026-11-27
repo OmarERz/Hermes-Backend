@@ -29,6 +29,7 @@ from core.db.session import make_session_factory
 from core.itop.client import reader_from_settings
 from core.logging import configure_logging
 from core.tickets.sync import TicketStateSync
+from core.views.telemetry import LlmSetup
 from core.vulndata.nvd import nvd_client
 
 
@@ -78,6 +79,12 @@ def create_app(
     # Connection checks (SEG-23): short timeouts, results cached; tests replace it with fake probes.
     app.state.connections = ConnectionChecker(Probes(settings, httpx.Client(trust_env=False)).get)
     app.state.itop_url = settings.itop_link_url  # for links to iTop: the console URL when it differs (F16.1)
+    claude = settings.llm_provider == "claude-code"
+    app.state.llm_setup = LlmSetup(  # telemetry shows the provider and models in use (D-084), never a key
+        settings.llm_provider,
+        settings.claude_code_model_judge if claude else None,
+        settings.claude_code_model_analysts if claude else None,
+    )
     install_error_handlers(app)
     app.add_middleware(BodySizeLimitMiddleware)
     # Also on the 413 of the size limit.

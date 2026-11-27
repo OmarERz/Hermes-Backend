@@ -1,0 +1,28 @@
+meta {
+  name: ticket-summary
+  type: http
+  seq: 13
+}
+
+get {
+  url: {{baseUrl}}/api/tickets/summary
+  body: none
+  auth: bearer
+}
+
+auth:bearer {
+  token: {{readerToken}}
+}
+
+assert {
+  res.status: eq 200
+  res.body.total: gte 0
+  res.body.by_status.open: gte 0
+  res.body.by_urgency: isDefined
+}
+
+docs {
+  Tickets by status and urgency, changed by a person, resolved share and resolution time (IN-3, AG-13 to AG-16).
+
+  operationId: get_ticket_summary
+}

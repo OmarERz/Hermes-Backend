@@ -1,0 +1,35 @@
+meta {
+  name: inventory-assets
+  type: http
+  seq: 7
+}
+
+get {
+  url: {{baseUrl}}/api/inventory/assets?limit=50
+  body: none
+  auth: bearer
+}
+
+auth:bearer {
+  token: {{readerToken}}
+}
+
+assert {
+  res.status: eq 200
+  res.body.items.length: gte {{demoMinItems}}
+}
+
+tests {
+  test("every CI links to iTop and its risk is a score or null", function () {
+    for (const ci of res.body.items) {
+      expect(ci.ci_id).to.be.a("string");
+      expect(ci.risk === null || (ci.risk >= 0 && ci.risk <= 100)).to.equal(true);
+    }
+  });
+}
+
+docs {
+  Every live CI of the iTop cache, with or without findings (AC-1).
+
+  operationId: list_inventory_assets
+}

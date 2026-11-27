@@ -1,0 +1,34 @@
+meta {
+  name: inventory-software
+  type: http
+  seq: 9
+}
+
+get {
+  url: {{baseUrl}}/api/inventory/software?limit=50
+  body: none
+  auth: bearer
+}
+
+auth:bearer {
+  token: {{readerToken}}
+}
+
+assert {
+  res.status: eq 200
+  res.body.items.length: gte {{demoMinItems}}
+}
+
+tests {
+  test("has_cpe agrees with cpe", function () {
+    for (const item of res.body.items) {
+      expect(item.has_cpe).to.equal(item.cpe !== null);
+    }
+  });
+}
+
+docs {
+  Software of iTop with versions, CPE and its worst open level (ST-1, ST-4).
+
+  operationId: list_inventory_software
+}

@@ -1,0 +1,41 @@
+meta {
+  name: recommendation-judge
+  type: http
+  seq: 16
+}
+
+get {
+  url: {{baseUrl}}/api/recommendations/{{assessmentId}}/judge
+  body: none
+  auth: bearer
+}
+
+auth:bearer {
+  token: {{readerToken}}
+}
+
+script:pre-request {
+  const hermes = require("./lib/hermes");
+  const first = await hermes.recommendation(bru);
+  if (!hermes.needData(bru, first, "a recommendation")) return;
+}
+
+assert {
+  res.status: eq 200
+  res.body.assessment_id: eq {{assessmentId}}
+  res.body.accepted_reasons: isArray
+  res.body.rejected_reasons: isArray
+}
+
+tests {
+  test("never the prompt or the raw calls", function () {
+    expect(res.body).to.not.have.property("calls");
+    expect(res.body).to.not.have.property("prompt_hash");
+  });
+}
+
+docs {
+  The judge behind the newest recommendation (FRO-13, RE-3, RE-5, RE-6).
+
+  operationId: get_recommendation_judge
+}

@@ -1,0 +1,26 @@
+meta {
+  name: ticket-updates
+  type: http
+  seq: 14
+}
+
+get {
+  url: {{baseUrl}}/api/tickets/updates?limit=20
+  body: none
+  auth: bearer
+}
+
+auth:bearer {
+  token: {{readerToken}}
+}
+
+assert {
+  res.status: eq 200
+  res.body.items: isArray
+}
+
+docs {
+  What Hermes did in each ticket and why (HI-4).
+
+  operationId: list_ticket_updates
+}

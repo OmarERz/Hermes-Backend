@@ -1,0 +1,34 @@
+meta {
+  name: asset-software
+  type: http
+  seq: 10
+}
+
+get {
+  url: {{baseUrl}}/api/inventory/assets/{{inventoryCiId}}/software
+  body: none
+  auth: bearer
+}
+
+auth:bearer {
+  token: {{readerToken}}
+}
+
+script:pre-request {
+  const hermes = require("./lib/hermes");
+  const page = await hermes.api(bru, "GET", "/api/inventory/assets?limit=1", "readerToken");
+  const first = page.items[0] || null;
+  bru.setVar("inventoryCiId", first ? first.ci_id : "");
+  if (!hermes.needData(bru, first, "a CI in the inventory")) return;
+}
+
+assert {
+  res.status: eq 200
+  res.body: isArray
+}
+
+docs {
+  Software installed on the first CI of the inventory list (AS-2); skipped on an empty installation.
+
+  operationId: list_asset_software
+}

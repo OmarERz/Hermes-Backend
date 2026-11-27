@@ -1,0 +1,27 @@
+meta {
+  name: inventory-summary
+  type: http
+  seq: 8
+}
+
+get {
+  url: {{baseUrl}}/api/inventory/summary
+  body: none
+  auth: bearer
+}
+
+auth:bearer {
+  token: {{readerToken}}
+}
+
+assert {
+  res.status: eq 200
+  res.body.total_assets: gte {{demoMinItems}}
+  res.body.software.total: gte 0
+}
+
+docs {
+  Totals of the live inventory and the health of its software (IN-1, IN-2, AC-6 to AC-10).
+
+  operationId: get_inventory_summary
+}

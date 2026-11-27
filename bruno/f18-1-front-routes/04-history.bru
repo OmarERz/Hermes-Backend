@@ -1,0 +1,26 @@
+meta {
+  name: history
+  type: http
+  seq: 4
+}
+
+get {
+  url: {{baseUrl}}/api/history?limit=20
+  body: none
+  auth: bearer
+}
+
+auth:bearer {
+  token: {{readerToken}}
+}
+
+assert {
+  res.status: eq 200
+  res.body.items.length: gte {{demoMinItems}}
+}
+
+docs {
+  One timeline of runs, LLM reviews and configuration changes (HI-1); `make demo` leaves runs in it.
+
+  operationId: list_history
+}

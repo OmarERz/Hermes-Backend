@@ -23,6 +23,7 @@ from api.routes._paths import UuidAliasId
 from api.routes.models import Source, SourceCreate, SourcePatch
 from core.configuration.errors import ConfigError, check_text
 from core.db import models as m
+from core.ingestion.source_info import source_info
 from core.ingestion.sources import (
     RESERVED_CODES,
     NewSource,
@@ -56,6 +57,7 @@ def _source_model(session: Session, source: m.Source) -> Source:
         .limit(1)
     )
     health = "ok" if failures == 0 else "failing" if failures >= FAILING_AFTER else "degraded"
+    info = source_info(source.code)  # own feeds never take a factory code (RESERVED_CODES)
     return Source.model_validate(
         {
             "id": str(source.id),
@@ -67,6 +69,9 @@ def _source_model(session: Session, source: m.Source) -> Source:
             "last_capture": last_ok.isoformat().replace("+00:00", "Z") if last_ok else None,
             "items_per_run": items or 0,
             "health": health,
+            "description": info.description,
+            "provider": info.provider,
+            "refresh_interval_minutes": info.refresh_interval_minutes,
         }
     )
 
