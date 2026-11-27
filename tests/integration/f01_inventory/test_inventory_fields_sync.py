@@ -194,3 +194,22 @@ def test_values_cleared_in_itop_are_cleared_in_the_cache(engine: Engine) -> None
         nginx = installation(session, "300")
         assert (web.cpu, web.ram, nginx.status, nginx.description) == (None, None, None, None)
         assert nginx.itop_class == "WebServer"
+
+
+def test_an_installation_that_loses_its_version_still_follows_itop(engine: Engine) -> None:
+    """ESC-12 keeps the row and its last version, but its status, description and licence are iTop's current ones."""
+    double = build_double()
+    run_sync(engine, double)
+    double.data["Software"]["200"]["version"] = ""
+    double.data["WebServer"]["300"].update(status="inactive", description="", softwarelicence_id="")
+    result = run_sync(engine, double, T0 + timedelta(hours=1))
+    assert "Software instance 300: no version, skipped (ESC-12)" in result.warnings
+    with Session(engine) as session:
+        nginx = installation(session, "300")
+        assert (nginx.version, nginx.removed_at, nginx.synced_at) == ("1.24.0", None, T0)
+        assert (nginx.itop_class, nginx.status, nginx.description, nginx.software_licence_id) == (
+            "WebServer",
+            "inactive",
+            None,
+            None,
+        )

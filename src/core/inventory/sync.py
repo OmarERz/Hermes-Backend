@@ -201,7 +201,7 @@ def _sync_assets(run: _Run, person_ids: dict[str, uuid.UUID], team_ids: dict[str
 
 
 def _sync_instances(run: _Run, asset_ids: dict[str, uuid.UUID]) -> dict[str, m.InstalledSoftware]:
-    """Apply the instances; returns the rows written in this run by iTop id (for the licence link)."""
+    """Apply the instances; returns the rows iTop still has, by iTop id (for the licence link)."""
     snapshot, session = run.snapshot, run.session
     catalogue = {s.itop_id: s for s in snapshot.software}
     products = {p.itop_name: p for p in session.scalars(select(m.SoftwareProduct))}
@@ -222,11 +222,14 @@ def _sync_instances(run: _Run, asset_ids: dict[str, uuid.UUID]) -> dict[str, m.I
             run.result.products.created += 1
             session.flush()
         version = normalize_version(software.version or "")
+        row = rows.get(item.itop_id)
         if version is None:
             seen.add(item.itop_id)  # still in iTop: an unknown version is no evidence that it was uninstalled
             run.result.warnings.append(f"Software instance {item.itop_id}: no version, skipped (ESC-12)")
+            if row is not None:  # its last version stays, but what iTop says of it now is shown (F18.3)
+                row.itop_class, row.status, row.description = item.category, item.status, item.description
+                written[item.itop_id] = row
             continue
-        row = rows.get(item.itop_id)
         if row is None:
             row = m.InstalledSoftware(itop_instance_id=item.itop_id)
             session.add(row)
