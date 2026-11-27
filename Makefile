@@ -4,7 +4,7 @@
 SHELL := /bin/bash
 .SHELLFLAGS := -eu -o pipefail -c
 
-.PHONY: up demo worker-host backup compose-secrets help openapi verify prepush lint typecheck boundaries test coverage semgrep kics secrets audit verify-full schemathesis adversarial dynamic zap bruno ci-lint seed events emulator-token itop-secrets itop-link itop-up itop-install itop-load itop-seed itop-map-cpe itop-token itop-rotate-token itop-down itop-destroy itop-backup itop-restore review
+.PHONY: up demo worker-host backup compose-secrets help openapi verify prepush lint typecheck boundaries test coverage semgrep kics secrets audit verify-full schemathesis adversarial dynamic zap bruno ci-lint seed events emulator-token set-role itop-secrets itop-link itop-up itop-install itop-load itop-seed itop-map-cpe itop-token itop-rotate-token itop-down itop-destroy itop-backup itop-restore review
 
 help: ## List the available targets
 	@grep -E '^[a-z-]+:.*## ' $(MAKEFILE_LIST) | awk 'BEGIN {FS = ":.*## "}; {printf "  %-12s %s\n", $$1, $$2}'
@@ -140,6 +140,14 @@ emulator-token: ## Print an emulator ID token: make emulator-token ROLE=admin|an
 	@test -n "$${ROLE:-}" || { echo "Usage: make emulator-token ROLE=admin|analyst|reader" >&2; exit 2; }
 	@FIREBASE_AUTH_EMULATOR_HOST="$${FIREBASE_AUTH_EMULATOR_HOST:-127.0.0.1:9099}" \
 	  uv run --locked python -m core.devtools.emulator token --role "$$ROLE"
+
+# D-087: the first admin of a real Firebase project (the admin route needs an admin already). Runs in the API container,
+# so it uses the API's Firebase project and credentials (or the emulator) and the app database role; the stack must be
+# up. The user must have signed up first (Email/Password). An unverified e-mail (the usual case) also needs CONFIRM_UID:
+# the account uid the first run prints, checked in the Firebase console. Idempotent; the e-mail is never printed.
+set-role: ## Give a Firebase user a role (first admin): make set-role EMAIL=<e-mail> ROLE=admin [CONFIRM_UID=<uid>]
+	@test -n "$${EMAIL:-}" && test -n "$${ROLE:-}" || { echo "Usage: make set-role EMAIL=<e-mail> ROLE=admin|analyst|reader [CONFIRM_UID=<uid>]" >&2; exit 2; }
+	docker compose exec -T api python -m api.auth.bootstrap --email "$$EMAIL" --role "$$ROLE" $${CONFIRM_UID:+--confirm-uid "$$CONFIRM_UID"}
 
 # Admin CLI (core.devtools.admin): seed as migrator (MIGRATION_DATABASE_URL), events as app (DATABASE_URL).
 seed: ## Load a seed scenario: make seed SCENARIO=empty|demo|edge

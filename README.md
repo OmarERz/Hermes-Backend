@@ -99,7 +99,7 @@ devuelve y los registros las enmascaran.
 | `DEEPSEEK_API_KEY`, `LLM_BASE_URL_JUDGE`, `LLM_BASE_URL_ANALYSTS` | Juez y analistas de IA; **la demo nunca las usa** |
 | `LLM_PROVIDER`, `CLAUDE_CODE_MODEL_JUDGE`, `CLAUDE_CODE_MODEL_ANALYSTS`, `CLAUDE_CODE_EFFORT`, `CLAUDE_CODE_TIMEOUT_SECONDS` | Proveedor del juez y los analistas: `deepseek` (por defecto) o `claude-code`, la CLI de Claude Code con tu suscripción, solo en tu equipo (ver la sección 8) |
 | `ABUSECH_AUTH_KEY`, `RANSOMWARELIVE_API_KEY` | Fuentes de indicadores y víctimas |
-| `FIREBASE_PROJECT_ID`, `FIREBASE_CREDENTIALS_FILE` | Inicio de sesión; con `demo-hermes` solo sirve el emulador de Firebase incluido |
+| `FIREBASE_PROJECT_ID`, `FIREBASE_CREDENTIALS_FILE` | Inicio de sesión; con `demo-hermes` solo sirve el emulador de Firebase incluido. Para el proyecto real, ver la sección 10 (`COMPOSE_FILE`, `FIREBASE_SERVICE_ACCOUNT_FILE`) |
 | `EMBEDDINGS_URL` | Servicio de *embeddings* del ciclo de noticias; por defecto `http://embeddings:8080` dentro de Compose. Vacío apaga el ciclo de noticias |
 | `ITOP_ORG_ID`, `ITOP_CALLER_ID`, `ITOP_SERVICE_ID` | Quién abre los tickets en iTop (ids de la organización, la persona del sistema y el servicio); sin los dos primeros el pipeline puntúa pero no abre tickets |
 | `SCAN_INTERVAL_HOURS` | Escaneo simulado programado cada N horas; `0` (por defecto) = solo a pedido (`POST /api/scans`) |
@@ -111,9 +111,9 @@ Para la pila local, `API_PORT`, `DB_PORT` y `AUTH_EMULATOR_PORT` cambian los pue
 `COMPOSE_SECRETS_DIR` cambia dónde se escriben los archivos de secretos y `MIGRATION_DATABASE_URL` es la conexión del
 rol `migrator` para `make seed` fuera de Compose (ver `.env.example`).
 
-El primer administrador se asigna con el rol (*custom claim*) de Firebase; con el emulador local,
-`make emulator-token ROLE=admin` imprime un token de prueba. Después, un admin cambia roles con
-`PUT /api/admin/users/{uid}/role`.
+El primer administrador se asigna con el rol (*custom claim*) de Firebase: con el emulador local,
+`make emulator-token ROLE=admin` imprime un token de prueba; con el proyecto real, `make set-role` (sección 10). Después,
+un admin cambia roles con `PUT /api/admin/users/{uid}/role`.
 
 ### 3. Datos de demostración
 
@@ -369,6 +369,68 @@ ya creados) y `make up`. Sin la red compartida, usa `ITOP_URL=http://host.docker
   /var/www/html/webservices/cron.php --param_file=/var/www/html/data/hermes-cron.params --status_only=1`.
 - Las contraseñas de MariaDB solo las usan los contenedores (nunca se publican). Cambiarlas después de instalar pide
   pasos a mano: `ALTER USER` en MariaDB y el mismo valor en `db_pwd` de `conf/production/config-itop.php`.
+
+### 10. Firebase real: inicio de sesión de la demo (D-087)
+
+Por defecto la pila usa el emulador de Firebase y el proyecto `demo-hermes`: así corren el desarrollo, las pruebas, el
+CI y `make prepush`. Para iniciar sesión con el proyecto real (`hermes-pass-sec`):
+
+1. **Proveedor de acceso.** En la consola de Firebase del proyecto, en *Authentication → Sign-in method*, habilita
+   **Correo electrónico/contraseña**. Sin él, el front no puede registrar usuarios ni iniciar sesión.
+2. **Cuenta de servicio.** Descarga la llave JSON de la cuenta de servicio (*Configuración del proyecto → Cuentas de
+   servicio*) y guárdala **fuera de cualquier repositorio** (por ejemplo, en `~/.config/hermes/`). Es el secreto más
+   sensible: no la copies al repositorio, no la imprimas y no la compartas. La API corre con el usuario y el grupo
+   `10001`, y Compose monta el archivo con el dueño y los permisos que tiene en tu equipo (en Compose sin Swarm se
+   ignoran `uid`, `gid` y `mode`), así que el grupo `10001` debe poder leerlo, y nadie más:
+
+   ```bash
+   sudo chgrp 10001 /ruta/firebase-service-account.json && chmod 640 /ruta/firebase-service-account.json
+   ```
+
+3. **Modo «proyecto real».** En tu `.env`, descomenta el bloque «Real Firebase project» del final de `.env.example`
+   (va al final para que sus valores ganen sobre los de arriba) y pon la ruta del archivo:
+
+   ```bash
+   COMPOSE_FILE=compose.yaml:compose.firebase.yaml
+   FIREBASE_PROJECT_ID=hermes-pass-sec
+   FIREBASE_SERVICE_ACCOUNT_FILE=/ruta/firebase-service-account.json
+   CORS_ALLOWED_ORIGINS=http://localhost:4200
+   ```
+
+   `compose.firebase.yaml` monta la cuenta de servicio como *Docker secret* solo en la API, le apunta
+   `FIREBASE_CREDENTIALS_FILE` y apaga el emulador para la API y los *workers*; Compose no arranca si falta el proyecto
+   o el archivo. `http://localhost:4200` es el servidor de desarrollo del front. Si además usas iTop en la red
+   compartida (sección 9), deja los dos *overrides* en una sola línea:
+   `COMPOSE_FILE=compose.yaml:compose.itop-link.yaml:compose.firebase.yaml`.
+4. **Arranca** con `make up`.
+5. **Primer administrador.** La persona se registra primero en el front con su correo y contraseña. Luego, con la pila
+   arriba:
+
+   ```bash
+   make set-role EMAIL=correo@ejemplo.com ROLE=admin
+   ```
+
+   Con correo y contraseña Firebase no comprueba que el correo sea de quien se registró (cualquiera pudo registrarlo
+   antes). Por eso, si el correo no está verificado (lo normal), la primera corrida no cambia nada: muestra el uid de
+   la cuenta y su fecha de creación. Compruébalos en la consola (*Authentication → Users*) y confirma con el uid:
+
+   ```bash
+   make set-role EMAIL=correo@ejemplo.com ROLE=admin CONFIRM_UID=<uid que mostró>
+   ```
+
+   El comando corre dentro del contenedor de la API, con su proyecto, sus credenciales y su rol de base de datos:
+   - pone el rol (*custom claim*) en Firebase y revoca sus sesiones, así que esa persona debe volver a iniciar sesión
+     para recibirlo;
+   - crea o actualiza su copia en `app_user` y lo registra en `audit_log`, sin actor y con `"via": "cli"`;
+   - repetirlo no cambia nada;
+   - si la persona está inactiva en Hermes, conserva el rol pero sigue inactiva (el comando lo avisa);
+   - nunca deja el sistema sin un admin activo;
+   - no imprime el correo.
+
+   Los demás roles los asigna después un admin desde el front (`PUT /api/admin/users/{uid}/role`). Ya con un admin,
+   `GET /api/connections/status` muestra si Firebase responde.
+
+Para volver al emulador, comenta esas líneas de `.env` y corre `make up` otra vez.
 
 ## License
 
