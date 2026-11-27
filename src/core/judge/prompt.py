@@ -16,7 +16,7 @@ from pathlib import Path
 from core.judge.catalog import JudgeSettings, ReasonCatalog, SensitivityProfile
 from core.llm.tools import default_schemas_dir
 
-PROMPT_VERSION = "judge-mode1-v1"
+PROMPT_VERSION = "judge-mode1-v2"  # v2: versions copied as quoted; a branch only of a quoted version (#176)
 MODE2_PROMPT_VERSION = "judge-mode2-v1"
 JUDGE_TOOLS_FILE = "judge_tools.json"
 MODE1_TOOLS = ("read_element", "propose_reason", "withdraw_reason", "finalize_review")
@@ -57,8 +57,18 @@ lee la regla incumplida y corrige o sigue con otro.
 8. Usa read_element para leer el texto completo de un elemento antes de citarlo.
 9. Cierra con finalize_review: summary de 1 a 3 frases en {language_name}. En mitigation_steps usa solo elementos N1 \
 (datos del CVE, KEV, aviso del fabricante, OSV), nunca noticias; toda versión, comando o URL de action debe aparecer \
-textual en quote; primero las mitigaciones temporales, después la corrección y al final la verificación; ci_id vacío \
-si aplica a todos. Lista vacía si no hay nada que agregar.
+textual en quote: copia cada versión tal como está en la cita. Redacta cada action en {language_name}; los ejemplos \
+solo muestran cómo tratar las versiones. Una rama (3.0.x, «la rama 3.0») vale solo si la cita trae una versión de esa \
+rama, y en el paso de corrección acompaña a la versión corregida, no la sustituye. En un rango, una versión antes de \
+`)` es la corregida (de `[3.0.0,3.0.23)` escribe «actualizar de la rama 3.0 a 3.0.23 o posterior»); un rango sin \
+límite superior (`[2.0,)`) no tiene corrección; `]` cierra con la última versión vulnerable y no nombra ninguna \
+corrección (`[3.0.0,3.0.22]`): recomienda una versión corregida solo si otra cita N1 la nombra. Con varios rangos del \
+mismo producto (fabricante:producto), toda versión que abarque el paso, «o posterior» incluido, debe quedar fuera de \
+todos: de `[1.0,1.5)` y `[1.4,2.3)` escribe «actualizar a 2.3 o posterior» (1.5 sigue en el segundo); de `[1.0,1.5)` y \
+`[2.0,)` escribe «actualizar a 1.5 sin llegar a 2.0». Si ninguna versión corregida citada cumple esto, omite el paso \
+de corrección. Una versión que no esté textual en la cita, o una rama sin una versión suya en la cita, descarta todo \
+el borrador. Primero las mitigaciones temporales, después la corrección y al final la verificación; ci_id vacío si \
+aplica a todos. Lista vacía si no hay nada que agregar.
 
 Motivos (code · dirección · rango sugerido · regla propia):
 {reasons}

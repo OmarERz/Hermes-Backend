@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import re
 from decimal import Decimal
 
 import pytest
@@ -16,6 +17,7 @@ from core.judge.budget import (
     token_cap,
 )
 from core.judge.catalog import JudgeSettings, ReasonCatalog, ReasonSpec, SensitivityProfile, TokenCaps
+from core.judge.mitigation import FactKind, traceable_facts
 from core.judge.package import ReviewPackage
 from core.judge.prompt import MODE1_TOOLS, system_prompt, user_message, versions
 from core.judge.store import parse_model_price
@@ -118,3 +120,39 @@ def test_pending_and_offset_costs_count_against_the_day() -> None:
     offset = OffsetDailyBudget(ledger, Decimal("0.015"))  # a first review that ran but is not stored yet
     assert not offset.allows(critical=False)
     assert offset.allows(critical=True)
+
+
+def test_the_prompt_asks_for_versions_as_quoted_and_its_examples_hold_against_jue_mit_03() -> None:
+    # Real batch of 23 nov (#176): the judge wrote "la rama 3.0" / "3.0.x" and every mitigation draft was discarded.
+    prompt = system_prompt(ReasonCatalog.default(), SensitivityProfile.named("normal"), JudgeSettings())
+    assert "copia cada versión tal como está en la cita" in prompt
+    assert "Una rama (3.0.x, «la rama 3.0») vale solo si la cita trae una versión de esa rama" in prompt
+    assert "una versión antes de `)` es la corregida" in prompt
+    assert "un rango sin límite superior (`[2.0,)`) no tiene corrección" in prompt
+    assert "Redacta cada action en español; los ejemplos solo muestran cómo tratar las versiones" in prompt
+    english = system_prompt(
+        ReasonCatalog.default(), SensitivityProfile.named("normal"), JudgeSettings(output_language="en")
+    )
+    assert "Redacta cada action en inglés" in english  # JUE-MIT-08: the examples do not set the language
+    assert "`]` cierra con la última versión vulnerable y no nombra ninguna corrección" in prompt
+    assert "recomienda una versión corregida solo si otra cita N1 la nombra" in prompt
+    assert "Con varios rangos del mismo producto (fabricante:producto)" in prompt
+    examples = re.findall(r"de `(\[[^`]+)` escribe «([^»]+)»", prompt)
+    assert [version_range for version_range, _ in examples] == ["[3.0.0,3.0.23)"]  # an inclusive end names no fix
+    for version_range, action in examples:  # every example the prompt gives passes JUE-MIT-03 as the package quotes it
+        quote = f"openssl:openssl {version_range}"
+        assert all(fact.in_quote(quote) for fact in traceable_facts(action)), action
+    assert "toda versión que abarque el paso, «o posterior» incluido, debe quedar fuera de todos" in prompt
+    assert "Si ninguna versión corregida citada cumple esto, omite el paso de corrección" in prompt
+    assert "Una versión que no esté textual en la cita, o una rama sin una versión suya en la cita" in prompt
+    several = re.findall(r"de `(\[[^`]+)` y `(\[[^`]+)` escribe «([^»]+)»", prompt)
+    assert [(first, second) for first, second, _ in several] == [("[1.0,1.5)", "[1.4,2.3)"), ("[1.0,1.5)", "[2.0,)")]
+    expected = (["2.3"], ["1.5", "2.0"])  # every version the step spans stays outside both ranges
+    for (first, second, action), facts in zip(several, expected, strict=True):
+        quote = f"example:lib {first}, example:lib {second}"
+        assert [fact.text for fact in traceable_facts(action)] == facts
+        assert all(fact.in_quote(quote) for fact in traceable_facts(action)), action
+    exclusive = "openssl:openssl [3.0.0,3.0.23)"
+    assert {fact.kind for fact in traceable_facts("Actualizar OpenSSL 3.0.x y la rama 3.0.")} == {FactKind.BRANCH}
+    assert all(fact.in_quote(exclusive) for fact in traceable_facts("Actualizar OpenSSL 3.0.x y la rama 3.0."))
+    assert versions(prompt).prompt_version == "judge-mode1-v2"
