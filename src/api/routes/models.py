@@ -190,6 +190,28 @@ class InventoryItem(_Model):
     ci_id: str
     name: str
     detail: str
+    # F18.6: the proper id of each kind of row; `ci_id` stays as it was for clients already generated
+    software_product_id: str | None = Field(
+        default=None,
+        description="Id (UUID) del producto de software, el `{software}` de `PUT /api/mappings/{software}`. Solo en "
+        "`software_without_cpe`; nulo en las listas de activos.",
+    )
+    itop_class: str | None = Field(
+        default=None,
+        description="Clase del CI en iTop (Server, VirtualMachine…), para enlazarlo en la consola de iTop. Solo en las "
+        "listas de activos; nula en `software_without_cpe`.",
+    )
+
+
+class InventoryPendingTotals(_Model):
+    """How many items of each type wait for a person, whatever the cap of each list (F18.6)."""
+
+    software_without_cpe: int = Field(ge=0)
+    without_classification: int = Field(ge=0)
+    without_exposure: int = Field(ge=0)
+    without_owner: int = Field(ge=0)
+    without_custodian: int = Field(ge=0)
+    outside_delivery_model: int = Field(ge=0)
 
 
 class InventoryPending(_Model):
@@ -199,6 +221,11 @@ class InventoryPending(_Model):
     without_owner: list[InventoryItem]
     without_custodian: list[InventoryItem]
     outside_delivery_model: list[InventoryItem]
+    totals: InventoryPendingTotals | None = Field(
+        default=None,
+        description="Total de pendientes de cada tipo. Cada lista trae a lo más 200 elementos (sin paginación): si "
+        "su total es mayor, la lista está cortada.",
+    )
 
 
 class CpeCandidate(_Model):

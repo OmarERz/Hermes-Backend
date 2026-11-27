@@ -258,7 +258,11 @@ OPERATIONS: Final[dict[tuple[str, str], Op]] = {
         "get_pending_inventory",
         "sources",
         "Pendientes de inventario",
-        "Activos y software con datos faltantes: sin CPE, sin clasificación, sin exposición o sin responsable.",
+        "Activos y software con datos faltantes: software sin CPE y CIs sin clasificación, sin dato de exposición, "
+        "sin responsable o sin custodio. Cada lista trae a lo más 200 elementos, sin paginación; `totals` da el total "
+        "de cada tipo. En el software, el id del producto va en `software_product_id`; en los CIs, `itop_class` "
+        "trae su clase de iTop. `outside_delivery_model` siempre llega vacía (Hermes aún no lee el modelo de entrega "
+        "de iTop).",
     ),
     ("GET", "/api/cpe/candidates"): Op(
         "list_cpe_candidates",
@@ -836,7 +840,10 @@ FIELDS: Final[dict[str, str]] = {
     "objects": "Objetos STIX del bundle.",
     "ok": "Si la conexión funciona.",
     "on_older_version": "Si el feedback se dio sobre una versión anterior de la evaluación.",
-    "outside_delivery_model": "Activos fuera del modelo de entrega de Hermes.",
+    "outside_delivery_model": "Equipos custodios fuera del modelo de entrega de la organización en iTop (los equipos "
+    "a los que iTop deja asignar sus tickets). Siempre vacía por ahora: Hermes no lee el modelo de entrega de iTop, "
+    "así que no puede saber qué equipo queda fuera; si iTop rechaza un equipo, el ticket se crea con el equipo por "
+    "defecto (TIC-09).",
     "owner": "Responsable del activo.",
     "owners": "Responsables de los activos afectados.",
     "previous_final": "Puntaje final de la evaluación anterior, si hubo.",
@@ -1022,6 +1029,16 @@ OVERRIDES: Final[dict[str, str]] = {
     "FeedbackEntry.proposed_score": "Puntaje propuesto por la persona.",
     "FeedbackEntry.comment": "Comentario de la persona.",
     "InventoryItem.name": "Nombre del activo o del software.",
+    "InventoryItem.ci_id": "Id del CI en iTop. En `software_without_cpe` trae el id (UUID) del producto de software, "
+    "como antes de F18.6: usa `software_product_id` para el software y `ci_id` solo para los CIs.",
+    "InventoryPendingTotals.software_without_cpe": "Productos de software sin CPE.",
+    "InventoryPendingTotals.without_classification": "CIs sin clasificación de datos.",
+    "InventoryPendingTotals.without_exposure": "CIs sin dato de exposición a internet.",
+    "InventoryPendingTotals.without_owner": "CIs sin responsable.",
+    "InventoryPendingTotals.without_custodian": "CIs sin equipo custodio.",
+    "InventoryPendingTotals.outside_delivery_model": "Siempre 0 por ahora (ver `outside_delivery_model`).",
+    "Mapping.software": "Id (UUID) del producto de software mapeado: el mismo `{software}` de la ruta, no su nombre.",
+    "Mapping.cpe": "CPE 2.3 guardado para el producto, tal como se mandó.",
     "Metric.key": "Clave estable de la métrica.",
     "Metric.label": "Nombre de la métrica, en español.",
     "NotificationEventRow.id": "Id del evento.",

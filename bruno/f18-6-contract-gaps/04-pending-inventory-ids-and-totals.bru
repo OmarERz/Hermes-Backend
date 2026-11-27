@@ -1,0 +1,54 @@
+meta {
+  name: pending-inventory-ids-and-totals
+  type: http
+  seq: 4
+}
+
+get {
+  url: {{baseUrl}}/api/pending/inventory
+  body: none
+  auth: bearer
+}
+
+auth:bearer {
+  token: {{readerToken}}
+}
+
+assert {
+  res.status: eq 200
+  res.body.outside_delivery_model: isArray
+}
+
+tests {
+  const lists = ["software_without_cpe", "without_classification", "without_exposure", "without_owner", "without_custodian", "outside_delivery_model"];
+
+  test("totals count every type and each list holds at most 200 of them", function () {
+    expect(Object.keys(res.body.totals).sort()).to.deep.equal([...lists].sort());
+    for (const list of lists) {
+      expect(res.body[list].length).to.be.at.most(200);
+      expect(res.body.totals[list]).to.be.at.least(res.body[list].length);
+    }
+    expect(res.body.outside_delivery_model).to.deep.equal([]);
+    expect(res.body.totals.outside_delivery_model).to.equal(0);
+  });
+
+  test("software rows name the product and CI rows carry their iTop class", function () {
+    for (const item of res.body.software_without_cpe) {
+      expect(item.software_product_id).to.equal(item.ci_id);
+      expect(item.itop_class).to.equal(null);
+    }
+    for (const list of lists.slice(1, 5)) {
+      for (const item of res.body[list]) {
+        expect(item.software_product_id).to.equal(null);
+        expect(item.itop_class).to.be.a("string");
+      }
+    }
+  });
+}
+
+docs {
+  Pending inventory (FRO-17, F18.6): `software_product_id` for software rows, `itop_class` for CI rows, and the total
+  of each type (each list is capped at 200).
+
+  operationId: get_pending_inventory
+}

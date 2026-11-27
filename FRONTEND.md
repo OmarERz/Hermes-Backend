@@ -197,6 +197,14 @@ Todo error responde con:
   (máximo 500 caracteres): muéstralo como dato.
 - **Inventario:** es de solo lectura; un activo, su dueño o su software se registran o cambian en iTop. Los totales
   y porcentajes del resumen ya vienen calculados.
+- **Pendientes de inventario (FRO-17, F18.6):** `GET /api/pending/inventory` no pagina: cada lista trae **a lo más
+  200** elementos y `totals` trae el total real de cada tipo (si `totals.<lista>` es mayor que la lista, está
+  cortada; muestra «200 de N»). En `software_without_cpe` el id del producto va en `software_product_id`: es el
+  `{software}` de `PUT /api/mappings/{software}` y de la respuesta `Mapping.software` (un id, no el nombre). `ci_id`
+  sigue trayendo ese mismo id en el software por compatibilidad, pero úsalo solo para los CIs. Cada CI pendiente
+  trae su `itop_class` para enlazarlo en iTop. `outside_delivery_model` (equipos custodios fuera del modelo de
+  entrega de iTop) **siempre llega vacía** y su total en 0: Hermes aún no lee el modelo de entrega de iTop; no la
+  muestres como «0 pendientes».
 - **Historial de un hallazgo:** abre el detalle `GET /api/vulnerabilities/{group_id}`; cada activo trae su
   `finding_id`, que es el `{id}` de `GET /api/findings/{id}/history` (puntaje de ese CI en cada evaluación del
   grupo, del más antiguo al más reciente). En las recomendaciones `asset.finding_id` llega nulo: su CI puede ser

@@ -2857,7 +2857,7 @@
         "additionalProperties": false,
         "properties": {
           "ci_id": {
-            "description": "Id del CI en iTop.",
+            "description": "Id del CI en iTop. En `software_without_cpe` trae el id (UUID) del producto de software, como antes de F18.6: usa `software_product_id` para el software y `ci_id` solo para los CIs.",
             "title": "Ci Id",
             "type": "string"
           },
@@ -2866,10 +2866,34 @@
             "title": "Detail",
             "type": "string"
           },
+          "itop_class": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Clase del CI en iTop (Server, VirtualMachine…), para enlazarlo en la consola de iTop. Solo en las listas de activos; nula en `software_without_cpe`.",
+            "title": "Itop Class"
+          },
           "name": {
             "description": "Nombre del activo o del software.",
             "title": "Name",
             "type": "string"
+          },
+          "software_product_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Id (UUID) del producto de software, el `{software}` de `PUT /api/mappings/{software}`. Solo en `software_without_cpe`; nulo en las listas de activos.",
+            "title": "Software Product Id"
           }
         },
         "required": [
@@ -2884,7 +2908,7 @@
         "additionalProperties": false,
         "properties": {
           "outside_delivery_model": {
-            "description": "Activos fuera del modelo de entrega de Hermes.",
+            "description": "Equipos custodios fuera del modelo de entrega de la organización en iTop (los equipos a los que iTop deja asignar sus tickets). Siempre vacía por ahora: Hermes no lee el modelo de entrega de iTop, así que no puede saber qué equipo queda fuera; si iTop rechaza un equipo, el ticket se crea con el equipo por defecto (TIC-09).",
             "items": {
               "$ref": "#/components/schemas/InventoryItem"
             },
@@ -2898,6 +2922,17 @@
             },
             "title": "Software Without Cpe",
             "type": "array"
+          },
+          "totals": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/InventoryPendingTotals"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Total de pendientes de cada tipo. Cada lista trae a lo más 200 elementos (sin paginación): si su total es mayor, la lista está cortada."
           },
           "without_classification": {
             "description": "Activos sin clasificación.",
@@ -2941,6 +2976,58 @@
           "outside_delivery_model"
         ],
         "title": "InventoryPending",
+        "type": "object"
+      },
+      "InventoryPendingTotals": {
+        "additionalProperties": false,
+        "description": "How many items of each type wait for a person, whatever the cap of each list (F18.6).",
+        "properties": {
+          "outside_delivery_model": {
+            "description": "Siempre 0 por ahora (ver `outside_delivery_model`).",
+            "minimum": 0.0,
+            "title": "Outside Delivery Model",
+            "type": "integer"
+          },
+          "software_without_cpe": {
+            "description": "Productos de software sin CPE.",
+            "minimum": 0.0,
+            "title": "Software Without Cpe",
+            "type": "integer"
+          },
+          "without_classification": {
+            "description": "CIs sin clasificación de datos.",
+            "minimum": 0.0,
+            "title": "Without Classification",
+            "type": "integer"
+          },
+          "without_custodian": {
+            "description": "CIs sin equipo custodio.",
+            "minimum": 0.0,
+            "title": "Without Custodian",
+            "type": "integer"
+          },
+          "without_exposure": {
+            "description": "CIs sin dato de exposición a internet.",
+            "minimum": 0.0,
+            "title": "Without Exposure",
+            "type": "integer"
+          },
+          "without_owner": {
+            "description": "CIs sin responsable.",
+            "minimum": 0.0,
+            "title": "Without Owner",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "software_without_cpe",
+          "without_classification",
+          "without_exposure",
+          "without_owner",
+          "without_custodian",
+          "outside_delivery_model"
+        ],
+        "title": "InventoryPendingTotals",
         "type": "object"
       },
       "InventorySummary": {
@@ -3535,12 +3622,12 @@
         "additionalProperties": false,
         "properties": {
           "cpe": {
-            "description": "Identificador CPE 2.3 del software.",
+            "description": "CPE 2.3 guardado para el producto, tal como se mandó.",
             "title": "Cpe",
             "type": "string"
           },
           "software": {
-            "description": "Nombre del software en el inventario.",
+            "description": "Id (UUID) del producto de software mapeado: el mismo `{software}` de la ruta, no su nombre.",
             "title": "Software",
             "type": "string"
           }
@@ -12619,7 +12706,7 @@
     },
     "/api/pending/inventory": {
       "get": {
-        "description": "Activos y software con datos faltantes: sin CPE, sin clasificación, sin exposición o sin responsable.",
+        "description": "Activos y software con datos faltantes: software sin CPE y CIs sin clasificación, sin dato de exposición, sin responsable o sin custodio. Cada lista trae a lo más 200 elementos, sin paginación; `totals` da el total de cada tipo. En el software, el id del producto va en `software_product_id`; en los CIs, `itop_class` trae su clase de iTop. `outside_delivery_model` siempre llega vacía (Hermes aún no lee el modelo de entrega de iTop).",
         "operationId": "get_pending_inventory",
         "responses": {
           "200": {
