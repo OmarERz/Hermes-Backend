@@ -95,7 +95,9 @@ ZAP_IMAGE ?= ghcr.io/zaproxy/zaproxy@sha256:9624669db72f54d86c4b46a7064518bd9bf7
 OPENAPI_SNAPSHOT ?= openapi/openapi.json
 # Operations with external effects are excluded from fuzzing (docs/14 §4.3). --exclude-path drops every
 # method of the path; later phases extend this list (e.g. SCHEMATHESIS_EXCLUDES += --exclude-path /api/x).
-SCHEMATHESIS_EXCLUDES ?= --exclude-path /api/scans --exclude-path /api/stix/export
+# The run progress stream (SSE) stays open while a run is in progress, so a request/response fuzzer reads nothing
+# for longer than its read timeout and reports a network error (pending #177); it keeps its own integration tests.
+SCHEMATHESIS_EXCLUDES ?= --exclude-path /api/scans --exclude-path /api/stix/export --exclude-path '/api/runs/{id}/events'
 
 # Not part of plain `make verify`. A step is skipped only while the phase that creates its prerequisite
 # has not landed, and says so with an explicit SKIPPED line; once the prerequisite exists it must pass.

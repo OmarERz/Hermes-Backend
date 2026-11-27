@@ -252,8 +252,8 @@ def test_the_consumer_comes_from_the_setting(factory: sessionmaker[Session]) -> 
     with factory() as session:
         assert configured_consumer_name(session) == "log"  # no catalog seeded: the default
     assert isinstance(consumer_for("log"), LogConsumer)
-    with pytest.raises(ValueError, match="not available"):
-        consumer_for("slack")
+    with pytest.raises(ValueError, match="its own service"):
+        consumer_for("slack")  # delivered by the Slack service (slack_app), never built by the worker
 
 
 def test_the_worker_job_delivers_with_the_log_consumer(factory: sessionmaker[Session]) -> None:

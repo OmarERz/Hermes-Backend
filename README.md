@@ -167,12 +167,13 @@ volumen**: no lo uses en producción.
 
 ### 6. Pasar las notificaciones a Slack
 
-Las notificaciones salen como eventos en la tabla `notification_event`; el consumidor por defecto es `log`. Cuando el
-módulo de Slack (otro equipo) esté integrado (F11), sus llaves `SLACK_BOT_TOKEN` y `SLACK_APP_TOKEN` se agregarán
-a `compose.yaml` junto con el módulo. El cambio de consumidor es entonces un parámetro que un admin edita
-(`PUT /api/config` con `{"expected_version": <versión actual>, "changes": {"notifications.consumer": "slack"}}`, o la
-pantalla de configuración); los eventos pendientes se entregan sin perderse y volver a `log` es repetir el cambio.
-Hasta entonces el único consumidor disponible es `log`.
+Las notificaciones salen como eventos en la tabla `notification_event`; el consumidor por defecto es `log`. El módulo
+de Slack (F11.1) corre como el servicio `slack` del perfil `slack` (`COMPOSE_PROFILES=slack make up`), con Bolt en
+Socket Mode; la instalación paso a paso (workspace, app desde `slack/manifest.yaml`, tokens, canales) está en
+[`SLACK.md`](SLACK.md). El cambio de consumidor es un parámetro que un admin edita (`PUT /api/config` con
+`{"expected_version": <versión actual>, "changes": {"notifications.consumer": "slack"}}`, o la pantalla de
+configuración): desde ese momento el trabajador deja los eventos y los entrega el servicio `slack`; los pendientes se
+entregan sin perderse y volver a `log` es repetir el cambio.
 
 ### 7. Proxy inverso: límites por IP y tamaño de petición
 
