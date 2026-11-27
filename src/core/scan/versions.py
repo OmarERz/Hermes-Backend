@@ -18,6 +18,10 @@ PRE_RELEASE: Final = {
 POST_RELEASE: Final = frozenset({"post", "p", "sp", "patch"})
 MAX_LENGTH: Final = 100
 DIGITS: Final = "0123456789"
+# OpenSSL letter releases only: one letter, or `z` and one letter after it (`1.1.1w`, `1.1.1zd`, `1.0.2zm`); never a
+# word such as `fips` or `beta1`
+LETTER_RELEASE: Final = re.compile(r"([0-9]+(?:\.[0-9]+)*)(z?[a-z])")
+WILDCARD: Final = "x"  # `1.2x` names a line, not one version
 
 
 class Version(NamedTuple):
@@ -27,8 +31,12 @@ class Version(NamedTuple):
     number: int
 
 
+def _comparable_text(raw: str) -> str:
+    return raw.strip().lower().removeprefix("v").split("+", 1)[0]  # build metadata has no precedence (SemVer)
+
+
 def parse_version(raw: str) -> Version | None:
-    text = raw.strip().lower().removeprefix("v").split("+", 1)[0]  # build metadata has no precedence (SemVer)
+    text = _comparable_text(raw)
     if not text or len(text) > MAX_LENGTH or text[0] not in DIGITS:
         return None
     tokens = [t for part in SEPARATORS.split(text) for t in TOKEN.findall(part)]
@@ -62,6 +70,38 @@ def compare_versions(left: str, right: str) -> int | None:
     """-1, 0 or 1; None when either version cannot be compared."""
     a, b = parse_version(left), parse_version(right)
     if a is None or b is None:
+        return None
+    return (a > b) - (a < b)
+
+
+def release_of(raw: str) -> tuple[int, ...] | None:
+    """The release numbers of a version, also for an OpenSSL letter release off the scale (`1.1.1zd` -> (1, 1, 1));
+    None for any other version the comparator cannot read (`3.0.23-fips`, `3.0.22fips`, `1.2.x`, `1.2x`, `latest`)."""
+    parsed = parse_version(raw)
+    if parsed is not None:
+        return parsed.release
+    text = _comparable_text(raw)
+    letters = LETTER_RELEASE.fullmatch(text) if len(text) <= MAX_LENGTH else None
+    if letters is None or letters.group(2) == WILDCARD:
+        return None
+    base = parse_version(letters.group(1))
+    return base.release if base is not None else None
+
+
+def known_order(left: str, right: str) -> int | None:
+    """-1, 0 or 1 when the comparator's scale decides the order without guessing; None otherwise (ESC-13).
+
+    `compare_versions` first. A letter release it cannot read (`1.1.1zd`) is still ordered against another release,
+    because the release numbers come first on the scale whatever the letters mean (`3.0.18 > 1.1.1zd`,
+    `1.1.1zd > 1.0.2`), and the same text is the same version (`1.1.1w` = `V1.1.1w`). Against its own release it
+    stays unknown (`1.1.1w` ? `1.1.1zd`, `1.1.1` ? `1.1.1w`): the letters could sort before or after."""
+    order = compare_versions(left, right)
+    if order is not None:
+        return order
+    if _comparable_text(left) == _comparable_text(right):
+        return 0
+    a, b = release_of(left), release_of(right)
+    if a is None or b is None or a == b:
         return None
     return (a > b) - (a < b)
 

@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import json
 import re
 from decimal import Decimal
 
@@ -17,7 +18,7 @@ from core.judge.budget import (
     token_cap,
 )
 from core.judge.catalog import JudgeSettings, ReasonCatalog, ReasonSpec, SensitivityProfile, TokenCaps
-from core.judge.mitigation import FactKind, traceable_facts
+from core.judge.mitigation import FactKind, MitigationStatus, traceable_facts, validate_mitigation
 from core.judge.package import ReviewPackage
 from core.judge.prompt import MODE1_TOOLS, system_prompt, user_message, versions
 from core.judge.store import parse_model_price
@@ -156,3 +157,30 @@ def test_the_prompt_asks_for_versions_as_quoted_and_its_examples_hold_against_ju
     assert {fact.kind for fact in traceable_facts("Actualizar OpenSSL 3.0.x y la rama 3.0.")} == {FactKind.BRANCH}
     assert all(fact.in_quote(exclusive) for fact in traceable_facts("Actualizar OpenSSL 3.0.x y la rama 3.0."))
     assert versions(prompt).prompt_version == "judge-mode1-v2"
+
+
+def test_the_prompt_examples_hold_against_jue_mit_10() -> None:
+    """D-101: what the prompt teaches about several ranges is what the code checks."""
+    prompt = system_prompt(ReasonCatalog.default(), SensitivityProfile.named("normal"), JudgeSettings())
+    examples = re.findall(r"de `(\[[^`]+)` escribe «([^»]+)»", prompt)
+    several = re.findall(r"de `(\[[^`]+)` y `(\[[^`]+)` escribe «([^»]+)»", prompt)
+    cases = [((version_range,), action) for version_range, action in examples]
+    cases += [((first, second), action) for first, second, action in several]
+    assert len(cases) == 3
+
+    def outcome(ranges: tuple[str, ...], action: str) -> tuple[MitigationStatus, str | None]:
+        content = finding_package()
+        content["group"]["cpe"] = "example:lib"
+        content["cve_data"]["affected_ranges"] = [f"example:lib {version_range}" for version_range in ranges]
+        quote = json.dumps(content["cve_data"]["affected_ranges"])[1:-1]
+        step = {"order": 1, "ci_id": "", "action": action, "element_id": "cve-1", "quote": quote}
+        result = validate_mitigation([step], ReviewPackage.from_content(content))
+        return result.status, result.rule
+
+    for ranges, action in cases:
+        assert outcome(ranges, action) == (MitigationStatus.ACCEPTED, None), action
+    # the step the prompt warns about ("1.5 sigue en el segundo") is the one the code discards
+    assert outcome(("[1.0,1.5)", "[1.4,2.3)"), "actualizar a 1.5 o posterior") == (
+        MitigationStatus.DISCARDED,
+        "JUE-MIT-10",
+    )
