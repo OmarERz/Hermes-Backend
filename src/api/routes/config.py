@@ -60,6 +60,7 @@ def _parameter(p: service.Parameter) -> ConfigParameter:
             "description": p.description,
             "validations": list(p.validations),
             "options": list(p.options),
+            "option_values": {option: dict(values) for option, values in p.option_values.items()},
         }
     )
 

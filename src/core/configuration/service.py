@@ -13,7 +13,8 @@ from __future__ import annotations
 
 import json
 import uuid
-from dataclasses import dataclass, replace
+from collections.abc import Mapping
+from dataclasses import dataclass, field, replace
 from datetime import UTC, datetime
 from decimal import Decimal, InvalidOperation
 from typing import Any, Final
@@ -33,7 +34,7 @@ from core.configuration.errors import (
 )
 from core.configuration.judge_estimate import JudgeEstimate
 from core.db import models as m
-from core.judge.catalog import SensitivityProfile
+from core.judge.catalog import CatalogError, SensitivityProfile
 from core.judge.store import load_judge_settings
 from core.scoring.engine import Formula
 from core.scoring.formula_repo import NoActiveFormulaError, load_formula
@@ -81,6 +82,39 @@ class Parameter:
     max: str | None = None
     validations: tuple[str, ...] = ()
     options: tuple[str, ...] = ()
+    # What each option sets, as text like every value (F18.6); only `sensitivity_profile` has them today
+    option_values: Mapping[str, Mapping[str, str]] = field(default_factory=dict)
+
+
+PROFILE_SETTING: Final = "sensitivity_profile"
+
+
+def profile_values(name: str) -> dict[str, str]:
+    """What a sensitivity profile sets (docs/07 §12), read from the judge's own table so they never diverge.
+
+    `judge.range_multiplier` and `judge.allow_lowering` always come from the profile; `dead_zone` is the zone the
+    frontend sends with the profile (D-091); `mode2.min_confidence` applies while no admin set one explicitly.
+    """
+    profile = SensitivityProfile.named(name)
+    return {
+        "judge.range_multiplier": format(profile.range_multiplier.normalize(), "f"),
+        "judge.allow_lowering": "true" if profile.allow_lowering else "false",
+        "dead_zone": str(profile.dead_zone),
+        "mode2.min_confidence": format(profile.mode2_min_confidence.normalize(), "f"),
+    }
+
+
+def option_values_of(key: str, options: list[str]) -> dict[str, dict[str, str]]:
+    """What each option of a parameter sets: the profile values for `sensitivity_profile`, nothing for the rest."""
+    if key != PROFILE_SETTING:
+        return {}
+    values: dict[str, dict[str, str]] = {}
+    for option in options:
+        try:
+            values[option] = profile_values(option)
+        except CatalogError:  # the judge has no profile with that name: nothing to publish for it
+            continue
+    return values
 
 
 @dataclass(frozen=True)
@@ -207,6 +241,7 @@ def catalog(session: Session) -> list[Parameter]:
                 min=_bound(definition.min_value),
                 max=_bound(definition.max_value),
                 options=tuple(options.get(definition.key, ())),
+                option_values=option_values_of(definition.key, options.get(definition.key, [])),
             )
         )
     return sorted(parameters, key=lambda p: (p.group != "formula", p.group, p.key))

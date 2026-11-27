@@ -83,6 +83,14 @@ class ConfigParameter(_Model):
     description: str
     validations: list[str] = Field(default_factory=list)
     options: list[str] = Field(default_factory=list, description="Allowed values of an enum parameter")
+    option_values: dict[str, dict[str, str]] = Field(
+        default_factory=dict,
+        description="Lo que fija cada opción de un parámetro `enum`: por opción, cada parámetro y su valor como texto. "
+        "Hoy solo `sensitivity_profile` (docs/07 §12), con `judge.range_multiplier` y `judge.allow_lowering` (fijos "
+        "del perfil), `dead_zone` (la zona muerta del perfil: mándala junto con el perfil al simular y al guardar, "
+        "D-091) y `mode2.min_confidence` (la usa el juez mientras un admin no la fije). Vacío en los demás "
+        "parámetros.",
+    )
 
 
 class ConfigDocument(_Model):

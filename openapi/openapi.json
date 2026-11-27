@@ -1467,6 +1467,17 @@
             "title": "Min Role",
             "type": "string"
           },
+          "option_values": {
+            "additionalProperties": {
+              "additionalProperties": {
+                "type": "string"
+              },
+              "type": "object"
+            },
+            "description": "Lo que fija cada opción de un parámetro `enum`: por opción, cada parámetro y su valor como texto. Hoy solo `sensitivity_profile` (docs/07 §12), con `judge.range_multiplier` y `judge.allow_lowering` (fijos del perfil), `dead_zone` (la zona muerta del perfil: mándala junto con el perfil al simular y al guardar, D-091) y `mode2.min_confidence` (la usa el juez mientras un admin no la fije). Vacío en los demás parámetros.",
+            "title": "Option Values",
+            "type": "object"
+          },
           "options": {
             "description": "Allowed values of an enum parameter",
             "items": {

@@ -152,7 +152,10 @@ Todo error responde con:
   motivo que el juez no propuso nunca aparece; si hubo doble revisión ciega, combina las dos con su regla). La zona
   muerta se resuelve como al guardar: la que mandes o la actual (guardar solo el perfil no la cambia). Cada perfil
   trae su zona muerta (mínima 6, normal 4, amplia 2): **al cambiar de perfil, manda también su `dead_zone`, igual en
-  la simulación y al guardar**, para que la vista previa sea lo que se guarda. Cualquier otro parámetro conocido (por
+  la simulación y al guardar**, para que la vista previa sea lo que se guarda. **Desde F18.6** no repitas esos
+  valores en el front: `GET /api/config/schema` los publica en `option_values` del parámetro `sensitivity_profile`
+  (por perfil: `judge.range_multiplier`, `judge.allow_lowering`, `dead_zone` y `mode2.min_confidence`, como texto),
+  leídos de la misma tabla que usa el juez. Cualquier otro parámetro conocido (por
   ejemplo `judge_model`) se
   ignora y vuelve en `not_simulable`: avisa a la persona que ese cambio no tiene vista previa. Una clave desconocida
   o un valor inválido siguen dando 422. Compara cada hallazgo abierto con su última evaluación
