@@ -169,6 +169,22 @@ def test_a_setting_that_names_no_team_falls_back_to_the_flagged_team(session: Se
     assert [t.custodian_team_id for t in tickets(session, sc)] == [flagged.id]
 
 
+@pytest.mark.parametrize("flagged", [False, True])
+def test_a_setting_that_names_two_teams_picks_neither(session: Session, flagged: bool) -> None:
+    """Feature review: two live teams called "Seguridad" (iTop allows it) are ambiguous; the flag decides, or nobody."""
+    sc = Scenario(session)
+    sc.team("Seguridad")
+    sc.team(" SEGURIDAD")
+    guard = sc.team("Guardia")
+    guard.is_default = flagged
+    sc.ci("orphan-01", None)
+    run = sc.scan({"orphan-01": "new"})
+
+    lifecycle(sc).apply(session, sc.assess({"orphan-01": 55}, run).id)
+
+    assert [t.custodian_team_id for t in tickets(session, sc)] == ([guard.id] if flagged else [])
+
+
 def test_without_custodian_nor_default_team_no_ticket_is_opened(session: Session) -> None:
     sc = Scenario(session)
     sc.ci("orphan-01", None)

@@ -199,7 +199,8 @@ class TicketLifecycle:
 
 def _default_team(session: Session, name: object) -> m.Team | None:
     """P-020: the live team the `default_team` setting names (same name, ignoring case and surrounding spaces),
-    else a live team flagged `is_default`.
+    else a live team flagged `is_default`. A name two live teams share is ambiguous and picks neither: the ticket
+    could go to a team outside the delivery model (TIC-09), with no fallback left.
 
     The inventory sync creates every team unflagged and nothing else sets the flag, so before this a CI without
     custodian never got its ticket (F20 dry run, P2-2): the setting is what the spec makes configurable (docs/11).
@@ -207,10 +208,10 @@ def _default_team(session: Session, name: object) -> m.Team | None:
     teams = session.scalars(select(m.Team).where(m.Team.removed_at.is_(None)).order_by(m.Team.itop_team_id)).all()
     wanted = name.strip().casefold() if isinstance(name, str) else ""
     if wanted:
-        named = next((team for team in teams if team.name.strip().casefold() == wanted), None)
-        if named is not None:
-            return named
-        log.warning("the default_team setting names no team of the inventory")
+        named = [team for team in teams if team.name.strip().casefold() == wanted]
+        if len(named) == 1:
+            return named[0]
+        log.warning("the default_team setting names %s team of the inventory", "more than one" if named else "no")
     return next((team for team in teams if team.is_default), None)
 
 
