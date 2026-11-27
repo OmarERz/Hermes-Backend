@@ -495,7 +495,7 @@ def test_same_ignores_html_entities_and_unset_external_keys(current: Any, wanted
     assert itop_load.same(current, wanted)
 
 
-INVENTORY = ROOT / "inventories" / "lyft-challenge.yaml"
+INVENTORY = ROOT / "inventories" / "m6-challenge.yaml"
 
 
 def test_the_approved_inventory_loads_and_a_second_run_changes_nothing(capsys: pytest.CaptureFixture[str]) -> None:
