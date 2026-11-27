@@ -171,6 +171,8 @@ Todo error responde con:
   (`GET /api/tickets/updates`, `GET /api/recommendations`), en `POST /api/feedback` y en las respuestas que lo
   traen. En `GET /api/tickets`, `itop_id` es para mostrar (la referencia `R-000123` cuando ya existe, si no el id
   numérico) y `ticket_itop_id` es el valor que pasas a esos filtros; nunca mandes la referencia a un filtro (422).
+  `ticket_itop_id` llega nulo si el ticket no tiene un id numérico de iTop (los tickets de `make demo`, `DEMO-n`):
+  no ofrezcas filtrar por ese ticket.
 - **Motivos del juez y su cita (FRO-13):** cada recomendación trae `accepted_reasons` (`code`, `label`, `points`,
   `quote`, `ci_id`), `judge_summary`, `judge_status` y `ticket_itop_id`; `accepted_reasons` llega vacío sin juez, con
   respaldo (`no_judge_review`) o con desacuerdo. El detalle completo (motivos rechazados con su regla, ajuste

@@ -60,6 +60,19 @@ def test_ticket_list_gives_the_numeric_id_the_filters_take(get: Get, front: Fron
     assert by_ticket == {str(a["A1"]), str(a["A2"])}
 
 
+def test_a_ticket_without_a_numeric_itop_id_lists_no_filter_id(get: Get, database: tuple[str, Engine]) -> None:
+    """A demo ticket (`make demo` stores DEMO-n) is shown by `itop_id`, but its `ticket_itop_id` is null: the
+    filters only take a numeric id, so the list never offers one they would refuse."""
+    with database[1].begin() as conn:
+        conn.execute(text("UPDATE ticket SET itop_ticket_id = 'DEMO-7' WHERE itop_ticket_id = '778'"))
+    try:
+        tickets = {t["itop_id"]: t["ticket_itop_id"] for t in get("/api/tickets")["items"]}
+        assert tickets == {"R-000777": "777", "DEMO-7": None}
+    finally:
+        with database[1].begin() as conn:
+            conn.execute(text("UPDATE ticket SET itop_ticket_id = '778' WHERE itop_ticket_id = 'DEMO-7'"))
+
+
 def test_judge_detail_shows_reasons_quotes_and_the_double_review(get: Get, front: Front) -> None:
     detail = get(f"/api/recommendations/{front.scenario.assessments['A2']}/judge")
     assert detail["review_id"] == str(front.reviews["first"])

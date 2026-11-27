@@ -16,10 +16,15 @@ auth:bearer {
 
 script:pre-request {
   const hermes = require("./lib/hermes");
-  const page = await hermes.api(bru, "GET", "/api/tickets?limit=1", "readerToken");
-  const first = page.items[0] || null;
-  bru.setVar("listedTicketId", first ? first.ticket_itop_id : "");
-  if (!hermes.needData(bru, first, "a ticket in iTop")) return;
+  const page = await hermes.api(bru, "GET", "/api/tickets?limit=50", "readerToken");
+  bru.setVar("listedTicketId", "");
+  if (!hermes.needData(bru, page.items[0] || null, "a ticket in iTop")) return;
+  const numbered = page.items.find((t) => t.ticket_itop_id !== null);
+  if (!numbered) {
+    bru.runner.skipRequest(); // only demo tickets (DEMO-n): none has an id the filter takes
+    return;
+  }
+  bru.setVar("listedTicketId", numbered.ticket_itop_id);
 }
 
 assert {
@@ -35,7 +40,8 @@ tests {
 }
 
 docs {
-  The `ticket_itop_id` of the first listed ticket filters its log; skipped when no ticket exists in iTop yet.
+  The `ticket_itop_id` of the first listed ticket that has one filters its log; skipped when no ticket exists in
+  iTop yet or every listed ticket is a demo one (DEMO-n, no numeric id).
 
   operationId: list_ticket_updates
 }

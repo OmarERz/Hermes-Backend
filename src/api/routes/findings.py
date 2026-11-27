@@ -55,6 +55,7 @@ from api.routes.models import (
     VulnerabilityFilters,
     VulnerabilityGroup,
     VulnerabilityList,
+    filter_ticket_id,
     parse_moment,
 )
 from core.feedback.service import FeedbackRejectedError, SqlFeedbackService
@@ -564,7 +565,7 @@ def list_tickets(
                 status=t.status,
                 fixed_cis=t.fixed_cis,
                 total_cis=t.total_cis,
-                ticket_itop_id=t.itop_ticket_id,
+                ticket_itop_id=filter_ticket_id(t.itop_ticket_id),
             )
             for t in found
         ],

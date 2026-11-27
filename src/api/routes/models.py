@@ -2,8 +2,9 @@
 
 from __future__ import annotations
 
+import re
 from datetime import datetime
-from typing import Annotated, Any, Literal, Self
+from typing import Annotated, Any, Final, Literal, Self
 
 from pydantic import BaseModel, BeforeValidator, ConfigDict, Field, model_validator
 
@@ -16,6 +17,17 @@ ReviewStatus = Literal[
     "applied", "suggestion", "partial_review", "judge_disagreement", "no_judge_review", "rejected", "queued"
 ]
 Verdict = Literal["relevant", "false_positive", "wrong_priority", "investigating", "stop_suggestions"]
+
+
+# The numeric id of a ticket in iTop, as every `ticket_itop_id` input takes it (filters and feedback).
+ITOP_TICKET_ID_PATTERN: Final = r"^[0-9]{1,12}$"
+
+
+def filter_ticket_id(itop_ticket_id: str | None) -> str | None:
+    """The ticket's iTop id when the `ticket_itop_id` inputs accept it, else None (the `DEMO-n` ids of `make demo`)."""
+    if itop_ticket_id is None or re.fullmatch(ITOP_TICKET_ID_PATTERN, itop_ticket_id) is None:
+        return None
+    return itop_ticket_id
 
 
 def parse_moment(value: str | None) -> datetime | None:
@@ -427,7 +439,7 @@ class FeedbackRequest(_Model):
     comment: str | None = Field(default=None, max_length=2000)
     ticket_itop_id: str | None = Field(
         default=None,
-        pattern=r"^[0-9]{1,12}$",
+        pattern=ITOP_TICKET_ID_PATTERN,
         description="Optional: iTop id of the ticket the user acted on; scopes ticket-level effects "
         "(stop_suggestions, false_positive) to it instead of every ticket of the assessment (TIC-07).",
     )
@@ -464,7 +476,8 @@ class Ticket(_Model):
         default=None,
         description="Id numérico del ticket en iTop (F18.4): el valor que aceptan los filtros `ticket_itop_id` de "
         "`GET /api/tickets/updates` y `GET /api/recommendations` y el campo `ticket_itop_id` de "
-        "`POST /api/feedback`. `itop_id` es para mostrar: trae la referencia (`R-000123`) cuando ya existe.",
+        "`POST /api/feedback`. Nulo si el ticket no tiene un id numérico (los tickets de demostración, `DEMO-n`). "
+        "`itop_id` es para mostrar: trae la referencia (`R-000123`) cuando ya existe.",
     )
 
 
@@ -682,7 +695,9 @@ class RecommendationFilters(_Model):
     group_id: str | None = Field(default=None, max_length=100, description="Timeline of one vulnerability group")
     ci_id: str | None = Field(default=None, max_length=100, description="Timeline of one CI (iTop id)")
     ticket_itop_id: str | None = Field(
-        default=None, pattern=r"^[0-9]{1,12}$", description="Solo las evaluaciones del grupo de ese ticket de iTop."
+        default=None,
+        pattern=ITOP_TICKET_ID_PATTERN,
+        description="Solo las evaluaciones del grupo de ese ticket de iTop.",
     )
     level: Level | None = Field(default=None, description="Solo las recomendaciones de ese nivel.")
     verdict: Verdict | None = Field(
@@ -1011,7 +1026,7 @@ class TicketUpdateFilters(_Model):
     model_config = ConfigDict(extra="ignore", strict=False)
 
     ticket_itop_id: str | None = Field(
-        default=None, pattern=r"^[0-9]{1,12}$", description="Id numérico del ticket en iTop."
+        default=None, pattern=ITOP_TICKET_ID_PATTERN, description="Id numérico del ticket en iTop."
     )
     action: TicketAction | None = Field(default=None, description="Acción registrada.")
 

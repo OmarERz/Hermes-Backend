@@ -5,7 +5,7 @@ from __future__ import annotations
 import pytest
 from pydantic import ValidationError
 
-from api.routes.models import Ticket, TicketUpdateFilters
+from api.routes.models import Ticket, TicketUpdateFilters, filter_ticket_id
 
 LISTED = {
     "itop_id": "R-000777",
@@ -29,3 +29,10 @@ def test_the_listed_numeric_id_is_what_the_filter_accepts_and_the_reference_is_n
     assert TicketUpdateFilters.model_validate({"ticket_itop_id": listed.ticket_itop_id}).ticket_itop_id == "777"
     with pytest.raises(ValidationError):
         TicketUpdateFilters.model_validate({"ticket_itop_id": listed.itop_id})
+
+
+def test_only_an_id_the_filters_take_is_listed_for_them() -> None:
+    assert filter_ticket_id("777") == "777"
+    assert filter_ticket_id("123456789012") == "123456789012"
+    for not_numeric in (None, "", "DEMO-1", "R-000777", "1234567890123", "77 ", "7\n"):
+        assert filter_ticket_id(not_numeric) is None, not_numeric
