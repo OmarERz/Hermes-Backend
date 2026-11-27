@@ -238,6 +238,10 @@ Todo error responde con:
   cada una con `instances`: cuántas de sus instalaciones la tienen) y `licensed_instances` (instalaciones con
   alguna licencia asignada). La lista acepta `?category=` (incluye el producto si **alguna** de sus instalaciones
   la tiene). Las gráficas «por categoría», «por estado» y «por licencia» cuentan instalaciones: suma esos conteos.
+- **Asistente de primera configuración (F18.6):** cada paso de `GET /api/setup/status` (y la respuesta de
+  `PUT /api/setup/steps/{n}`) trae `done_source`: `data` si los datos ya muestran el paso hecho (desmarcarlo no
+  cambia nada: no ofrezcas «desmarcar»), `manual` si solo lo marcó un admin (`PUT` con `{"done": false}` lo
+  desmarca) y nulo si no está hecho.
 - **Privacidad:** el backend no devuelve correos de otros usuarios en vistas de lectura; usa el nombre que venga.
 - **Secretos:** ninguna respuesta trae una llave. El asistente y la pantalla de conexiones solo **verifican**; las
   llaves se configuran en el servidor (`.env` / Docker secrets), nunca desde el front.

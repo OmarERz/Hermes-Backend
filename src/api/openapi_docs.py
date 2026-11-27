@@ -358,13 +358,15 @@ OPERATIONS: Final[dict[tuple[str, str], Op]] = {
         "get_setup_status",
         "operations",
         "Estado de la instalación",
-        "Pasos del asistente de instalación y cuáles están hechos. Solo `admin`.",
+        "Pasos del asistente de instalación y cuáles están hechos u omitidos; `done_source` dice si un paso hecho "
+        "sale de los datos o de la marca de un admin. Solo `admin`.",
     ),
     ("PUT", "/api/setup/steps/{n}"): Op(
         "update_setup_step",
         "operations",
         "Marcar un paso de instalación",
-        "Marca un paso del asistente como hecho u omitido. Solo `admin`.",
+        "Marca un paso del asistente como hecho u omitido, o lo desmarca con `done: false` (desmarcar solo tiene "
+        "efecto si su `done_source` es `manual`). Solo `admin`.",
     ),
     ("GET", "/api/audit"): Op(
         "list_audit_entries",
@@ -563,6 +565,10 @@ ENUMS: Final[dict[tuple[str, ...], dict[str, str]]] = {
         "ingestion": "Ingesta y análisis de noticias",
         "recalculation": "Recálculo por un cambio de fórmula, sin juez",
         "nightly": "Recálculo nocturno por el paso del tiempo",
+    },
+    ("data", "manual"): {
+        "data": "Los datos ya muestran el paso hecho",
+        "manual": "Solo lo marcó un admin; se puede desmarcar",
     },
     ("queued", "running", "succeeded", "failed"): {
         "queued": "En cola; el worker aún no la toma",

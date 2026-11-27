@@ -5074,6 +5074,22 @@
             "title": "Done",
             "type": "boolean"
           },
+          "done_source": {
+            "anyOf": [
+              {
+                "enum": [
+                  "data",
+                  "manual"
+                ],
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "De dónde sale `done` (F18.6): `data` si los datos ya lo muestran (desmarcarlo no cambia nada), `manual` si solo lo marcó un admin (`PUT /api/setup/steps/{n}` con `done: false` lo desmarca). Nulo si el paso no está hecho. Valores: `data`: Los datos ya muestran el paso hecho; `manual`: Solo lo marcó un admin; se puede desmarcar.",
+            "title": "Done Source"
+          },
           "n": {
             "description": "Número del paso.",
             "title": "N",
@@ -14446,7 +14462,7 @@
     },
     "/api/setup/status": {
       "get": {
-        "description": "Pasos del asistente de instalación y cuáles están hechos. Solo `admin`.",
+        "description": "Pasos del asistente de instalación y cuáles están hechos u omitidos; `done_source` dice si un paso hecho sale de los datos o de la marca de un admin. Solo `admin`.",
         "operationId": "get_setup_status",
         "responses": {
           "200": {
@@ -14567,7 +14583,7 @@
     },
     "/api/setup/steps/{n}": {
       "put": {
-        "description": "Marca un paso del asistente como hecho u omitido. Solo `admin`.",
+        "description": "Marca un paso del asistente como hecho u omitido, o lo desmarca con `done: false` (desmarcar solo tiene efecto si su `done_source` es `manual`). Solo `admin`.",
         "operationId": "update_setup_step",
         "parameters": [
           {

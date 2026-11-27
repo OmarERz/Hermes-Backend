@@ -655,6 +655,12 @@ class SetupStep(_Model):
     name: str
     done: bool
     skipped: bool
+    done_source: Literal["data", "manual"] | None = Field(
+        default=None,
+        description="De dónde sale `done` (F18.6): `data` si los datos ya lo muestran (desmarcarlo no cambia nada), "
+        "`manual` si solo lo marcó un admin (`PUT /api/setup/steps/{n}` con `done: false` lo desmarca). Nulo si el "
+        "paso no está hecho.",
+    )
 
 
 class SetupStepUpdate(_Model):

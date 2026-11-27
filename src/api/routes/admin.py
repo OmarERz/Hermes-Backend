@@ -93,10 +93,7 @@ def connections_test(request: ConnectionTestRequest, checker: Checker, session: 
 def setup_status(session: SessionDep, checker: Checker) -> list[SetupStep]:
     """The seven steps of the first-run wizard (D-042). A step is done when the data shows it or an admin marked
     it; step 1 uses the last connection checks without running new ones."""
-    return [
-        SetupStep(n=s.n, name=s.name, done=s.done, skipped=s.skipped)
-        for s in setup.setup_status(session, _all_ok(checker), output_language(session))
-    ]
+    return [_setup_step(s) for s in setup.setup_status(session, _all_ok(checker), output_language(session))]
 
 
 @router.put("/api/setup/steps/{n}", dependencies=[guard("PUT", "/api/setup/steps/{n}")])
@@ -113,7 +110,11 @@ def setup_step(
     if step is None:
         raise ApiError(404, "not_found", "El paso del asistente no existe.")
     session.commit()
-    return SetupStep(n=step.n, name=step.name, done=step.done, skipped=step.skipped)
+    return _setup_step(step)
+
+
+def _setup_step(step: setup.SetupStep) -> SetupStep:
+    return SetupStep(n=step.n, name=step.name, done=step.done, skipped=step.skipped, done_source=step.done_source)
 
 
 @router.get("/api/audit", dependencies=[guard("GET", "/api/audit")], responses=PAGINATED_RESPONSES)
