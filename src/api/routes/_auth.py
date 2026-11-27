@@ -63,6 +63,23 @@ ROUTE_ROLES: dict[tuple[str, str], Role] = {
     ("PUT", "/api/setup/steps/{n}"): Role.ADMIN,
     ("GET", "/api/audit"): Role.ADMIN,
 }
+# Read-only routes the Angular front needs beyond API-06 (D-088, F18.1). Readers see what the front's dashboards show,
+# including the display name of whoever launched a run or changed the configuration (as `/api/config/versions` does);
+# account lists and operational errors are admin only.
+FRONT_ROUTE_ROLES: dict[tuple[str, str], Role] = {
+    ("GET", "/api/telemetry/summary"): Role.READER,
+    ("GET", "/api/telemetry/daily"): Role.READER,
+    ("GET", "/api/telemetry/reviews"): Role.READER,
+    ("GET", "/api/history"): Role.READER,
+    ("GET", "/api/inventory/assets"): Role.READER,
+    ("GET", "/api/inventory/summary"): Role.READER,
+    ("GET", "/api/inventory/software"): Role.READER,
+    ("GET", "/api/inventory/assets/{ci_id}/software"): Role.READER,
+    ("GET", "/api/tickets/summary"): Role.READER,
+    ("GET", "/api/tickets/updates"): Role.READER,
+    ("GET", "/api/recommendations/{assessment_id}/judge"): Role.READER,
+}
+ROUTE_ROLES.update(FRONT_ROUTE_ROLES)
 
 
 def guard(method: str, path: str) -> DependsParam:

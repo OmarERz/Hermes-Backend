@@ -79,9 +79,12 @@ Los requisitos de cada pantalla (FRO-xx) están en la especificación del produc
 | Detalle de vulnerabilidad / de activo | `GET /api/vulnerabilities/{group_id}`, `GET /api/assets/{ci_id}` | reader |
 | Historial de puntuación | `GET /api/findings/{id}/history`, con el `finding_id` de cada activo de `GET /api/vulnerabilities/{group_id}` | reader |
 | Comparación crudo vs. procesado y cascada del Δ | `GET /api/comparison/summary`, `GET /api/comparison/table`, `GET /api/assessments/{id}/breakdown` | reader |
-| Historial de recomendaciones y feedback | `GET /api/recommendations`, `GET /api/recommendations/{assessment_id}`, `GET /api/recommendations/{id}/feedback`, `POST /api/feedback` | reader ver; analyst dar feedback |
-| Tickets y alertas | `GET /api/tickets`, `GET /api/alerts` | reader |
-| Corridas (lanzar escaneo y ver progreso en vivo) | `POST /api/scans`, `GET /api/runs`, `GET /api/runs/{id}/events` (SSE) | analyst lanzar; reader ver |
+| Historial de recomendaciones y feedback | `GET /api/recommendations` (filtros `group_id`, `ci_id`, `ticket_itop_id`, `level`, `verdict`, `without_feedback`), `GET /api/recommendations/{assessment_id}`, `GET /api/recommendations/{assessment_id}/judge`, `GET /api/recommendations/{id}/feedback`, `POST /api/feedback` | reader ver; analyst dar feedback |
+| Tickets y alertas | `GET /api/tickets`, `GET /api/tickets/summary`, `GET /api/tickets/updates` (filtros `ticket_itop_id`, `action`), `GET /api/alerts` | reader |
+| Corridas (lanzar escaneo y ver progreso en vivo) | `POST /api/scans`, `GET /api/runs` (filtros `kind`, `status`, `date_from`, `date_to`), `GET /api/runs/{id}/events` (SSE) | analyst lanzar; reader ver |
+| Historial (línea de tiempo de corridas, revisiones LLM y cambios de configuración) | `GET /api/history` (filtros `type`, `status`, `date_from`, `date_to`) | reader |
+| Telemetría de agentes (analistas y juez) | `GET /api/telemetry/summary?window=24h\|7d\|30d`, `GET /api/telemetry/daily?days=1..90`, `GET /api/telemetry/reviews` (filtros `agent`, `status`, `date_from`, `date_to`) | reader |
+| Inventario de activos y software (solo lectura; iTop es el inventario) | `GET /api/inventory/assets` (filtros `q`, `itop_class`, `criticality`, `exposed`, `classification`, `owner`, `custodian`, `with_findings`), `GET /api/inventory/summary`, `GET /api/inventory/software` (filtros `q`, `has_cpe`, `worst_level`, `with_vulnerabilities`), `GET /api/inventory/assets/{ci_id}/software` | reader |
 | Exportación STIX | `POST /api/stix/export` | analyst |
 | Propuestas de calibración (modo supervisado) | `GET /api/calibration/proposals`, `POST .../{id}/approve`, `POST .../{id}/reject` | reader ver; admin decidir |
 | Métricas | `GET /api/metrics` | reader |
@@ -155,6 +158,17 @@ Todo error responde con:
   `ticket_itop_id` (el ticket que el usuario tiene a la vista) para que «no sugerir más» y «falso positivo» solo
   afecten a ese ticket; sin él se aplican a todos los tickets de la evaluación. Errores: 404 si la evaluación no
   existe, 403 si el usuario no es analista o admin activo, 422 si el ticket no es de esa evaluación.
+- **Motivos del juez y su cita (FRO-13):** cada recomendación trae `accepted_reasons` (`code`, `label`, `points`,
+  `quote`, `ci_id`), `judge_summary`, `judge_status` y `ticket_itop_id`; `accepted_reasons` llega vacío sin juez, con
+  respaldo (`no_judge_review`) o con desacuerdo. El detalle completo (motivos rechazados con su regla, ajuste
+  propuesto contra aplicado, zona muerta y doble revisión ciega) está en
+  `GET /api/recommendations/{assessment_id}/judge`. **Toda cita es texto externo** (noticias, CVE, iTop):
+  muéstrala como dato, escapada, nunca como HTML.
+- **Telemetría e historial:** solo metadatos (agente, modelo, estado, latencia, tokens, costo, nivel de la
+  escalera); ninguna ruta devuelve prompts, paquetes ni llamadas crudas. Las series diarias vienen rellenas con
+  cero. Costos y porcentajes llegan como texto decimal: no los conviertas a `float` para sumarlos.
+- **Inventario:** es de solo lectura; un activo, su dueño o su software se registran o cambian en iTop. Los totales
+  y porcentajes del resumen ya vienen calculados.
 - **Historial de un hallazgo:** abre el detalle `GET /api/vulnerabilities/{group_id}`; cada activo trae su
   `finding_id`, que es el `{id}` de `GET /api/findings/{id}/history` (puntaje de ese CI en cada evaluación del
   grupo, del más antiguo al más reciente). En las recomendaciones `asset.finding_id` llega nulo: su CI puede ser

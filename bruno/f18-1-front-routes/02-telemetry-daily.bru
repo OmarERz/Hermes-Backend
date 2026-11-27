@@ -1,0 +1,27 @@
+meta {
+  name: telemetry-daily
+  type: http
+  seq: 2
+}
+
+get {
+  url: {{baseUrl}}/api/telemetry/daily?days=7
+  body: none
+  auth: bearer
+}
+
+auth:bearer {
+  token: {{readerToken}}
+}
+
+assert {
+  res.status: eq 200
+  res.body.days: eq 7
+  res.body.series.length: eq 7
+}
+
+docs {
+  Daily series with zeros on quiet days (AG-6, AG-7).
+
+  operationId: get_telemetry_daily
+}

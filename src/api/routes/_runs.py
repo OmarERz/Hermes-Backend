@@ -19,7 +19,7 @@ from sqlalchemy import case, func, select, tuple_
 from sqlalchemy.orm import Session, sessionmaker
 
 from api.errors import ApiError
-from api.routes.models import Run
+from api.routes.models import Run, RunFilters
 from core.db import models as m
 from core.scan.engine import queue_scan
 
@@ -48,7 +48,9 @@ EPOCH: Final = datetime(1970, 1, 1, tzinfo=UTC)
 
 
 class RunSource(Protocol):
-    def page(self, after: RunKey | None, limit: int) -> tuple[list[Run], RunKey | None]: ...
+    def page(
+        self, after: RunKey | None, limit: int, filters: RunFilters | None = None
+    ) -> tuple[list[Run], RunKey | None]: ...
 
     def queue_scan(self, firebase_uid: str | None) -> Run: ...
 
@@ -61,7 +63,17 @@ def _iso(moment: datetime | None) -> str | None:
     return moment.astimezone(UTC).isoformat().replace("+00:00", "Z") if moment is not None else None
 
 
-def to_api(run: m.Run) -> Run:
+TRIGGERS: Final[dict[str, Literal["schedule", "manual", "after_scan", "formula_change"]]] = {
+    "schedule": "schedule",
+    "manual": "manual",
+    "after_scan": "after_scan",
+    "formula_change": "formula_change",
+}
+API_TO_DB_KINDS: Final = {api: db for db, api in KINDS.items()}
+UNNAMED: Final = "Usuario sin nombre"
+
+
+def to_api(run: m.Run, launched_by: str | None = None) -> Run:
     return Run(
         id=str(run.id),
         kind=KINDS[run.kind],
@@ -69,7 +81,28 @@ def to_api(run: m.Run) -> Run:
         started_at=_iso(run.started_at) or "",
         finished_at=_iso(run.finished_at),
         progress=run.progress,
+        trigger_reason=TRIGGERS.get(run.trigger_reason),
+        triggered_by=launched_by,
     )
+
+
+def _launcher(run: m.Run, name: str | None) -> str | None:
+    """Who launched the run (HI-10): their display name, a generic label without one, None for the scheduler."""
+    if run.triggered_by is None:
+        return None
+    return name or UNNAMED
+
+
+def _with_launcher(session: Session, run: m.Run) -> Run:
+    """One run for the API with who launched it, as the list shows it (HI-10)."""
+    if run.triggered_by is None:
+        return to_api(run)
+    name = session.scalar(select(m.AppUser.display_name).where(m.AppUser.id == run.triggered_by))
+    return to_api(run, _launcher(run, name))
+
+
+def _moment(value: str | None) -> datetime | None:
+    return datetime.fromisoformat(value.upper()) if value else None
 
 
 @dataclass
@@ -80,10 +113,26 @@ class SqlRunSource:
     max_polls: int = 900  # a stream ends after ~15 minutes; the frontend reconnects
     sleep: Callable[[float], None] = time.sleep
 
-    def page(self, after: RunKey | None, limit: int) -> tuple[list[Run], RunKey | None]:
+    def page(
+        self, after: RunKey | None, limit: int, filters: RunFilters | None = None
+    ) -> tuple[list[Run], RunKey | None]:
         unstarted = case((m.Run.started_at.is_(None), 1), else_=0)
         started = func.coalesce(m.Run.started_at, EPOCH)
-        query = select(m.Run, unstarted, started).where(m.Run.kind.in_(KINDS))
+        query = (
+            select(m.Run, unstarted, started, m.AppUser.display_name)
+            .outerjoin(m.AppUser, m.AppUser.id == m.Run.triggered_by)
+            .where(m.Run.kind.in_(KINDS))
+        )
+        if filters is not None:
+            if filters.kind is not None:
+                query = query.where(m.Run.kind == API_TO_DB_KINDS[filters.kind])
+            if filters.status is not None:  # the API says `failed` for cancelled runs too
+                wanted = [db for db, api in STATUSES.items() if api == filters.status]
+                query = query.where(m.Run.status.in_(wanted))
+            if (since := _moment(filters.date_from)) is not None:
+                query = query.where(m.Run.started_at >= since)
+            if (until := _moment(filters.date_to)) is not None:
+                query = query.where(m.Run.started_at <= until)
         if after is not None:
             try:
                 after_id = uuid.UUID(after[2])
@@ -98,7 +147,7 @@ class SqlRunSource:
         if len(rows) > limit:
             last = kept[-1]
             next_key = (int(last[1]), last[2], str(last[0].id))
-        return [to_api(row[0]) for row in kept], next_key
+        return [to_api(row[0], _launcher(row[0], row[3])) for row in kept], next_key
 
     def queue_scan(self, firebase_uid: str | None) -> Run:
         with self.session_factory() as session, session.begin():
@@ -107,12 +156,12 @@ class SqlRunSource:
                 if firebase_uid
                 else None
             )
-            return to_api(queue_scan(session, self.clock(), user_id))
+            return _with_launcher(session, queue_scan(session, self.clock(), user_id))
 
     def _read(self, key: uuid.UUID) -> Run | None:
         with self.session_factory() as session:
             row = session.get(m.Run, key)
-            return to_api(row) if row is not None and row.kind in KINDS else None
+            return to_api(row) if row is not None and row.kind in KINDS else None  # the stream omits the launcher
 
     def progress(self, run_id: str) -> Iterator[Run]:
         try:

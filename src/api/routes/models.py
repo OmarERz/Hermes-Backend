@@ -11,6 +11,10 @@ from notifications_api.models import DateTimeString
 Level = Literal["critical", "high", "medium", "low"]
 Classification = Literal["public", "classified", "highly_classified", "unclassified"]
 FindingStatus = Literal["new", "persistent", "reopened", "fixed", "no_data"]
+ReviewStatus = Literal[
+    "applied", "suggestion", "partial_review", "judge_disagreement", "no_judge_review", "rejected", "queued"
+]
+Verdict = Literal["relevant", "false_positive", "wrong_priority", "investigating", "stop_suggestions"]
 
 
 def _whole_number(value: Any) -> Any:
@@ -144,6 +148,9 @@ class Source(_Model):
     last_capture: str | None
     items_per_run: int
     health: Literal["ok", "degraded", "failing"]
+    description: str | None = None
+    provider: str | None = None
+    refresh_interval_minutes: int | None = None
 
 
 class SourceCreate(_Model):
@@ -361,6 +368,16 @@ class Breakdown(_Model):
 
 
 # --- recommendations, feedback, tickets, alerts -----------------------------------------------------------------
+class AcceptedReason(_Model):
+    """A judge reason that reached the score (FRO-13): its points and the quote it cites, shown as data (SEG-02)."""
+
+    code: str
+    label: str
+    points: int
+    quote: str
+    ci_id: str | None
+
+
 class Recommendation(_Model):
     assessment_id: str
     created_at: str
@@ -377,6 +394,10 @@ class Recommendation(_Model):
     asset: AffectedAsset | None
     ticket_url: str | None
     feedback_count: int
+    accepted_reasons: list[AcceptedReason] = Field(default_factory=list)
+    judge_summary: str | None = None
+    judge_status: ReviewStatus | None = None
+    ticket_itop_id: str | None = None
 
 
 class FeedbackRequest(_Model):
@@ -458,6 +479,24 @@ class Run(_Model):
     started_at: str
     finished_at: str | None
     progress: int = Field(ge=0, le=100)
+    trigger_reason: Literal["schedule", "manual", "after_scan", "formula_change"] | None = None
+    triggered_by: str | None = None
+
+
+class RunFilters(_Model):
+    """Optional filters of the run list (HI-2)."""
+
+    # The same query string also carries `cursor` and `limit`, read by other parameters.
+    model_config = ConfigDict(extra="ignore", strict=False)
+
+    kind: Literal["scan", "ingestion", "recalculation", "nightly"] | None = Field(
+        default=None, description="Tipo de corrida."
+    )
+    status: Literal["queued", "running", "succeeded", "failed"] | None = Field(
+        default=None, description="Estado de la corrida."
+    )
+    date_from: DateTimeString | None = Field(default=None, description="Started on or after (RFC 3339)")
+    date_to: DateTimeString | None = Field(default=None, description="Started on or before (RFC 3339)")
 
 
 class StixExportRequest(_Model):
@@ -586,3 +625,353 @@ class RecommendationFilters(_Model):
 
     group_id: str | None = Field(default=None, max_length=100, description="Timeline of one vulnerability group")
     ci_id: str | None = Field(default=None, max_length=100, description="Timeline of one CI (iTop id)")
+    ticket_itop_id: str | None = Field(
+        default=None, pattern=r"^[0-9]{1,12}$", description="Solo las evaluaciones del grupo de ese ticket de iTop."
+    )
+    level: Level | None = Field(default=None, description="Solo las recomendaciones de ese nivel.")
+    verdict: Verdict | None = Field(
+        default=None, description="Solo las que tienen un feedback vigente con ese veredicto."
+    )
+    without_feedback: bool | None = Field(
+        default=None, description="Solo las que no tienen (`true`) o sí tienen (`false`) feedback vigente."
+    )
+
+
+# --- agent telemetry (D-088, F18.1) ------------------------------------------------------------------------------
+AgentName = Literal["news_analyst", "cve_analyst", "judge"]
+TelemetryWindow = Literal["24h", "7d", "30d"]
+RunKindAny = Literal["scan", "ingestion", "recalculation", "nightly", "inventory_sync", "calibration"]
+
+
+class RunCounts(_Model):
+    kind: RunKindAny
+    queued: int
+    running: int
+    succeeded: int
+    failed: int
+
+
+class AgentTelemetry(_Model):
+    agent: AgentName
+    reviews: int
+    by_status: dict[str, int]
+    success_percent: str | None
+    latency_avg_ms: int | None
+    latency_p95_ms: int | None
+    tokens_input: int
+    tokens_output: int
+    cost_usd: str
+    provider: Literal["deepseek", "claude-code"]
+    model: str
+    last_model: str | None
+    spend_today_usd: str
+    active: bool
+    ladder_level: int | None
+
+
+class ReasonUsage(_Model):
+    code: str
+    label: str
+    accepted: int
+    rejected: int
+
+
+class TelemetrySummary(_Model):
+    window: TelemetryWindow
+    since: str
+    generated_at: str
+    runs: list[RunCounts]
+    runs_queued: int
+    runs_running: int
+    runs_succeeded: int
+    runs_failed: int
+    run_success_percent: str | None
+    agents: list[AgentTelemetry]
+    top_reasons: list[ReasonUsage]
+    daily_budget_usd: str
+    spend_today_usd: str
+    ladder_level: int = Field(ge=0, le=3)
+    ladder_label: str
+
+
+class AgentDay(_Model):
+    agent: AgentName
+    reviews: int
+    success_percent: str | None
+    latency_avg_ms: int | None
+    cost_usd: str
+
+
+class TelemetryDay(_Model):
+    date: str
+    runs_succeeded: int
+    runs_failed: int
+    agents: list[AgentDay]
+
+
+class TelemetryDaily(_Model):
+    days: int
+    series: list[TelemetryDay]
+
+
+class LlmReviewFilters(_Model):
+    """Optional filters of the LLM review log."""
+
+    # The same query string also carries `cursor` and `limit`, read by other parameters.
+    model_config = ConfigDict(extra="ignore", strict=False)
+
+    agent: AgentName | None = None
+    status: ReviewStatus | None = Field(default=None, description="Estado de la revisión.")
+    date_from: DateTimeString | None = Field(default=None, description="On or after (RFC 3339)")
+    date_to: DateTimeString | None = Field(default=None, description="On or before (RFC 3339)")
+
+
+class LlmReviewEntry(_Model):
+    id: str
+    created_at: str
+    agent: AgentName
+    mode: str | None
+    model: str
+    status: ReviewStatus
+    attempts: int
+    latency_ms: int
+    tokens_input: int
+    tokens_cached: int
+    tokens_output: int
+    tokens_reasoning: int
+    cost_usd: str
+    ladder_level: int
+    second_review: bool
+    assessment_id: str | None
+    reasons_accepted: int
+    reasons_rejected: int
+
+
+# --- history timeline (D-088, F18.1) ------------------------------------------------------------------------------
+HistoryType = Literal["run", "llm_review", "config_change"]
+
+
+class HistoryFilters(_Model):
+    """Optional filters of the history timeline (HI-2)."""
+
+    # The same query string also carries `cursor` and `limit`, read by other parameters.
+    model_config = ConfigDict(extra="ignore", strict=False)
+
+    type: HistoryType | None = Field(default=None, description="Tipo de evento.")
+    status: str | None = Field(
+        default=None,
+        max_length=30,
+        pattern=r"^[a-z_]{1,30}$",
+        description="Estado final exacto: el de la corrida (`succeeded`, `failed`…) o el de la revisión "
+        "(`applied`, `no_judge_review`…); los cambios de configuración tienen `applied`.",
+    )
+    date_from: DateTimeString | None = Field(default=None, description="On or after (RFC 3339)")
+    date_to: DateTimeString | None = Field(default=None, description="On or before (RFC 3339)")
+
+
+class HistoryEvent(_Model):
+    id: str
+    type: HistoryType
+    at: str
+    title: str
+    status: str
+    actor: str
+    trigger: Literal["schedule", "manual", "after_scan", "formula_change"] | None
+    run_kind: RunKindAny | None
+    agent: AgentName | None
+    assessment_id: str | None
+    config_version: int | None
+    duration_seconds: int | None
+
+
+# --- inventory and software (D-088, F18.1) -----------------------------------------------------------------------
+Criticality = Literal["high", "medium", "low", "unknown"]
+FilterText = Annotated[str, Field(min_length=1, max_length=100)]
+
+
+class InventoryAssetFilters(_Model):
+    """Optional filters of the inventory list (AC-1). Text filters compare the exact value, `q` searches."""
+
+    # The same query string also carries `cursor` and `limit`, read by other parameters.
+    model_config = ConfigDict(extra="ignore", strict=False)
+
+    q: FilterText | None = Field(default=None, description="Texto a buscar en el nombre o el id del CI.")
+    itop_class: FilterText | None = Field(default=None, description="Clase de iTop exacta, por ejemplo `Server`.")
+    criticality: Criticality | None = Field(default=None, description="Criticidad del CI en iTop.")
+    exposed: bool | None = None
+    classification: Classification | None = None
+    owner: FilterText | None = None
+    custodian: FilterText | None = None
+    with_findings: bool | None = Field(
+        default=None, description="Solo CIs con (`true`) o sin (`false`) hallazgos abiertos."
+    )
+
+
+class InventoryAsset(_Model):
+    ci_id: str
+    name: str
+    itop_class: str
+    criticality: Criticality
+    exposed: bool | None
+    classification: Classification
+    personal_data: bool | None
+    owner: str | None
+    custodian: str | None
+    service: str | None
+    os: str | None
+    itop_url: str
+    synced_at: str
+    open_findings: int
+    kev_findings: int
+    risk: int | None = Field(ge=0, le=100)
+    level: Level | None
+    software_count: int
+
+
+class SoftwareHealth(_Model):
+    total: int
+    with_cpe: int
+    with_known_version: int
+    without_critical: int
+    cpe_percent: str | None
+    known_version_percent: str | None
+    without_critical_percent: str | None
+
+
+class InventorySummary(_Model):
+    total_assets: int
+    by_class: dict[str, int]
+    by_criticality: dict[str, int]
+    by_exposure: dict[str, int]
+    by_classification: dict[str, int]
+    owners: int
+    without_owner: int
+    custodians: int
+    with_open_findings: int
+    with_kev_findings: int
+    last_sync_at: str | None
+    software: SoftwareHealth
+
+
+class SoftwareFilters(_Model):
+    """Optional filters of the software list (ST-1)."""
+
+    # The same query string also carries `cursor` and `limit`, read by other parameters.
+    model_config = ConfigDict(extra="ignore", strict=False)
+
+    q: FilterText | None = Field(default=None, description="Texto a buscar en el nombre del software.")
+    has_cpe: bool | None = Field(default=None, description="Solo software con (`true`) o sin (`false`) CPE.")
+    worst_level: Level | None = Field(default=None, description="Peor nivel de sus vulnerabilidades abiertas.")
+    with_vulnerabilities: bool | None = Field(
+        default=None, description="Solo software con (`true`) o sin (`false`) vulnerabilidades abiertas."
+    )
+
+
+class SoftwareItem(_Model):
+    id: str
+    name: str
+    versions: list[str]
+    version_known: bool
+    instances: int
+    ci_count: int
+    cpe: str | None
+    has_cpe: bool
+    open_vulnerabilities: int
+    worst_level: Level | None
+
+
+class InstalledSoftwareItem(_Model):
+    software_id: str
+    name: str
+    version: str
+    version_known: bool
+    cpe: str | None
+    has_cpe: bool
+    open_vulnerabilities: int
+    worst_level: Level | None
+
+
+# --- ticket summary and log, judge detail (D-088, F18.1) ---------------------------------------------------------
+TicketAction = Literal[
+    "create",
+    "add_ci",
+    "add_owner",
+    "comment",
+    "raise_urgency",
+    "lower_urgency",
+    "suggest",
+    "partial_fix",
+    "fix_comment",
+    "reopen",
+]
+
+
+class TicketSummary(_Model):
+    total: int
+    by_status: dict[str, int]
+    by_urgency: dict[str, int]
+    changed_by_person: int
+    resolved: int
+    resolved_percent: str | None
+    avg_resolution_hours: str | None
+
+
+class TicketUpdateFilters(_Model):
+    """Optional filters of the ticket log (HI-4)."""
+
+    # The same query string also carries `cursor` and `limit`, read by other parameters.
+    model_config = ConfigDict(extra="ignore", strict=False)
+
+    ticket_itop_id: str | None = Field(
+        default=None, pattern=r"^[0-9]{1,12}$", description="Id numérico del ticket en iTop."
+    )
+    action: TicketAction | None = Field(default=None, description="Acción registrada.")
+
+
+class TicketUpdateEntry(_Model):
+    id: str
+    created_at: str
+    action: TicketAction
+    label: str
+    assessment_id: str | None
+    ticket_itop_id: str | None
+    ticket_ref: str | None
+    ticket_url: str | None
+    cve: str
+    custodian: str
+    itop_status: Literal["pending", "in_progress", "done", "failed"] | None
+
+
+class JudgeReasonItem(_Model):
+    seq: int
+    code: str
+    label: str
+    points: int
+    quote: str
+    element_id: str
+    ci_id: str | None
+    status: Literal["accepted", "rejected", "withdrawn"]
+    rejection_rule: str | None
+
+
+class DoubleReviewInfo(_Model):
+    agreed: bool | None
+    first_adjustment: int | None
+    second_adjustment: int | None
+    second_status: ReviewStatus
+
+
+class JudgeDetail(_Model):
+    assessment_id: str
+    review_id: str | None
+    status: ReviewStatus | None
+    summary: str | None
+    model: str | None
+    reviewed_at: str | None
+    proposed_adjustment: int | None
+    applied_adjustment: int
+    dead_zone_applied: bool
+    accepted_reasons: list[JudgeReasonItem]
+    rejected_reasons: list[JudgeReasonItem]
+    double_review: DoubleReviewInfo | None
+    mitigation_status: Literal["accepted", "discarded", "absent"] | None

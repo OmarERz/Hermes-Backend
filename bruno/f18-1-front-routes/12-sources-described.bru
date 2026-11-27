@@ -1,0 +1,36 @@
+meta {
+  name: sources-described
+  type: http
+  seq: 12
+}
+
+get {
+  url: {{baseUrl}}/api/sources?limit=50
+  body: none
+  auth: bearer
+}
+
+auth:bearer {
+  token: {{readerToken}}
+}
+
+assert {
+  res.status: eq 200
+  res.body.items: isArray
+}
+
+tests {
+  test("factory sources carry a description and a provider", function () {
+    const kev = res.body.items.find((s) => s.name === "CISA KEV");
+    if (kev) {
+      expect(kev.provider).to.equal("CISA");
+      expect(kev.refresh_interval_minutes).to.equal(1440);
+    }
+  });
+}
+
+docs {
+  Sources with their static description, provider and real refresh period (FE-2, FE-3).
+
+  operationId: list_sources
+}

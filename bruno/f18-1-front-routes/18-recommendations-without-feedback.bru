@@ -1,0 +1,35 @@
+meta {
+  name: recommendations-without-feedback
+  type: http
+  seq: 18
+}
+
+get {
+  url: {{baseUrl}}/api/recommendations?without_feedback=true&limit=10
+  body: none
+  auth: bearer
+}
+
+auth:bearer {
+  token: {{readerToken}}
+}
+
+assert {
+  res.status: eq 200
+  res.body.items: isArray
+}
+
+tests {
+  test("none has current feedback and each lists its accepted reasons", function () {
+    for (const item of res.body.items) {
+      expect(item.feedback_count).to.equal(0);
+      expect(item.accepted_reasons).to.be.an("array");
+    }
+  });
+}
+
+docs {
+  Recommendations without current feedback (RE-2) with their accepted reasons (FRO-13).
+
+  operationId: list_recommendations
+}

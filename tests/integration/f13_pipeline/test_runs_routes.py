@@ -43,6 +43,9 @@ def test_a_scan_request_is_queued_listed_and_streamed(factory: sessionmaker[Sess
         assert queued.status_code == 202
         run = queued.json()
         assert (run["kind"], run["status"], run["progress"]) == ("scan", "queued", 0)
+        # HI-10: the answer names the person who launched it, as the list does
+        launcher = (user.display_name or "Usuario sin nombre") if user is not None else None
+        assert run["triggered_by"] == launcher
         assert run["id"] in [r["id"] for r in client.get("/api/runs").json()["items"]]
         with factory() as session, session.begin():
             row = session.get_one(m.Run, run["id"])

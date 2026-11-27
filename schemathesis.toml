@@ -53,6 +53,26 @@ checks.positive_data_acceptance.expected-statuses = ["2xx", "3xx", "400", "401",
 include-name = "GET /api/vulnerabilities"
 checks.positive_data_acceptance.expected-statuses = ["2xx", "3xx", "400", "401", "403", "404", "409", "429", "5xx"]
 
+[[operations]]
+include-name = "GET /api/history"
+checks.positive_data_acceptance.expected-statuses = ["2xx", "3xx", "400", "401", "403", "404", "409", "429", "5xx"]
+
+[[operations]]
+include-name = "GET /api/inventory/assets"
+checks.positive_data_acceptance.expected-statuses = ["2xx", "3xx", "400", "401", "403", "404", "409", "429", "5xx"]
+
+[[operations]]
+include-name = "GET /api/inventory/software"
+checks.positive_data_acceptance.expected-statuses = ["2xx", "3xx", "400", "401", "403", "404", "409", "429", "5xx"]
+
+[[operations]]
+include-name = "GET /api/telemetry/reviews"
+checks.positive_data_acceptance.expected-statuses = ["2xx", "3xx", "400", "401", "403", "404", "409", "429", "5xx"]
+
+[[operations]]
+include-name = "GET /api/tickets/updates"
+checks.positive_data_acceptance.expected-statuses = ["2xx", "3xx", "400", "401", "403", "404", "409", "429", "5xx"]
+
 # Configuration and catalog writes validate semantics the schema cannot express (parameter keys of the formula and
 # settings catalog, ISO country and language codes, formula rules of FRO-05, catalog sector codes, the source rules of D-041). A request that is
 # schema-valid but breaks one of those rules is correctly refused with 422 `validation_error` (documented on every
