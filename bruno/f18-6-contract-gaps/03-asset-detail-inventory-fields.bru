@@ -1,0 +1,44 @@
+meta {
+  name: asset-detail-inventory-fields
+  type: http
+  seq: 3
+}
+
+get {
+  url: {{baseUrl}}/api/assets/{{inventoryCiId}}
+  body: none
+  auth: bearer
+}
+
+auth:bearer {
+  token: {{readerToken}}
+}
+
+script:pre-request {
+  const hermes = require("./lib/hermes");
+  const page = await hermes.api(bru, "GET", "/api/inventory/assets?limit=1", "readerToken");
+  const first = page.items[0] || null;
+  bru.setVar("inventoryCiId", first ? encodeURIComponent(first.ci_id) : "");
+  bru.setVar("inventoryCi", first ? JSON.stringify(first) : "");
+  if (!hermes.needData(bru, first, "a CI in the inventory")) return;
+}
+
+assert {
+  res.status: eq 200
+}
+
+tests {
+  test("the detail carries the CI's inventory fields with the values of the inventory list", function () {
+    const listed = JSON.parse(bru.getVar("inventoryCi"));
+    for (const key of ["itop_class", "criticality", "exposed", "personal_data", "os", "service", "synced_at", "itop_url"]) {
+      expect(res.body[key]).to.deep.equal(listed[key]);
+    }
+  });
+}
+
+docs {
+  The detail of the first CI of the inventory (F18.6): criticality, exposure, personal data, OS, service, last sync
+  and link to iTop, the same values GET /api/inventory/assets gives. Skipped without an inventory.
+
+  operationId: get_asset
+}

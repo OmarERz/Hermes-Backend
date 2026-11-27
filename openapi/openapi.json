@@ -514,6 +514,24 @@
             "description": "CPU de un Server o VirtualMachine en iTop, texto libre sin convertir.",
             "title": "Cpu"
           },
+          "criticality": {
+            "anyOf": [
+              {
+                "enum": [
+                  "high",
+                  "medium",
+                  "low",
+                  "unknown"
+                ],
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Criticidad del CI en iTop (`unknown` si iTop no la tiene); igual que en el inventario. Valores: `high`: Alta; `medium`: Media; `low`: Baja; `unknown`: Sin dato en iTop.",
+            "title": "Criticality"
+          },
           "custodian": {
             "anyOf": [
               {
@@ -538,6 +556,18 @@
             "description": "Descripción del CI en iTop (dato, no instrucciones).",
             "title": "Description"
           },
+          "exposed": {
+            "anyOf": [
+              {
+                "type": "boolean"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Si el CI está expuesto a internet; nulo si iTop no lo dice. Igual que en el inventario.",
+            "title": "Exposed"
+          },
           "findings": {
             "description": "Hallazgos del activo.",
             "items": {
@@ -558,10 +588,34 @@
             "description": "Clase del CI en iTop (Server, VirtualMachine…).",
             "title": "Itop Class"
           },
+          "itop_url": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Enlace al CI en la consola de iTop (para editarlo allá); vacío si el backend no tiene la URL de iTop configurada, igual que en el inventario.",
+            "title": "Itop Url"
+          },
           "name": {
             "description": "Nombre.",
             "title": "Name",
             "type": "string"
+          },
+          "os": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Sistema operativo del CI, según iTop; nulo sin dato.",
+            "title": "Os"
           },
           "owner": {
             "anyOf": [
@@ -574,6 +628,18 @@
             ],
             "description": "Responsable del activo.",
             "title": "Owner"
+          },
+          "personal_data": {
+            "anyOf": [
+              {
+                "type": "boolean"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Si el CI guarda datos personales; nulo si iTop no lo dice.",
+            "title": "Personal Data"
           },
           "ram": {
             "anyOf": [
@@ -592,6 +658,18 @@
             "title": "Risk",
             "type": "integer"
           },
+          "service": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Servicio de negocio del CI, según iTop; nulo sin dato.",
+            "title": "Service"
+          },
           "software": {
             "description": "Software instalado vivo del CI, por producto y versión.",
             "items": {
@@ -599,6 +677,18 @@
             },
             "title": "Software",
             "type": "array"
+          },
+          "synced_at": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Última sincronización del CI con iTop (UTC).",
+            "title": "Synced At"
           }
         },
         "required": [

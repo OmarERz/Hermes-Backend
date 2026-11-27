@@ -214,6 +214,10 @@ Todo error responde con:
   perpetua). CPU y RAM son texto libre de iTop: muéstralos tal cual, sin convertir. Cualquiera puede llegar nulo
   (sin dato en iTop o aún no sincronizado); la descripción es texto de iTop: muéstrala como texto, nunca como
   HTML. GPU y almacenamiento no existen en iTop. Editar cualquiera de estos datos es un enlace a iTop.
+  **Desde F18.6** el detalle trae también los datos del CI que ya tenía la lista del inventario, con los mismos
+  valores: `criticality`, `exposed` (expuesto a internet; nulo sin dato), `personal_data`, `os`, `service`,
+  `synced_at` e `itop_url` (enlace al CI en iTop para editarlo; vacío si el backend no tiene la URL de iTop). El
+  detalle ya no necesita una segunda lectura de `GET /api/inventory/assets`.
   Las rutas de inventario traen lo mismo (F18.4): cada CI de `GET /api/inventory/assets` trae `description`,
   `cpu` y `ram` (además de `itop_class`); cada instalación de `GET /api/inventory/assets/{ci_id}/software` trae
   `category`, `status`, `description` y `licence`; cada producto de `GET /api/inventory/software` trae, sobre

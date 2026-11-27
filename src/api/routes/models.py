@@ -12,6 +12,7 @@ from notifications_api.models import DateTimeString
 
 Level = Literal["critical", "high", "medium", "low"]
 Classification = Literal["public", "classified", "highly_classified", "unclassified"]
+Criticality = Literal["high", "medium", "low", "unknown"]  # of a CI in iTop
 FindingStatus = Literal["new", "persistent", "reopened", "fixed", "no_data"]
 ReviewStatus = Literal[
     "applied", "suggestion", "partial_review", "judge_disagreement", "no_judge_review", "rejected", "queued"
@@ -342,6 +343,26 @@ class AssetDetail(_Model):
     )
     software: list[AssetSoftware] = Field(
         default_factory=list, description="Software instalado vivo del CI, por producto y versión."
+    )
+    # F18.6: the CI's inventory fields, the same values `GET /api/inventory/assets` gives for it
+    criticality: Criticality | None = Field(
+        default=None,
+        description="Criticidad del CI en iTop (`unknown` si iTop no la tiene); igual que en el inventario.",
+    )
+    exposed: bool | None = Field(
+        default=None,
+        description="Si el CI está expuesto a internet; nulo si iTop no lo dice. Igual que en el inventario.",
+    )
+    personal_data: bool | None = Field(
+        default=None, description="Si el CI guarda datos personales; nulo si iTop no lo dice."
+    )
+    os: str | None = Field(default=None, description="Sistema operativo del CI, según iTop; nulo sin dato.")
+    service: str | None = Field(default=None, description="Servicio de negocio del CI, según iTop; nulo sin dato.")
+    synced_at: str | None = Field(default=None, description="Última sincronización del CI con iTop (UTC).")
+    itop_url: str | None = Field(
+        default=None,
+        description="Enlace al CI en la consola de iTop (para editarlo allá); vacío si el backend no tiene la URL de "
+        "iTop configurada, igual que en el inventario.",
     )
 
 
@@ -856,7 +877,6 @@ class HistoryEvent(_Model):
 
 
 # --- inventory and software (D-088, F18.1) -----------------------------------------------------------------------
-Criticality = Literal["high", "medium", "low", "unknown"]
 FilterText = Annotated[str, Field(min_length=1, max_length=100)]
 
 
