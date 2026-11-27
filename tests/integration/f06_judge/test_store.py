@@ -137,7 +137,7 @@ def test_review_with_reasons_and_mitigation_is_stored(engine: Engine) -> None:
         assert len(review.calls) == 4
         assert review.calls[2]["result"] == "rejected"
         assert review.tokens_input == 40
-        assert review.prompt_version == "judge-mode1-v1"
+        assert review.prompt_version == "judge-mode1-v2"
         assert review.parameters["failure"] is None
         reasons = session.scalars(
             select(m.JudgeReason).where(m.JudgeReason.llm_review_id == review.id).order_by(m.JudgeReason.seq)
