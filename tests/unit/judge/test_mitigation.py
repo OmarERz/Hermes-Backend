@@ -545,6 +545,56 @@ def test_tokens_are_classified_whole_and_alike(action: str, quote: str, kinds: l
     assert result.rule == (None if status == "accepted" else "JUE-MIT-03")
 
 
+@pytest.mark.parametrize(
+    ("fact", "quote", "backed"),
+    [
+        (
+            TraceableFact(FactKind.URL, "https://vendor.example/advisory"),
+            "Ver “https://vendor.example/advisory”.",
+            True,
+        ),
+        (
+            TraceableFact(FactKind.URL, "https://vendor.example/advisory"),
+            "Ver «https://vendor.example/advisory».",
+            True,
+        ),
+        (TraceableFact(FactKind.URL, "https://[2001:db8::1234]"), "Ver https://[2001:db8::1234 ahora.", False),
+        (TraceableFact(FactKind.URL, "https://[2001:db8::1234]"), "Ver [https://[2001:db8::1234]] ahora.", True),
+        (TraceableFact(FactKind.HOST, "docs.example.org/advisory"), "Ver [docs.example.org/advisory] ahora.", True),
+        (TraceableFact(FactKind.HOST, "docs.example.org/advisory"), "Ver docs.example.org/advisory] ahora.", False),
+        (
+            TraceableFact(FactKind.URL, "https://vendor.example/guide"),
+            "Ver https://vendor.example/guide\u2019s-update.",
+            False,
+        ),
+        (
+            TraceableFact(FactKind.URL, "https://vendor.example/guide\u2019s-update"),
+            "Ver https://vendor.example/guide\u2019s-update.",
+            True,
+        ),
+    ],
+)
+def test_addresses_lose_only_the_quotes_and_brackets_around_them(fact: TraceableFact, quote: str, backed: bool) -> None:
+    assert fact.in_quote(quote) is backed
+
+
+@pytest.mark.parametrize(
+    ("action", "expected"),
+    [
+        ("Ver https://[2001:db8::1234] ahora.", ["https://[2001:db8::1234]"]),  # an IPv6 bracket is part of it
+        ("Ver [https://vendor.example/advisory].", ["https://vendor.example/advisory"]),
+        ("Ver “https://vendor.example/advisory”.", ["https://vendor.example/advisory"]),
+        (
+            "Ver https://vendor.example/guide\u2019s-update.",
+            ["https://vendor.example/guide\u2019s-update"],
+        ),  # inside the path
+        ("Ver docs.example.org/advisory] ahora.", ["docs.example.org/advisory]"]),  # no '[' opens around it
+    ],
+)
+def test_url_facts_keep_their_own_brackets(action: str, expected: list[str]) -> None:
+    assert texts(action) == expected
+
+
 def test_a_v_prefixed_version_matches_the_quote() -> None:
     assert validate_mitigation([step(action="Actualizar a v2.4.60.")], package()).status is MitigationStatus.ACCEPTED
 

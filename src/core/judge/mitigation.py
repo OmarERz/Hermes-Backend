@@ -22,15 +22,17 @@ MAX_QUOTE_CHARS = 1000
 
 # JUE-MIT-03: traceable facts. URLs (with or without scheme, bare hosts), commands in backticks, versions (dotted,
 # v-prefixed, or a number after a version word) and file paths must appear in the quote as the same whole fact.
-_URL = re.compile(r"(?<![A-Za-z0-9+.-])[A-Za-z][A-Za-z0-9+.-]*://[^\s`'\"<>()]+")  # any scheme, any case
+_ADDRESS_CHAR = r"[^\s`'\"<>()]"
+# A bracket or typographic quote that opens right before an address closes around it, not inside it.
+_CLOSERS = {"[": "]", "{": "}", "\u201c": "\u201d", "\u2018": "\u2019", "\u00ab": "\u00bb"}
+_URL = re.compile(rf"(?<![A-Za-z0-9+.-])[A-Za-z][A-Za-z0-9+.-]*://{_ADDRESS_CHAR}+")  # any scheme, any case
 # Dotted names are read whole, with any port, path or query ('vendor.example.invalid2', never 'vendor.example';
 # 'docs.example.org:8443/?id=3', 'docs.example.org/'). Action and quote classify them the same way: a version when
 # it is a qualified version below ('3.0.23.post1', 'v3.0.0rc1') or has no two letters in a row ('1.1.1w', 'e.g');
 # otherwise a host ('3.0.23.example', '1password.com').
-_DOTTED_NAME = r"(?P<name>(?>[\w+~-]+(?:\.[\w+~-]+)+))(?::\d+)?(?:/[^\s`'\"<>()]*|[?#][^\s`'\"<>()]+)?"
+_DOTTED_NAME = rf"(?P<name>(?>[\w+~-]+(?:\.[\w+~-]+)+))(?::\d+)?(?:/{_ADDRESS_CHAR}*|[?#]{_ADDRESS_CHAR}+)?"
 _HOST = re.compile(rf"(?<![\w@/.-]){_DOTTED_NAME}")
 _LETTERS = re.compile(r"[^\W\d_]{2}")  # 'e.g' and 'U.S.A' are not hosts
-_URL_END = ".,;:]}"  # '[https://vendor.example/advisory]': the bracket delimits the link
 _COMMAND = re.compile(r"`([^`\n]+)`")
 # A branch (#176) names a release line, not one version: a wildcard ('3.0.x', '3.*') or a dotted number next to a
 # branch word ('la rama 3.0', 'the 3.0 branch'). It becomes the fact '3.0.x', where x stands for one or more numbers:
@@ -110,12 +112,9 @@ class TraceableFact:
         # Addresses are compared whole, as the same pattern reads them on both sides: 'docs.example.org/' is not
         # backed by 'docs.example.org/?x=1', nor 'https://a.example/x' by 'https://a.example/x?y=1'.
         if self.kind is FactKind.HOST:
-            return any(
-                _is_address(match) and match.group(0).rstrip(_TRAILING) == self.text
-                for match in _QUOTE_NAME.finditer(quote)
-            )
+            return any(_is_address(match) and _address(match) == self.text for match in _QUOTE_NAME.finditer(quote))
         if self.kind is FactKind.URL:
-            return any(url.rstrip(_URL_END) == self.text for url in _URL.findall(quote))
+            return any(_address(match) == self.text for match in _URL.finditer(quote))
         return appears_as_fact(self.text, quote)
 
 
@@ -219,7 +218,7 @@ def appears_as_fact(fact: str, quote: str) -> bool:
 def traceable_facts(action: str) -> list[TraceableFact]:
     """Versions, branches, URLs, backticked commands and file paths written in an action (JUE-MIT-03)."""
     text = normalize_text(action)
-    facts = _facts(FactKind.URL, (url.rstrip(_URL_END) for url in _URL.findall(text)))
+    facts = _facts(FactKind.URL, (_address(match) for match in _URL.finditer(text)))
     facts += _facts(FactKind.COMMAND, (normalize_text(command) for command in _COMMAND.findall(text)))
     without_urls = _URL.sub(" ", text)
     hosts, without_hosts = _split_hosts(without_urls)
@@ -233,6 +232,18 @@ def traceable_facts(action: str) -> list[TraceableFact]:
     return facts
 
 
+def _address(match: re.Match[str]) -> str:
+    """The address a match read, without the punctuation that ends the sentence and without the closing mark of a
+    bracket or quote opened right before it: '[https://vendor.example/advisory]' and '“https://…”' lose it, while
+    'https://[2001:db8::1234]', 'docs.example.org/advisory]' and a typographic apostrophe inside a path keep theirs."""
+    address = match.group(0).rstrip(_TRAILING)
+    opener = match.string[match.start() - 1] if match.start() else ""
+    closer = _CLOSERS.get(opener)
+    if closer and address.endswith(closer) and (closer not in "]}" or address.count(closer) > address.count(opener)):
+        address = address[: -len(closer)].rstrip(_TRAILING)
+    return address
+
+
 def _split_hosts(text: str) -> tuple[list[str], str]:
     """The host names of an action, each read whole, and the text without them."""
     hosts: list[str] = []
@@ -240,7 +251,7 @@ def _split_hosts(text: str) -> tuple[list[str], str]:
     def take(match: re.Match[str]) -> str:
         if not _is_address(match):
             return match.group(0)
-        hosts.append(match.group(0).rstrip(_TRAILING))
+        hosts.append(_address(match))
         return " "
 
     return hosts, _HOST.sub(take, text)
