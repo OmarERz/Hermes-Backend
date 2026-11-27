@@ -374,7 +374,7 @@ def _recommendation_model(r: recs.Recommendation) -> Recommendation:
         ],
         judge_summary=r.judge_summary,
         judge_status=cast(ReviewStatus | None, r.judge_status),
-        ticket_itop_id=r.ticket_itop_id,
+        ticket_itop_id=filter_ticket_id(r.ticket_itop_id),
     )
 
 
@@ -613,7 +613,7 @@ def ticket_updates(
                 action=cast(TicketAction, u.action),
                 label=u.label,
                 assessment_id=str(u.assessment_id) if u.assessment_id else None,
-                ticket_itop_id=u.ticket_itop_id,
+                ticket_itop_id=filter_ticket_id(u.ticket_itop_id),
                 ticket_ref=u.ticket_ref,
                 ticket_url=u.ticket_url,
                 cve=u.cve,

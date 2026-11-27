@@ -167,12 +167,18 @@ Todo error responde con:
   `ticket_itop_id` (el ticket que el usuario tiene a la vista) para que «no sugerir más» y «falso positivo» solo
   afecten a ese ticket; sin él se aplican a todos los tickets de la evaluación. Errores: 404 si la evaluación no
   existe, 403 si el usuario no es analista o admin activo, 422 si el ticket no es de esa evaluación.
-- **Id de un ticket (F18.4):** `ticket_itop_id` es siempre el id **numérico** de iTop, en los filtros
-  (`GET /api/tickets/updates`, `GET /api/recommendations`), en `POST /api/feedback` y en las respuestas que lo
-  traen. En `GET /api/tickets`, `itop_id` es para mostrar (la referencia `R-000123` cuando ya existe, si no el id
-  numérico) y `ticket_itop_id` es el valor que pasas a esos filtros; nunca mandes la referencia a un filtro (422).
-  `ticket_itop_id` llega nulo si el ticket no tiene un id numérico de iTop (los tickets de `make demo`, `DEMO-n`):
-  no ofrezcas filtrar por ese ticket.
+- **Id de un ticket (F18.4, F18.5):** `ticket_itop_id` es siempre el id **numérico** de iTop, en los filtros
+  (`GET /api/tickets/updates`, `GET /api/recommendations`), en `POST /api/feedback` y en **todas** las respuestas
+  que lo traen: `GET /api/tickets`, `GET /api/recommendations` y su detalle, `GET /api/tickets/updates` y
+  `GET /api/error-queue`. Cualquier `ticket_itop_id` que recibas tiene el formato que aceptan esos filtros y el
+  feedback; el feedback además exige que el ticket sea de esa evaluación (422 si no). En `GET /api/tickets`,
+  `itop_id` es para mostrar (la referencia `R-000123` cuando ya existe, si no el id numérico); nunca mandes la
+  referencia a un filtro (422). `ticket_itop_id` llega nulo si no hay ticket o si el ticket no tiene un id numérico
+  de iTop (los tickets de `make demo`, `DEMO-n`): no ofrezcas filtrar por ese ticket ni las acciones de ese ticket
+  («No sugerir más» y «Falso positivo» sobre él). Sin `ticket_itop_id` esas dos acciones se aplican a **todos** los
+  tickets de la evaluación: omítelo solo cuando la persona elija explícitamente actuar sobre toda la evaluación.
+  Para mostrar el ticket usa `itop_id` (lista de tickets), `ticket_ref` (bitácora y cola de errores) o el enlace
+  (`url`, `ticket_url`).
 - **Motivos del juez y su cita (FRO-13):** cada recomendación trae `accepted_reasons` (`code`, `label`, `points`,
   `quote`, `ci_id`), `judge_summary`, `judge_status` y `ticket_itop_id`; `accepted_reasons` llega vacío sin juez, con
   respaldo (`no_judge_review`) o con desacuerdo. El detalle completo (motivos rechazados con su regla, ajuste
@@ -182,6 +188,16 @@ Todo error responde con:
 - **Telemetría e historial:** solo metadatos (agente, modelo, estado, latencia, tokens, costo, nivel de la
   escalera); ninguna ruta devuelve prompts, paquetes ni llamadas crudas. Las series diarias vienen rellenas con
   cero. Costos y porcentajes llegan como texto decimal: no los conviertas a `float` para sumarlos.
+- **Tablero de métricas:** `GET /api/metrics` trae, en orden de catálogo, el último valor guardado de cada métrica
+  (`key` estable, `label` en español, `value` ya formateado y `unit`) y al final `judge_ladder_level`. Una métrica
+  aparece cuando el job nocturno guardó al menos un valor suyo, y se muestra el último guardado. Una proporción no
+  se guarda el día en que su denominador es cero: `wrong_priority_judged` y `original_score_accepted` necesitan
+  feedback sobre evaluaciones que ajustó el juez, y `precision` feedback `relevant` o `false_positive`; con
+  `make demo`, que no crea feedback, no aparecen. No esperes una lista fija de claves.
+- **«Aceptar puntaje original» (RE-9):** es un `POST /api/feedback` con `verdict: wrong_priority` y
+  `proposed_score` igual a la `base` de la recomendación (`wrong_priority` siempre exige además `proposed_level`);
+  la métrica `original_score_accepted` es la proporción de esos votos en el feedback del día sobre evaluaciones que
+  ajustó el juez.
 - **Motivos del juez (FRO-03):** cada motivo es un interruptor booleano `reasons.<code>.enabled` del grupo `judge`
   (solo admin). Activar o desactivar uno guarda una versión nueva de la configuración (como un cambio de fórmula, con
   la misma `expected_version`) y aplica desde la siguiente revisión del juez; **no** recalcula puntajes guardados ni

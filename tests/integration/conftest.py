@@ -9,7 +9,7 @@ import pytest
 from testcontainers.core.config import testcontainers_config
 from testcontainers.postgres import PostgresContainer
 
-from harness.isolation import LABELS, isolated_run
+from harness.isolation import LABELS, LOOPBACK, isolated_run, on_loopback
 
 # Ryuk (testcontainers' cleanup helper) mounts the Docker socket and publishes an unauthenticated control
 # port on every interface. It stays disabled: the fixtures stop their containers on teardown, a SIGTERM unwinds
@@ -32,7 +32,8 @@ def _isolated_run() -> Iterator[None]:
 
 @pytest.fixture(scope="session")
 def postgres_url() -> Iterator[str]:
-    """Superuser URL (plain postgresql://) of a throwaway database, in a container labelled with this run."""
+    """Superuser URL (plain postgresql://) of a throwaway database, in a container labelled with this run and
+    published on the loopback interface only."""
     throwaway = {"username": "postgres", "password": secrets.token_urlsafe(16), "dbname": "hermes"}
-    with PostgresContainer(POSTGRES_IMAGE, driver=None, labels=LABELS, **throwaway) as pg:
-        yield pg.get_connection_url()
+    with on_loopback(PostgresContainer(POSTGRES_IMAGE, driver=None, labels=LABELS, **throwaway)) as pg:
+        yield pg.get_connection_url(host=LOOPBACK)

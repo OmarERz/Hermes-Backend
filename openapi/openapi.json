@@ -1907,7 +1907,7 @@
                 "type": "null"
               }
             ],
-            "description": "Id del ticket en iTop, si el error es de un ticket.",
+            "description": "Id numérico del ticket en iTop, el que acepta el filtro `ticket_itop_id` de `GET /api/tickets/updates` (F18.5); nulo si el error no es de un ticket o si el ticket no tiene un id numérico (los de demostración, `DEMO-n`): para mostrarlo usa `ticket_ref`.",
             "title": "Ticket Itop Id"
           },
           "ticket_ref": {
@@ -4550,7 +4550,7 @@
                 "type": "null"
               }
             ],
-            "description": "Id del ticket de iTop que se muestra (el del custodio del CI mostrado).",
+            "description": "Id numérico del ticket de iTop que se muestra (el del custodio del CI mostrado), con el formato que aceptan el filtro `ticket_itop_id` y `POST /api/feedback` (F18.5; el feedback además exige que el ticket sea de la evaluación). Nulo sin ticket o si el ticket no tiene un id numérico (los de demostración, `DEMO-n`): entonces no hay a qué ticket acotar «No sugerir más» ni «Falso positivo», y sin `ticket_itop_id` se aplican a todos los tickets de la evaluación.",
             "title": "Ticket Itop Id"
           },
           "ticket_url": {
@@ -6106,7 +6106,7 @@
                 "type": "null"
               }
             ],
-            "description": "Id numérico del ticket en iTop; nulo mientras no se crea.",
+            "description": "Id numérico del ticket en iTop, el que acepta el filtro `ticket_itop_id` (F18.5); nulo mientras no se crea o si no es numérico (los de demostración, `DEMO-n`): para mostrarlo usa `ticket_ref`.",
             "title": "Ticket Itop Id"
           },
           "ticket_ref": {

@@ -972,7 +972,9 @@ OVERRIDES: Final[dict[str, str]] = {
     "ErrorQueueItem.error": "Último error, en texto corto (máximo 500 caracteres; nunca un secreto).",
     "ErrorQueueItem.component": "Qué falló: el tipo de evento, la operación de iTop o el componente del LLM.",
     "ErrorQueueItem.cve": "CVE relacionado, si lo hay.",
-    "ErrorQueueItem.ticket_itop_id": "Id del ticket en iTop, si el error es de un ticket.",
+    "ErrorQueueItem.ticket_itop_id": "Id numérico del ticket en iTop, el que acepta el filtro `ticket_itop_id` de "
+    "`GET /api/tickets/updates` (F18.5); nulo si el error no es de un ticket o si el ticket no tiene un id numérico "
+    "(los de demostración, `DEMO-n`): para mostrarlo usa `ticket_ref`.",
     "ErrorQueueItem.ticket_ref": "Referencia legible del ticket en iTop (por ejemplo `R-000123`), si la hay.",
     "ErrorQueueItem.assessment_id": "Evaluación relacionada, si la hay.",
     "ErrorQueueItem.retryable": "Si se puede reintentar desde la API (hoy, solo los eventos de notificación).",
@@ -1091,7 +1093,11 @@ OVERRIDES: Final[dict[str, str]] = {
     "sin juez, con respaldo o con desacuerdo.",
     "Recommendation.judge_summary": "Resumen del juez, si hubo revisión.",
     "Recommendation.judge_status": "Resultado de la revisión del juez; nulo sin revisión.",
-    "Recommendation.ticket_itop_id": "Id del ticket de iTop que se muestra (el del custodio del CI mostrado).",
+    "Recommendation.ticket_itop_id": "Id numérico del ticket de iTop que se muestra (el del custodio del CI "
+    "mostrado), con el formato que aceptan el filtro `ticket_itop_id` y `POST /api/feedback` (F18.5; el feedback "
+    "además exige que el ticket sea de la evaluación). Nulo sin ticket o si el ticket no tiene un id numérico (los de "
+    "demostración, `DEMO-n`): entonces no hay a qué ticket acotar «No sugerir más» ni «Falso positivo», y sin "
+    "`ticket_itop_id` se aplican a todos los tickets de la evaluación.",
     "JudgeReasonItem.seq": "Orden en que el juez propuso el motivo.",
     "JudgeReasonItem.code": "Código del motivo.",
     "JudgeReasonItem.label": "Descripción del motivo, en español.",
@@ -1128,7 +1134,9 @@ OVERRIDES: Final[dict[str, str]] = {
     "TicketUpdateEntry.action": "Qué hizo Hermes en el ticket.",
     "TicketUpdateEntry.label": "La acción, en español.",
     "TicketUpdateEntry.assessment_id": "Evaluación que lo motivó, si la hay.",
-    "TicketUpdateEntry.ticket_itop_id": "Id numérico del ticket en iTop; nulo mientras no se crea.",
+    "TicketUpdateEntry.ticket_itop_id": "Id numérico del ticket en iTop, el que acepta el filtro `ticket_itop_id` "
+    "(F18.5); nulo mientras no se crea o si no es numérico (los de demostración, `DEMO-n`): para mostrarlo usa "
+    "`ticket_ref`.",
     "TicketUpdateEntry.ticket_ref": "Referencia del ticket en iTop (por ejemplo `R-000123`).",
     "TicketUpdateEntry.itop_status": "Estado de la escritura en iTop; nulo si ya se purgó (90 días).",
     "Run.trigger_reason": "Por qué se lanzó la corrida.",

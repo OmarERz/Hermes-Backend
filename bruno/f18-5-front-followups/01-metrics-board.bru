@@ -1,0 +1,40 @@
+meta {
+  name: metrics-board
+  type: http
+  seq: 1
+}
+
+get {
+  url: {{baseUrl}}/api/metrics
+  body: none
+  auth: bearer
+}
+
+auth:bearer {
+  token: {{readerToken}}
+}
+
+assert {
+  res.status: eq 200
+  res.body.metrics: isArray
+}
+
+tests {
+  test("the board ends with the judge ladder and shows the accepted original score as a percentage", function () {
+    const metrics = res.body.metrics;
+    expect(metrics[metrics.length - 1].key).to.equal("judge_ladder_level");
+    const original = metrics.find((m) => m.key === "original_score_accepted");
+    // Only once the nightly job stored it: it needs feedback on judge-adjusted assessments (make demo has none)
+    if (original) {
+      expect(original.label).to.equal("«Aceptar puntaje original» en ajustes del juez");
+      expect(original.unit).to.equal("%");
+    }
+  });
+}
+
+docs {
+  The metrics board (FRO-21) lists the latest stored value of each catalogued metric, RE-9 included (F18.5), and
+  ends with the judge ladder level.
+
+  operationId: get_metrics
+}

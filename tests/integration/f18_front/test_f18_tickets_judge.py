@@ -73,6 +73,34 @@ def test_a_ticket_without_a_numeric_itop_id_lists_no_filter_id(get: Get, databas
             conn.execute(text("UPDATE ticket SET itop_ticket_id = '778' WHERE itop_ticket_id = 'DEMO-7'"))
 
 
+def test_no_response_gives_a_ticket_id_the_filters_refuse(
+    get: Get, admin: TestClient, front: Front, database: tuple[str, Engine]
+) -> None:
+    """F18.5: the rule of the ticket list holds wherever a `ticket_itop_id` comes back. With a demo ticket (DEMO-7)
+    the recommendations, the ticket log and the error queue give null, so the front never sends the id to a filter
+    or to the feedback (422); the ticket is still shown by its link and its reference."""
+    a, updates = front.scenario.assessments, front.updates
+    with database[1].begin() as conn:
+        conn.execute(text("UPDATE ticket SET itop_ticket_id = 'DEMO-7' WHERE itop_ticket_id = '777'"))
+    try:
+        detail = get(f"/api/recommendations/{a['A2']}")
+        assert detail["ticket_itop_id"] is None and detail["ticket_url"] == f"{TICKET}DEMO-7"
+        listed = {r["assessment_id"]: r["ticket_itop_id"] for r in get("/api/recommendations")["items"]}
+        assert listed[str(a["A1"])] is None and listed[str(a["A2"])] is None
+        log = {u["id"]: u for u in get("/api/tickets/updates")["items"]}
+        for update in (updates["create"], updates["raise"]):
+            assert (log[str(update)]["ticket_itop_id"], log[str(update)]["ticket_ref"]) == (None, "R-000777")
+        errors = admin.get("/api/error-queue").json()["items"]
+        assert [(e["ticket_itop_id"], e["ticket_ref"]) for e in errors] == [(None, "R-000777")] * 2
+    finally:
+        with database[1].begin() as conn:
+            conn.execute(text("UPDATE ticket SET itop_ticket_id = '777' WHERE itop_ticket_id = 'DEMO-7'"))
+    # A numeric id still comes back as it is, ready for the filters.
+    assert get(f"/api/recommendations/{a['A2']}")["ticket_itop_id"] == "777"
+    assert {u["ticket_itop_id"] for u in get("/api/tickets/updates", ticket_itop_id="777")["items"]} == {"777"}
+    assert [e["ticket_itop_id"] for e in admin.get("/api/error-queue").json()["items"]] == ["777"] * 2
+
+
 def test_judge_detail_shows_reasons_quotes_and_the_double_review(get: Get, front: Front) -> None:
     detail = get(f"/api/recommendations/{front.scenario.assessments['A2']}/judge")
     assert detail["review_id"] == str(front.reviews["first"])

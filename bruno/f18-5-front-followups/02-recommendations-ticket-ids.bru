@@ -1,0 +1,36 @@
+meta {
+  name: recommendations-ticket-ids
+  type: http
+  seq: 2
+}
+
+get {
+  url: {{baseUrl}}/api/recommendations?limit=50
+  body: none
+  auth: bearer
+}
+
+auth:bearer {
+  token: {{readerToken}}
+}
+
+assert {
+  res.status: eq 200
+  res.body.items: isArray
+}
+
+tests {
+  test("every recommendation gives a ticket id the filters take, or null", function () {
+    for (const recommendation of res.body.items) {
+      const id = recommendation.ticket_itop_id;
+      expect(id === null || /^[0-9]{1,12}$/.test(id)).to.equal(true);
+    }
+  });
+}
+
+docs {
+  `ticket_itop_id` of a recommendation is the numeric iTop id that `GET /api/recommendations?ticket_itop_id=`,
+  the ticket log and `POST /api/feedback` take; null without a ticket or for a demo ticket (DEMO-n) (F18.5).
+
+  operationId: list_recommendations
+}
