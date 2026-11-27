@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from datetime import datetime
 from typing import Annotated, Any, Literal, Self
 
 from pydantic import BaseModel, BeforeValidator, ConfigDict, Field, model_validator
@@ -15,6 +16,11 @@ ReviewStatus = Literal[
     "applied", "suggestion", "partial_review", "judge_disagreement", "no_judge_review", "rejected", "queued"
 ]
 Verdict = Literal["relevant", "false_positive", "wrong_priority", "investigating", "stop_suggestions"]
+
+
+def parse_moment(value: str | None) -> datetime | None:
+    """An RFC 3339 filter value already checked by its model (`DateTimeString`) as a datetime; None if absent."""
+    return datetime.fromisoformat(value.upper()) if value else None
 
 
 def _whole_number(value: Any) -> Any:

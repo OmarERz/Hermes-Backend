@@ -9,6 +9,10 @@ from typing import Any
 import pytest
 from f18data import Front
 from fastapi.testclient import TestClient
+from sqlalchemy import Engine, event
+from sqlalchemy.orm import Session
+
+from core.views import assets
 
 pytestmark = pytest.mark.integration
 Get = Callable[..., Any]
@@ -110,3 +114,22 @@ def test_sources_carry_their_refresh_interval(get: Get) -> None:
     sources = {s["name"]: s for s in get("/api/sources")["items"]}
     own = sources["Noticias de prueba"]  # not a factory source: no text, the news cycle's period
     assert own["description"] is None and own["provider"] is None and own["refresh_interval_minutes"] == 60
+
+
+def test_the_summary_reads_each_table_once(database: tuple[str, Engine], front: Front) -> None:
+    """F18.4: the summary aggregates the CIs and the software from a single read of each table, never the same
+    query twice (live CIs, live installations, scored findings)."""
+    statements: list[str] = []
+
+    def record(_conn: object, _cursor: object, statement: str, *_rest: object) -> None:
+        statements.append(statement)
+
+    engine = database[1]
+    event.listen(engine, "before_cursor_execute", record)
+    try:
+        with Session(engine) as session:
+            found = assets.summary(session)
+    finally:
+        event.remove(engine, "before_cursor_execute", record)
+    assert found.total_assets == 3 and found.software.total == 2
+    assert len(statements) == len(set(statements)) == 3

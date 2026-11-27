@@ -43,7 +43,6 @@ _ASSETS: Final = text(
       LEFT JOIN person pe ON pe.id = a.owner_person_id
       LEFT JOIN team t ON t.id = a.custodian_team_id
      WHERE a.decommissioned_at IS NULL
-       AND (CAST(:ci AS text) IS NULL OR a.itop_ci_id = CAST(:ci AS text))
     """
 )
 _INSTALLS: Final = text(
@@ -85,6 +84,11 @@ def _licence(row: Any) -> Licence | None:
     if row.licence_name is None:
         return None
     return Licence(row.licence_name, row.usage_limit, row.start_date, row.end_date, row.perpetual)
+
+
+def _installs(session: Session, asset_id: uuid.UUID | None = None) -> list[Any]:
+    """Installations not removed, on live CIs (of one CI when `asset_id` is given)."""
+    return list(session.execute(_INSTALLS, {"asset": asset_id}))
 
 
 @dataclass
@@ -156,11 +160,12 @@ class AssetQuery:
         return text_ok and all(wanted is None or wanted == value for wanted, value in checks)
 
 
-def _assets(session: Session, itop_base_url: str | None, ci: str | None = None) -> list[InventoryAsset]:
-    findings = _findings(session)
-    software: Counter[uuid.UUID] = Counter(row.asset_id for row in session.execute(_INSTALLS, {"asset": None}))
+def _assets(
+    session: Session, itop_base_url: str | None, findings: _Findings, installs: Sequence[Any]
+) -> list[InventoryAsset]:
+    software: Counter[uuid.UUID] = Counter(row.asset_id for row in installs)
     out: list[InventoryAsset] = []
-    for row in session.execute(_ASSETS, {"ci": ci}):
+    for row in session.execute(_ASSETS):
         current = findings.by_asset.get(row.id, [])
         risk = max((final for _g, _l, _k, final in current), default=None)
         out.append(
@@ -210,7 +215,8 @@ def list_assets(
     session: Session, query: AssetQuery, itop_base_url: str | None, *, after: NameKey | None, limit: int
 ) -> tuple[list[InventoryAsset], NameKey | None]:
     """Every live CI that matches, alphabetical; the second value keys the next page."""
-    return page_by_name((a for a in _assets(session, itop_base_url) if query.matches(a)), asset_key, after, limit)
+    found = _assets(session, itop_base_url, _findings(session), _installs(session))
+    return page_by_name((a for a in found if query.matches(a)), asset_key, after, limit)
 
 
 # --- software ------------------------------------------------------------------------------------------------
@@ -246,28 +252,27 @@ class SoftwareQuery:
         )
 
 
-def _software(session: Session) -> list[SoftwareItem]:
-    findings = _findings(session)
+def _software(findings: _Findings, installs: Sequence[Any]) -> list[SoftwareItem]:
     rows: dict[uuid.UUID, list[Any]] = defaultdict(list)
-    for row in session.execute(_INSTALLS, {"asset": None}):
+    for row in installs:
         rows[row.product_id].append(row)
     out: list[SoftwareItem] = []
-    for product_id, installs in rows.items():
-        first = installs[0]
+    for product_id, own in rows.items():
+        first = own[0]
         current = findings.by_product.get(first.product, [])
-        known = sorted({r.version for r in installs if version_known(r.version)})
+        known = sorted({r.version for r in own if version_known(r.version)})
         out.append(
             SoftwareItem(
                 id=product_id,
                 name=first.product,
                 versions=known[:MAX_VERSIONS],
                 version_known=bool(known),
-                instances=len(installs),
-                ci_count=len({r.asset_id for r in installs}),
+                instances=len(own),
+                ci_count=len({r.asset_id for r in own}),
                 cpe=_cpe(first),
                 open_vulnerabilities=len({group for group, _l, _a in current}),
                 worst_level=_worst(level for _g, level, _a in current),
-                categories=sorted({r.category for r in installs if r.category is not None}),
+                categories=sorted({r.category for r in own if r.category is not None}),
             )
         )
     return out
@@ -281,7 +286,8 @@ def list_software(
     session: Session, query: SoftwareQuery, *, after: NameKey | None, limit: int
 ) -> tuple[list[SoftwareItem], NameKey | None]:
     """Software installed on live CIs, alphabetical; the second value keys the next page."""
-    return page_by_name((s for s in _software(session) if query.matches(s)), software_key, after, limit)
+    found = _software(_findings(session), _installs(session))
+    return page_by_name((s for s in found if query.matches(s)), software_key, after, limit)
 
 
 @dataclass(frozen=True)
@@ -310,7 +316,7 @@ def asset_software(session: Session, ci_id: str) -> list[InstalledItem] | None:
     findings = _findings(session)
     groups_here = {group: level for group, level, _k, _f in findings.by_asset.get(asset_id, [])}
     out: list[InstalledItem] = []
-    for row in session.execute(_INSTALLS, {"asset": asset_id}):
+    for row in _installs(session, asset_id):
         current = [
             (group, level)
             for group, level, asset in findings.by_product.get(row.product, [])
@@ -364,9 +370,10 @@ def _counts(values: Sequence[str]) -> dict[str, int]:
 
 
 def summary(session: Session) -> Summary:
-    """Totals of the live inventory and the health of its software (D-088)."""
-    assets = _assets(session, None)
-    software = _software(session)
+    """Totals of the live inventory and the health of its software (D-088). Each table is read once."""
+    findings, installs = _findings(session), _installs(session)
+    assets = _assets(session, None, findings, installs)
+    software = _software(findings, installs)
     exposure = ["exposed" if a.exposed else "internal" if a.exposed is False else "unknown" for a in assets]
     return Summary(
         total_assets=len(assets),

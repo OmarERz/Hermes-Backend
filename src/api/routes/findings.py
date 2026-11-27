@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import logging
-from datetime import datetime
 from typing import Annotated, Final, Literal, cast
 
 from fastapi import APIRouter, Depends, Query, Request
@@ -56,6 +55,7 @@ from api.routes.models import (
     VulnerabilityFilters,
     VulnerabilityGroup,
     VulnerabilityList,
+    parse_moment,
 )
 from core.feedback.service import FeedbackRejectedError, SqlFeedbackService
 from core.views import comparison, history, judge_detail, ticket_log
@@ -94,8 +94,8 @@ def _filters(f: VulnerabilityFilters) -> views.Filters:
         exposed=f.exposed,
         in_kev=f.in_kev,
         status=f.status,
-        date_from=datetime.fromisoformat(f.date_from.upper()) if f.date_from else None,
-        date_to=datetime.fromisoformat(f.date_to.upper()) if f.date_to else None,
+        date_from=parse_moment(f.date_from),
+        date_to=parse_moment(f.date_to),
     )
 
 

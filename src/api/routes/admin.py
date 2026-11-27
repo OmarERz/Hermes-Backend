@@ -29,6 +29,7 @@ from api.routes.models import (
     SetupStep,
     SetupStepUpdate,
     UserAccount,
+    parse_moment,
 )
 from core.connections.checker import ConnectionChecker, ConnectionState
 from core.connections.messages import connection_text, output_language
@@ -128,8 +129,8 @@ def audit(
         audit_trail.AuditFilters(
             actor=filters.actor,
             action=filters.action,
-            date_from=datetime.fromisoformat(filters.date_from.upper()) if filters.date_from else None,
-            date_to=datetime.fromisoformat(filters.date_to.upper()) if filters.date_to else None,
+            date_from=parse_moment(filters.date_from),
+            date_to=parse_moment(filters.date_to),
         ),
         after=None if key is None else (cast(datetime, key[0]), key[1]),
         limit=params.limit,
