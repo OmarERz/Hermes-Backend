@@ -301,7 +301,7 @@ software se identifica por **nombre y versión** (`@Software:PostgreSQL 15.4`), 
 producto son dos entradas del catálogo; `key` y `ref` cambian la identidad o el nombre de referencia de un objeto.
 Sirve cualquier campo de iTop, p. ej. `type` (categoría del software), `status` y `softwarelicence_id` (estado y
 licencia de una instalación, con la licencia como objeto `SoftwareLicence`), `description`, `cpu` y `ram`;
-`inventories/lyft-challenge.yaml` los usa todos. Pon entre comillas las fechas y los `yes`/`no`
+`inventories/m6-challenge.yaml` los usa todos. Pon entre comillas las fechas y los `yes`/`no`
 (`"2024-01-15"`, `"yes"`): sin comillas YAML los convierte en fecha o booleano y el cargador rechaza el archivo.
 
 - `make itop-load INVENTORY=<archivo>` es un simulacro: lista qué crearía (`+ create`), qué ya existe (`= exists`) y

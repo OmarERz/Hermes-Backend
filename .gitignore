@@ -220,7 +220,7 @@ __marimo__/
 # Streamlit
 .streamlit/secrets.toml
 
-# --- Reto Lyft ---
+# --- Reto M6 ---
 .env
 .env.*
 !.env.example
