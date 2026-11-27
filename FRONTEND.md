@@ -182,6 +182,15 @@ Todo error responde con:
 - **Telemetría e historial:** solo metadatos (agente, modelo, estado, latencia, tokens, costo, nivel de la
   escalera); ninguna ruta devuelve prompts, paquetes ni llamadas crudas. Las series diarias vienen rellenas con
   cero. Costos y porcentajes llegan como texto decimal: no los conviertas a `float` para sumarlos.
+- **Tablero de métricas:** `GET /api/metrics` trae, en orden de catálogo, el último valor guardado de cada métrica
+  (`key` estable, `label` en español, `value` ya formateado y `unit`) y al final `judge_ladder_level`. Una métrica
+  aparece solo cuando el job nocturno ya guardó un valor: las de feedback (`precision`, `feedback_rate`,
+  `wrong_priority_judged`, `original_score_accepted`…) faltan mientras no haya feedback del día, como con
+  `make demo`, que no crea feedback. No esperes una lista fija de claves.
+- **«Aceptar puntaje original» (RE-9):** es un `POST /api/feedback` con `verdict: wrong_priority` y
+  `proposed_score` igual a la `base` de la recomendación (`wrong_priority` siempre exige además `proposed_level`);
+  la métrica `original_score_accepted` es la proporción de esos votos en el feedback del día sobre evaluaciones que
+  ajustó el juez.
 - **Motivos del juez (FRO-03):** cada motivo es un interruptor booleano `reasons.<code>.enabled` del grupo `judge`
   (solo admin). Activar o desactivar uno guarda una versión nueva de la configuración (como un cambio de fórmula, con
   la misma `expected_version`) y aplica desde la siguiente revisión del juez; **no** recalcula puntajes guardados ni

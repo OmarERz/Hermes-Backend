@@ -46,3 +46,28 @@ def test_the_route_returns_the_stored_metrics(factory: sessionmaker[Session]) ->
         "unit": None,
     }
     assert body["generated_at"].endswith("Z")
+
+
+def test_the_route_returns_the_accepted_original_score(factory: sessionmaker[Session]) -> None:
+    """RE-9 (F18.2): «Aceptar puntaje original» is on the board, in the judge section next to «Prioridad incorrecta»."""
+    with factory() as session, session.begin():
+        for code, value in (("wrong_priority_judged", "0.25"), ("original_score_accepted", "0.5")):
+            session.add(
+                m.DailyMetric(metric_date=date(2026, 11, 21), metric_code=code, dimension="", value=Decimal(value))
+            )
+    app = create_app(SETTINGS)
+    app.state.session_factory = factory
+    app.dependency_overrides[get_current_user] = lambda: CurrentUser(
+        uid="u", email="reader@example.test", display_name=None, role=Role.READER
+    )
+
+    with TestClient(app) as client:
+        metrics = client.get("/api/metrics").json()["metrics"]
+
+    assert [x["key"] for x in metrics] == ["wrong_priority_judged", "original_score_accepted", "judge_ladder_level"]
+    assert metrics[1] == {
+        "key": "original_score_accepted",
+        "label": "«Aceptar puntaje original» en ajustes del juez",
+        "value": "50.0",
+        "unit": "%",
+    }
