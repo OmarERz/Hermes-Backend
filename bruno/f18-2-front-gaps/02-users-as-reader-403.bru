@@ -1,0 +1,26 @@
+meta {
+  name: users-as-reader-403
+  type: http
+  seq: 2
+}
+
+get {
+  url: {{baseUrl}}/api/admin/users
+  body: none
+  auth: bearer
+}
+
+auth:bearer {
+  token: {{readerToken}}
+}
+
+assert {
+  res.status: eq 403
+  res.body.error.code: eq forbidden
+}
+
+docs {
+  Only an admin lists the users.
+
+  operationId: list_users
+}

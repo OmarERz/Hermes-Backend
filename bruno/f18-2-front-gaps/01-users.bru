@@ -1,0 +1,39 @@
+meta {
+  name: users
+  type: http
+  seq: 1
+}
+
+get {
+  url: {{baseUrl}}/api/admin/users?limit=50
+  body: none
+  auth: bearer
+}
+
+auth:bearer {
+  token: {{token}}
+}
+
+assert {
+  res.status: eq 200
+  res.body.items: isArray
+}
+
+tests {
+  test("every account says its stored, claimed and effective role", function () {
+    expect(res.body.items.length).to.be.at.least(1);  // the admin running the collection
+    for (const user of res.body.items) {
+      expect(user).to.have.property("uid");
+      expect(user).to.have.property("role");
+      expect(user).to.have.property("claim_role");
+      expect(user).to.have.property("effective_role");
+      expect(user).to.have.property("signed_in");
+    }
+  });
+}
+
+docs {
+  Every account, signed in or not: the app_user copy joined with the Firebase directory (D-030, F18.2).
+
+  operationId: list_users
+}

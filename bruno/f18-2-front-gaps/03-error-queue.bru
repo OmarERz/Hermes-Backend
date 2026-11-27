@@ -1,0 +1,36 @@
+meta {
+  name: error-queue
+  type: http
+  seq: 3
+}
+
+get {
+  url: {{baseUrl}}/api/error-queue?limit=20
+  body: none
+  auth: bearer
+}
+
+auth:bearer {
+  token: {{token}}
+}
+
+assert {
+  res.status: eq 200
+  res.body.items: isArray
+}
+
+tests {
+  test("each item names its origin and whether the API retries it", function () {
+    for (const item of res.body.items) {
+      expect(["notification", "itop", "llm_validation"]).to.include(item.kind);
+      expect(item.retryable).to.equal(item.kind === "notification");
+      expect(item).to.not.have.property("payload");
+    }
+  });
+}
+
+docs {
+  What failed and waits for a person (FRO-18): notification events, iTop writes and LLM items, newest first.
+
+  operationId: list_error_queue
+}

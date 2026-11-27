@@ -13,6 +13,7 @@ from api.auth.admin_routes import build_admin_router
 from api.auth.dependencies import CurrentUser
 from api.auth.directory import SqlUserDirectory
 from api.auth.role_admin import FirebaseRoleManager, RoleManager
+from api.auth.user_list import FirebaseUserLister, UserLister
 from api.errors import ERROR_RESPONSES, ErrorResponse, UnhandledErrorMiddleware, install_error_handlers
 from api.itop_webhook import build_itop_webhook_router
 from api.openapi_docs import apply as apply_documentation
@@ -97,6 +98,12 @@ def create_app(
         role_manager = role_manager or FirebaseRoleManager(firebase)
     app.state.token_verifier = token_verifier
     app.state.role_manager = role_manager
+    # The admin user list reads the Firebase directory through the verifier's SDK app; with a fake verifier the route
+    # answers 503 until a test sets its own lister on `app.state.user_lister` (F18.2).
+    user_lister: UserLister | None = (
+        FirebaseUserLister(token_verifier) if isinstance(token_verifier, FirebaseTokenVerifier) else None
+    )
+    app.state.user_lister = user_lister
     # The engine connects lazily: building the app never opens a database connection.
     session_factory = make_session_factory(settings)
     app.state.session_factory = session_factory

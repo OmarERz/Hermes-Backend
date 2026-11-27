@@ -196,7 +196,11 @@ OPERATIONS: Final[dict[tuple[str, str], Op]] = {
         "configuration",
         "Simular la fórmula",
         "Vista previa sin guardar nada: cuántos hallazgos abiertos cambiarían de nivel con la "
-        "fórmula propuesta. Solo `admin`.",
+        "fórmula propuesta. También simula `dead_zone`, `sensitivity_profile` y los motivos "
+        "`reasons.<code>.enabled` (la zona muerta se resuelve como al guardar: la enviada o la actual), estimando el "
+        "ajuste del juez desde los motivos "
+        "que ya aceptó y combinando la doble revisión ciega con su regla, sin llamar al juez. Otros parámetros "
+        "conocidos vuelven en `not_simulable`. Solo `admin`.",
     ),
     ("GET", "/api/profile"): Op(
         "get_profile", "configuration", "Perfil de la empresa", "Sector, subsectores, países e idioma de salida."
@@ -348,6 +352,25 @@ OPERATIONS: Final[dict[tuple[str, str], Op]] = {
         "operations",
         "Bitácora de auditoría",
         "Cambios hechos por personas y por el sistema, con filtros opcionales. Solo `admin`.",
+    ),
+    ("GET", "/api/admin/users"): Op(
+        "list_users",
+        "admin",
+        "Listar usuarios",
+        "Todas las cuentas, hayan iniciado sesión o no: la copia de `app_user` unida al directorio de Firebase. "
+        "Cada una trae su rol guardado (`role`: mándalo como `expected_role` al cambiarlo), el rol del claim de "
+        "Firebase y el rol efectivo que tendría ahora una petición suya (el menor de los dos; nulo si está "
+        "desactivada, deshabilitada en Firebase o sin claim). Ordenadas por correo; pagina por cursor. 503 "
+        "`auth_unavailable` si Firebase no responde. Solo `admin`.",
+    ),
+    ("GET", "/api/error-queue"): Op(
+        "list_error_queue",
+        "operations",
+        "Cola de error",
+        "Lo que falló y espera a una persona (FRO-18), de lo más reciente a lo más antiguo: eventos de "
+        "notificación y escrituras de iTop que agotaron sus reintentos, y elementos que un analista o el juez no "
+        "pudieron validar. Filtro por origen (`kind`). Solo los eventos de notificación se reintentan desde la API "
+        "(`retryable`). Pagina por cursor. Solo `admin`.",
     ),
     ("POST", "/api/itop/webhook"): Op(
         "receive_itop_webhook",
@@ -576,6 +599,16 @@ ENUMS: Final[dict[tuple[str, ...], dict[str, str]]] = {
         "abusech": "Indicadores de abuse.ch",
         "ransomwarelive": "Víctimas de ransomware.live",
         "firebase": "Inicio de sesión",
+    },
+    ("notification", "itop", "llm_validation"): {
+        "notification": "Evento de notificación que agotó sus reintentos (se reintenta desde la API)",
+        "itop": "Escritura en iTop del outbox que agotó sus reintentos",
+        "llm_validation": "Elemento que un analista o el juez no pudieron validar",
+    },
+    ("failed", "pending", "gave_up"): {
+        "failed": "Agotó sus reintentos",
+        "pending": "Espera su próximo reintento",
+        "gave_up": "Se dejó de reintentar",
     },
     ("reader", "analyst", "admin"): {
         "reader": "Solo lectura",
@@ -921,6 +954,28 @@ OVERRIDES: Final[dict[str, str]] = {
     "Alert.summary": "Resumen de la noticia, en español.",
     "AssetDetail.risk": "Riesgo del activo: el mayor final de sus hallazgos.",
     "AuditEntry.id": "Id del registro.",
+    "ErrorQueueItem.id": "Id del elemento en su tabla de origen (evento, escritura de iTop o cola de error).",
+    "ErrorQueueItem.kind": "Origen del error.",
+    "ErrorQueueItem.status": "Estado del elemento.",
+    "ErrorQueueItem.attempts": "Intentos hechos.",
+    "ErrorQueueItem.next_attempt_at": "Cuándo toca el próximo intento (UTC), si queda alguno.",
+    "ErrorQueueItem.error": "Último error, en texto corto (máximo 500 caracteres; nunca un secreto).",
+    "ErrorQueueItem.component": "Qué falló: el tipo de evento, la operación de iTop o el componente del LLM.",
+    "ErrorQueueItem.cve": "CVE relacionado, si lo hay.",
+    "ErrorQueueItem.ticket_itop_id": "Id del ticket en iTop, si el error es de un ticket.",
+    "ErrorQueueItem.ticket_ref": "Referencia legible del ticket en iTop (por ejemplo `R-000123`), si la hay.",
+    "ErrorQueueItem.assessment_id": "Evaluación relacionada, si la hay.",
+    "ErrorQueueItem.retryable": "Si se puede reintentar desde la API (hoy, solo los eventos de notificación).",
+    "UserAccount.role": "Rol guardado en Hermes; mándalo como `expected_role` al cambiarlo. Nulo si nunca inició "
+    "sesión.",
+    "UserAccount.claim_role": "Rol del claim de Firebase; nulo si no tiene uno válido.",
+    "UserAccount.effective_role": "Rol que tendría ahora una petición suya: el menor entre el claim y el guardado; "
+    "nulo si se rechazaría.",
+    "UserAccount.active": "Si la cuenta está activa (en Hermes y en Firebase).",
+    "UserAccount.signed_in": "Si inició sesión alguna vez (tiene copia en Hermes).",
+    "UserAccount.last_login_at": "Último inicio de sesión (UTC), si lo hubo.",
+    "SimulationResult.not_simulable": "Parámetros conocidos del cambio que la simulación no puede estimar (por "
+    "ejemplo el modelo del juez); se ignoran en el resultado.",
     "AuditEntry.target": "Qué se cambió, por ejemplo `source:cisa_kev`.",
     "CalibrationProposal.id": "Id de la propuesta.",
     "CalibrationProposal.kind": "Qué clase de ajuste propone.",

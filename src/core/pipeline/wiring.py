@@ -115,14 +115,19 @@ def engine_recalculate(tickets: TicketApplier | None) -> Callable[[Session], obj
 
 def engine_recalculate_queued(tickets: TicketApplier | None) -> Callable[[Session, uuid.UUID], object]:
     """A queued formula-change request (FRO-08): the same recalculation, on the request's own run row, with the
-    formula version the save created. A request whose version was replaced by a later save is superseded: that
-    save queued its own pass, so this one has nothing left to do."""
+    formula version the save created. A request whose version was replaced by a later save with another engine
+    formula is superseded: that save queued its own pass, so this one has nothing left to do. A later save that
+    kept the engine formula (a judge-reason switch, FRO-03) queued none, so the request runs with the version now
+    active, which scores the same; checked here, after the claim, so a switch saved while the request waited or
+    was being claimed never cancels it."""
 
     def run(session: Session, run_id: uuid.UUID) -> object:
         request = session.get_one(m.Run, run_id)
         try:
             version_id = request.formula_version_id
-            active_id, _ = load_active_formula(session)
+            active_id, active = load_active_formula(session)
+            if version_id is not None and version_id != active_id and load_formula(session, version_id) == active:
+                request.formula_version_id = version_id = active_id  # the run carries the version it applies (D-061)
             if version_id is None or version_id != active_id:
                 _finish(session, request, "succeeded", 100)
                 return None

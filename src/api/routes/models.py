@@ -98,6 +98,7 @@ class SimulationResult(_Model):
     level_matrix: dict[str, dict[str, int]] = Field(description="before level -> after level -> findings")
     last_30_days_effect: str
     top_movers: list[str]
+    not_simulable: list[str] = Field(default_factory=list)
 
 
 # --- profile and peers ---------------------------------------------------------------------------------------
@@ -557,6 +558,49 @@ class AuditEntry(_Model):
     actor: str
     action: str
     target: str
+
+
+# --- users and error queue (D-088, F18.2) ------------------------------------------------------------------------
+RoleName = Literal["reader", "analyst", "admin"]
+ErrorKind = Literal["notification", "itop", "llm_validation"]
+ErrorStatus = Literal["failed", "pending", "gave_up"]
+
+
+class UserAccount(_Model):
+    uid: str
+    email: str | None
+    display_name: str | None
+    role: RoleName | None
+    claim_role: RoleName | None
+    effective_role: RoleName | None
+    active: bool
+    signed_in: bool
+    last_login_at: str | None
+
+
+class ErrorQueueFilters(_Model):
+    """Optional filter of the error queue (FRO-18)."""
+
+    # The same query string also carries `cursor` and `limit`, read by other parameters.
+    model_config = ConfigDict(extra="ignore", strict=False)
+
+    kind: ErrorKind | None = Field(default=None, description="Origen del error.")
+
+
+class ErrorQueueItem(_Model):
+    id: str
+    kind: ErrorKind
+    created_at: str
+    status: ErrorStatus
+    attempts: int
+    next_attempt_at: str | None
+    error: str | None
+    component: str
+    cve: str | None
+    ticket_itop_id: str | None
+    ticket_ref: str | None
+    assessment_id: str | None
+    retryable: bool
 
 
 class VulnerabilityFilters(_Model):

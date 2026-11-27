@@ -17,10 +17,13 @@ from sqlalchemy.orm import Session, sessionmaker
 from api.app import create_app
 from api.auth import CurrentUser, Role, get_current_user
 from core.config import Settings
+from core.configuration import service
 from core.db import models as m
 from core.db.seeds import NOW, seed
 from core.ingestion.catalog import sync_default_sources
 from core.ingestion.ssrf import system_resolver
+from core.judge.catalog import load_reason_catalog
+from core.pipeline.wiring import engine_recalculate_queued
 
 pytestmark = pytest.mark.integration
 APPS: dict[int, Any] = {}
@@ -265,10 +268,166 @@ def test_restore_errors(client: TestClient) -> None:
 def test_simulate_validates_against_the_active_formula(client: TestClient) -> None:
     as_role(client, Role.ADMIN)
     assert client.post("/api/formula/simulate", json={"changes": {"weights.S": "0.9"}}).status_code == 422
-    assert client.post("/api/formula/simulate", json={"changes": {"dead_zone": "5"}}).status_code == 422
     ok = client.post("/api/formula/simulate", json={"changes": {"formula.kev_exposed_floor": "95"}})
-    assert ok.status_code == 200
+    assert ok.status_code == 200 and ok.json()["not_simulable"] == []
     assert client.get("/api/config").json()["version"] == 1  # a preview never writes
+
+
+def simulate(client: TestClient, **changes: str) -> Any:
+    return client.post("/api/formula/simulate", json={"changes": changes})
+
+
+def test_simulate_estimates_the_judge_settings_and_lists_the_rest(client: TestClient) -> None:
+    """FRO-04: the profile, the dead zone and the reason switches are simulated; other known parameters come back as
+    not simulable; an unknown key or an invalid value is still a 422."""
+    as_role(client, Role.ADMIN)
+    judge = {"sensitivity_profile": "broad", "dead_zone": "2", "reasons.mass_exploitation.enabled": "false"}
+    ok = simulate(
+        client, **judge, judge_model="otro", **{"weights.S": client.get("/api/config").json()["values"]["weights.S"]}
+    )
+    assert ok.status_code == 200, ok.text
+    assert ok.json()["not_simulable"] == ["judge_model"]
+    for bad, issue in (
+        ({"nope": "1"}, "unknown_parameter"),
+        ({"dead_zone": "11"}, "out_of_range"),
+        ({"sensitivity_profile": "wild"}, "not_an_option"),
+        ({"reasons.mass_exploitation.enabled": "maybe"}, "invalid_boolean"),
+        ({"reasons.nope.enabled": "false"}, "unknown_parameter"),
+        ({"reasons.mass_exploitation.points": "5"}, "unknown_parameter"),
+    ):
+        response = simulate(client, **bad)
+        assert response.status_code == 422, bad
+        assert issue in {d["issue"] for d in response.json()["error"]["details"]}
+    assert client.get("/api/config").json()["version"] == 1
+
+
+def test_a_simulated_profile_resolves_the_dead_zone_as_a_save_would(client: TestClient, engine: Engine) -> None:
+    """FRO-04: the preview shows what saving the same changes stores. A profile alone keeps the dead zone (saving it
+    does too); the profile's own dead zone (docs/07 §12) is previewed and saved when it is sent."""
+    add_user(engine, "u1", "admin")
+    as_role(client, Role.ADMIN)
+    assert client.get("/api/config").json()["values"]["dead_zone"] == "4"
+    with Session(engine) as session:
+        assert service.simulation_input(session, {"sensitivity_profile": "broad"}).formula.dead_zone == 4
+        assert (
+            service.simulation_input(session, {"sensitivity_profile": "broad", "dead_zone": "2"}).formula.dead_zone == 2
+        )
+        given = service.simulation_input(session, {"sensitivity_profile": "broad", "dead_zone": "5"})
+        assert given.formula.dead_zone == 5 and given.estimate is not None
+        only_reasons = service.simulation_input(session, {REASON: "false"})
+        assert only_reasons.formula.dead_zone == 4 and only_reasons.estimate is not None
+        assert service.simulation_input(session, {"dead_zone": "3"}).estimate is None  # stored proposals kept
+    saved = put(client, 1, sensitivity_profile="broad").json()["values"]
+    assert saved["sensitivity_profile"] == "broad" and saved["dead_zone"] == "4"  # as previewed
+
+
+# --- judge reason switches (FRO-03) ----------------------------------------------------------------------------
+REASON = "reasons.mass_exploitation.enabled"
+
+
+def test_schema_and_values_list_one_switch_per_judge_reason(client: TestClient) -> None:
+    as_role(client, Role.READER)
+    schema = {p["key"]: p for p in client.get("/api/config/schema").json()}
+    switch = schema[REASON]
+    assert (switch["group"], switch["type"], switch["min_role"], switch["default"]) == (
+        "judge",
+        "boolean",
+        "admin",
+        "true",
+    )
+    assert switch["description"] == "Motivo del juez activo: Explotación masiva con evidencia de los últimos 30 días"
+    assert len([k for k in schema if k.startswith("reasons.")]) == 9
+    assert client.get("/api/config").json()["values"][REASON] == "true"
+
+
+def test_switching_a_reason_off_saves_a_formula_version_without_rescoring(client: TestClient, engine: Engine) -> None:
+    add_user(engine, "u1", "admin")
+    as_role(client, Role.ADMIN)
+    response = put(client, 1, **{REASON: "false"})
+    assert response.status_code == 200, response.text
+    assert response.json()["version"] == 2 and response.json()["values"][REASON] == "false"
+    assert rows(
+        engine,
+        "SELECT r.enabled FROM formula_reason_range r JOIN formula_version v ON v.id = r.formula_version_id "
+        "WHERE v.status = 'active' AND r.reason_code = 'mass_exploitation'",
+    ) == [(False,)]
+    assert rows(engine, "SELECT count(*) FROM formula_version") == [(2,)]
+    assert rows(engine, "SELECT count(*) FROM run WHERE kind = 'recalculation'") == [(0,)]  # scores do not use it
+    with Session(engine) as session:
+        spec = load_reason_catalog(session).get("mass_exploitation")
+        assert spec is not None and spec.enabled is False  # the next judge review sees it at once
+    assert put(client, 2, **{REASON: "false"}).json()["version"] == 2  # no change, no version
+    restored = client.post("/api/config/versions/1/restore", json={"expected_version": 2})
+    assert restored.status_code == 200 and restored.json()["values"][REASON] == "true"
+    assert restored.json()["version"] == 3
+    assert rows(engine, "SELECT count(*) FROM run WHERE kind = 'recalculation'") == [(0,)]
+
+
+@pytest.mark.parametrize("claimed", [False, True])
+def test_a_reason_switch_never_cancels_a_formula_recalculation(
+    client: TestClient, engine: Engine, claimed: bool
+) -> None:
+    """FRO-08: a weights save queues its pass; a reason switch saved before the worker checks the request (still
+    queued, or already claimed) supersedes that version without queueing its own. The worker sees the same engine
+    formula, runs the pass with the active version and records it on the run."""
+    add_user(engine, "u1", "admin")
+    as_role(client, Role.ADMIN)
+    values = client.get("/api/config").json()["values"]
+    shifted = {
+        "weights.S": str(Decimal(values["weights.S"]) - Decimal("0.05")),
+        "weights.D": str(Decimal(values["weights.D"]) + Decimal("0.05")),
+    }
+    assert put(client, 1, **shifted).json()["version"] == 2
+    ((request,),) = rows(engine, "SELECT id FROM run WHERE kind = 'recalculation' AND status = 'queued'")
+    if claimed:  # the worker took it but has not checked the formula yet
+        run(engine, "UPDATE run SET status = 'running' WHERE id = :i", {"i": request})
+    assert put(client, 2, **{REASON: "false"}).json()["version"] == 3
+    assert rows(engine, "SELECT count(*) FROM run WHERE kind = 'recalculation'") == [(1,)]  # the switch queued none
+    with Session(engine) as session:
+        report = engine_recalculate_queued(None)(session, request)
+    assert report is not None  # the pass ran instead of finishing as superseded
+    assert rows(
+        engine,
+        "SELECT r.status, r.formula_version_id = v.id FROM run r JOIN formula_version v ON v.status = 'active' "
+        "WHERE r.kind = 'recalculation'",
+    ) == [("succeeded", True)]
+
+
+def test_a_request_superseded_by_another_formula_still_finishes_without_a_pass(
+    client: TestClient, engine: Engine
+) -> None:
+    """A later save that changes the engine formula queued its own pass: the older request has nothing left to do."""
+    add_user(engine, "u1", "admin")
+    as_role(client, Role.ADMIN)
+    assert put(client, 1, **{"formula.kev_exposed_floor": "95"}).json()["version"] == 2
+    ((older,),) = rows(engine, "SELECT id FROM run WHERE kind = 'recalculation' AND status = 'queued'")
+    assert put(client, 2, **{"formula.kev_exposed_floor": "96"}).json()["version"] == 3
+    with Session(engine) as session:
+        assert engine_recalculate_queued(None)(session, older) is None
+    with engine.connect() as conn:
+        assert conn.execute(text("SELECT status FROM run WHERE id = :i"), {"i": older}).scalar_one() == "succeeded"
+
+
+def test_a_reason_switch_with_a_formula_edit_saves_one_version(client: TestClient, engine: Engine) -> None:
+    add_user(engine, "u1", "admin")
+    as_role(client, Role.ADMIN)
+    response = put(client, 1, **{REASON: "false", "formula.kev_exposed_floor": "95"})
+    assert response.status_code == 200 and response.json()["version"] == 2
+    assert rows(engine, "SELECT count(*) FROM formula_version") == [(2,)]
+    assert rows(engine, "SELECT count(*) FROM run WHERE kind = 'recalculation'") == [(1,)]
+
+
+def test_reason_switches_need_an_admin_and_a_boolean(client: TestClient) -> None:
+    as_role(client, Role.ANALYST)
+    assert put(client, 1, **{REASON: "false"}).status_code == 403
+    as_role(client, Role.ADMIN)
+    for key, value, issue in (
+        (REASON, "no", "invalid_boolean"),
+        ("reasons.nope.enabled", "false", "unknown_parameter"),
+        ("reasons.mass_exploitation", "false", "unknown_parameter"),
+    ):
+        response = put(client, 1, **{key: value})
+        assert response.status_code == 422 and issue in {d["issue"] for d in response.json()["error"]["details"]}
 
 
 # --- profile ---------------------------------------------------------------------------------------------------

@@ -1,13 +1,17 @@
-"""Connections, first-run setup wizard and audit trail (docs/13 §9, API-06). Admin only (ROUTE_ROLES)."""
+"""Connections, first-run setup wizard, audit trail (docs/13 §9, API-06), user list and error queue (D-088, F18.2).
+Admin only (ROUTE_ROLES)."""
 
 from __future__ import annotations
 
 from datetime import datetime
-from typing import Annotated, cast
+from typing import Annotated, Any, Final, cast
 
 from fastapi import APIRouter, Depends, Path, Query, Request
 
-from api.errors import ApiError
+from api.auth import Role, user_list
+from api.auth.identity import AuthUnavailableError
+from api.auth.user_list import UserLister
+from api.errors import ApiError, ErrorResponse
 from api.pagination import PAGINATED_RESPONSES, Page, PageQuery, Signer, decode_key, encode_key
 from api.routes._auth import guard
 from api.routes._config_support import CurrentUserDep, app_user_id, now
@@ -17,14 +21,21 @@ from api.routes.models import (
     AuditFilters,
     ConnectionStatus,
     ConnectionTestRequest,
+    ErrorKind,
+    ErrorQueueFilters,
+    ErrorQueueItem,
+    ErrorStatus,
+    RoleName,
     SetupStep,
     SetupStepUpdate,
+    UserAccount,
 )
 from core.connections.checker import ConnectionChecker, ConnectionState
 from core.connections.messages import connection_text, output_language
 from core.connections.probes import NAMES
 from core.operations import audit as audit_trail
 from core.operations import setup
+from core.views import error_queue
 from core.views.common import iso
 
 router = APIRouter(tags=["operations"])
@@ -129,4 +140,89 @@ def audit(
             for r in rows
         ],
         next_cursor=encode_key(signer, "audit", next_key),
+    )
+
+
+# --- users and error queue (D-088, F18.2) ------------------------------------------------------------------------
+USERS_UNAVAILABLE: Final[dict[int | str, dict[str, Any]]] = {
+    **PAGINATED_RESPONSES,
+    503: {"model": ErrorResponse, "description": "Firebase no respondió (code: auth_unavailable)"},
+}
+
+
+def get_user_lister(request: Request) -> UserLister | None:
+    lister: UserLister | None = request.app.state.user_lister
+    return lister
+
+
+Lister = Annotated[UserLister | None, Depends(get_user_lister)]
+
+
+def _role(role: Role | None) -> RoleName | None:
+    return None if role is None else role.value
+
+
+@router.get("/api/admin/users", dependencies=[guard("GET", "/api/admin/users")], responses=USERS_UNAVAILABLE)
+def list_users(params: PageQuery, signer: Signer, session: SessionDep, lister: Lister) -> Page[UserAccount]:
+    """Every account, signed in or not, with its stored role (sent back as `expected_role`), its Firebase claim and
+    the effective role a request would get now (D-030), ordered by e-mail. The cursor is the position in that order:
+    an account added or removed between two pages shifts the next one by that much."""
+    key = decode_key(params, "users", ("int",))
+    if lister is None:
+        raise ApiError(503, "auth_unavailable", "No se pudo leer el directorio de usuarios. Intenta de nuevo.")
+    try:
+        directory = lister.list_users()
+    except AuthUnavailableError as exc:
+        raise ApiError(503, "auth_unavailable", "No se pudo leer el directorio de usuarios. Intenta de nuevo.") from exc
+    views = user_list.merge_users(user_list.stored_users(session), directory)
+    page, next_offset = user_list.page_at(views, 0 if key is None else int(key[0]), params.limit)
+    return Page[UserAccount](
+        items=[
+            UserAccount(
+                uid=v.uid,
+                email=v.email,
+                display_name=v.display_name,
+                role=_role(v.role),
+                claim_role=_role(v.claim_role),
+                effective_role=_role(v.effective_role),
+                active=v.active,
+                signed_in=v.signed_in,
+                last_login_at=_iso(v.last_login_at),
+            )
+            for v in page
+        ],
+        next_cursor=None if next_offset is None else encode_key(signer, "users", (next_offset,)),
+    )
+
+
+@router.get("/api/error-queue", dependencies=[guard("GET", "/api/error-queue")], responses=PAGINATED_RESPONSES)
+def list_error_queue(
+    params: PageQuery, signer: Signer, session: SessionDep, filters: Annotated[ErrorQueueFilters, Query()]
+) -> Page[ErrorQueueItem]:
+    """What failed and waits for a person (FRO-18), newest first: notification events and iTop writes that exhausted
+    their retries, and the items an analyst or the judge could not validate."""
+    key = decode_key(params, "error_queue", ("time", "uuid"))
+    found, next_key = error_queue.list_errors(
+        session, filters.kind, after=None if key is None else (key[0], key[1]), limit=params.limit
+    )
+    return Page[ErrorQueueItem](
+        items=[
+            ErrorQueueItem(
+                id=str(e.id),
+                kind=cast(ErrorKind, e.kind),
+                created_at=iso(e.created_at),
+                status=cast(ErrorStatus, e.status),
+                attempts=e.attempts,
+                next_attempt_at=_iso(e.next_attempt_at),
+                error=e.error,
+                component=e.component,
+                cve=e.cve,
+                ticket_itop_id=e.ticket_itop_id,
+                ticket_ref=e.ticket_ref,
+                assessment_id=str(e.assessment_id) if e.assessment_id else None,
+                retryable=e.retryable,
+            )
+            for e in found
+        ],
+        next_cursor=encode_key(signer, "error_queue", next_key),
     )

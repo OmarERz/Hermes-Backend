@@ -1,0 +1,37 @@
+meta {
+  name: reason-switches
+  type: http
+  seq: 5
+}
+
+get {
+  url: {{baseUrl}}/api/config/schema
+  body: none
+  auth: bearer
+}
+
+auth:bearer {
+  token: {{readerToken}}
+}
+
+assert {
+  res.status: eq 200
+}
+
+tests {
+  test("one admin switch per judge reason (FRO-03)", function () {
+    const switches = res.body.filter((p) => /^reasons\.[a-z_]+\.enabled$/.test(p.key));
+    expect(switches.length).to.be.at.least(1);
+    for (const p of switches) {
+      expect(p.type).to.equal("boolean");
+      expect(p.group).to.equal("judge");
+      expect(p.min_role).to.equal("admin");
+    }
+  });
+}
+
+docs {
+  The judge reasons are switched on and off per formula version as reasons.<code>.enabled (FRO-03).
+
+  operationId: get_config_schema
+}

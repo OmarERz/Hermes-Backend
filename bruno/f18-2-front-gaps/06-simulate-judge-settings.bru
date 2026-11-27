@@ -1,0 +1,37 @@
+meta {
+  name: simulate-judge-settings
+  type: http
+  seq: 6
+}
+
+post {
+  url: {{baseUrl}}/api/formula/simulate
+  body: json
+  auth: bearer
+}
+
+auth:bearer {
+  token: {{token}}
+}
+
+body:json {
+  {"changes": {"sensitivity_profile": "broad", "dead_zone": "3", "reasons.mass_exploitation.enabled": "false", "judge_model": "otro-modelo"}}
+}
+
+assert {
+  res.status: eq 200
+  res.body.changed_findings: gte 0
+  res.body.not_simulable: isArray
+}
+
+tests {
+  test("the judge model cannot be simulated; the profile, dead zone and switches can (FRO-04)", function () {
+    expect(res.body.not_simulable).to.deep.equal(["judge_model"]);
+  });
+}
+
+docs {
+  Preview without writing or calling the judge: the stored judge reasons rescaled to the proposed profile (FRO-04).
+
+  operationId: simulate_formula
+}
