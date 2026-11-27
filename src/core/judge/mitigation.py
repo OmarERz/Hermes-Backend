@@ -1,19 +1,25 @@
-"""Validation of the mitigation drafted in `finalize_review` (D-017, docs/07 §13 JUE-MIT-01 to JUE-MIT-06).
+"""Validation of the mitigation drafted in `finalize_review` (D-017, docs/07 §13 JUE-MIT-01 to JUE-MIT-06, JUE-MIT-10).
 
 All or nothing (JUE-MIT-05): one failing step discards the whole draft and records the broken rule; the
 data-based mitigation (docs/06 §5) is always shown anyway. Length and count limits the strict mode cannot
-express are checked here too (VAL-02).
+express are checked here too (VAL-02). A version a step recommends must fall outside every affected range of the
+group's product (D-101, JUE-MIT-10).
 """
 
 from __future__ import annotations
 
+import itertools
+import logging
 import re
 from collections.abc import Iterable, Mapping, Sequence
 from dataclasses import dataclass
 from enum import StrEnum
 from typing import Any
 
+from core.judge.affected import AffectedRange, product_ranges
 from core.judge.package import ElementKind, ReviewPackage, SourceLevel, normalize_text
+
+logger = logging.getLogger(__name__)
 
 MAX_STEPS = 20
 MAX_ACTION_CHARS = 1000
@@ -78,6 +84,150 @@ _VERSION_CONTEXT = re.compile(r"(?i:\b(?:versi[oó]n|version|release)\s+)$")
 _CONTEXT_QUALIFIED = re.compile(rf"[vV]?{_NUMBERED_LABEL}(?:\.{_NUMBERED_LABEL})*\.(?i:post|dev|ga)")
 _GAP = "\x00"  # what a read fact leaves behind: no later pattern reads across it ('versión 3.0.23 64-bit')
 
+# D-101 (JUE-MIT-10): the versions an action recommends, read from the words around each version fact within its
+# clause (up to '.', ';', '!' or '?'), once URLs, hosts and branches are out. Spanish and English, case ignored. When in
+# doubt a version is checked: a wrong check only discards the draft, and the data mitigation is always shown.
+# - a target of a move verb ('actualizar', 'migrar', 'pasar', 'subir', 'upgrade', 'update', 'move'...): every version
+#   after it whose stretch since the verb or the previous version ends in 'a', 'al', 'hacia', 'to' or 'into' and at most
+#   five words that are no version and no 'con', 'desde', 'que', 'y'... ('Actualizar OpenSSL de la rama 3.0 a la versión
+#   3.0.23', 'Upgrade hosts running 3.0.22 to OpenSSL 3.0.23', '… a 3.0.24 para la rama 3.0 y a 3.1.22 para la 3.1',
+#   'a, como mínimo, la versión 3.0.23'); 'hasta' leads the first target only; once the verb has a target, the end of a
+#   set of installed versions is not another one ('Actualizar a 3.0.23 los equipos con 3.0.0 a 3.0.22'), while before
+#   it that end is read as where the move goes and checked ('Actualizar los equipos con 3.0.22 a 3.0.23');
+#   a bare number counts right after the preposition, an article or a capitalized name ('Actualizar Chrome a 126'),
+#   as an install object, as a floor after a product name or a verb of running ('ejecuten 126 o posterior') and as the
+#   next item of a list ('to 128 or 126');
+# - a replacement after 'reemplazar', 'sustituir', 'cambiar', 'replace' or 'swap' ('por', 'with', 'by' or as above);
+# - the object of an install verb ('instalar', 'aplicar', 'desplegar', 'install', 'apply', 'deploy'): the first
+#   version after it, at most five words away, after any place ('Instalar OpenSSL 3.0.23', 'Instalar en todos los
+#   servidores OpenSSL 3.0.23', `pip install x==1.2.3`, `npm install x@1.2`);
+# - a floor ('3.0.23 o posterior', '3.0.23 or later'), unless it describes affected versions ('3.0.0 o posteriores
+#   están afectadas', 'affected versions: 3.0.0 and later'; not 'servidores afectados con 3.0.22 o posterior');
+# - the version named as the fixed one ('versión corregida: 3.0.23', 'La versión corregida de OpenSSL es 3.0.23',
+#   '3.0.23 is the fixed version');
+# - the next item of a list after a recommended version ('a 3.0.18, 3.2.6 o 3.5.4', '3.0.23 (rama 3.0) o 3.1.5',
+#   '3.0.23 on branch 3.0 or 3.1.22').
+# A verb right after a negation ('no', 'nunca', 'evitar', 'do not', 'avoid') recommends nothing, and a version is never
+# a recommendation where it is a limit or where a move starts: after 'de la versión', 'desde', 'entre', 'from',
+# 'running', 'sin llegar a', 'antes de', 'posterior a', 'below', 'later than', 'not'..., after 'con' or 'with' unless it
+# is the replacement, before 'o anterior' /
+# 'or earlier', or before 'a'/'to' and another dotted version or a branch ('de 3.0.22 a 3.0.23'; not 'a 3.0.23 a más
+# tardar el 1'). Any other version (identification steps, a quoted range) is not checked.
+_CLAUSE_BREAK = re.compile(r"[;!?]|\.(?=\s|$)")
+_OPENER = "[(\\[«“\"'`]?"  # a bracket, quote or backtick right before a version: '(3.0.18)', '«3.0.18»'
+_CLOSER = "[)\\]»”\"'`]?"
+_NO_VERSION = rf"(?!{_OPENER}[vV]?\d)"
+_STOP = (
+    r"(?:con|desde|entre|que|si|sin|en|para|por|sobre|y|e|o|u|from|with|between|than|that|which|if|without|in|on"
+    r"|for|and|or|running|ejecutando)"
+)
+_LEAD_WORD = rf"(?:(?!{_STOP}\b){_NO_VERSION}\S+\s+)"
+_ARTICLES = r"(?:(?:la|las|el|los|una?|the|versi[oó]n(?:es)?|versions?|releases?)\s+){0,2}"
+_INSTALL = (
+    r"(?:re)?instalar\w*|instal(?:e|en|a|an|ando)|aplicar\w*|apli(?:que|quen|ca|can|cando)|desplegar\w*"
+    r"|desplieg(?:ue|uen|a|an)|(?:re)?install(?:ing)?|apply(?:ing)?|deploy(?:ing)?"
+)
+_VERB = re.compile(
+    r"\b(?:(?P<replace>reempla[zc]\w*|sustitu\w*|cambi(?:ar|e|en|a|an)|replac\w*|swap\w*)"
+    r"|(?P<move>actuali[zc]\w*|migr\w*|pas(?:ar|e|en|a|an|ando)|sub(?:ir|a|an|e|en|iendo)|llev(?:ar|e|en|a|an)"
+    r"|mov(?:er|e|ed|ing)|upgrad\w*|updat\w*|bump\w*|switch\w*|patch\w*)"
+    rf"|(?P<install>{_INSTALL}))\b",
+    re.IGNORECASE,
+)
+_NEGATION = re.compile(r"\b(?:no|nunca|jam[aá]s|evit\w*|never|not|avoid\w*|don't)\s+(?:se\s+)?$", re.IGNORECASE)
+_TARGET_LEAD = re.compile(rf"\b(?:a|al|hacia|to|into)(?:\s*,)?\s+{_LEAD_WORD}{{0,5}}{_OPENER}$", re.IGNORECASE)
+# 'hasta' leads only the first target of a verb ('Actualizar hasta la versión 3.0.23'; not '… a 3.0.23 (corrige las
+# versiones hasta 3.0.22)')
+_FIRST_TARGET_LEAD = re.compile(rf"\b(?:hasta)(?:\s*,)?\s+{_LEAD_WORD}{{0,5}}{_OPENER}$", re.IGNORECASE)
+_REPLACEMENT_LEAD = re.compile(
+    rf"\b(?:a|al|hacia|to|into|por|with|by)(?:\s*,)?\s+{_LEAD_WORD}{{0,5}}{_OPENER}$", re.IGNORECASE
+)
+_OBJECT_LEAD = re.compile(
+    rf"\s+(?:(?:en|on|in)\s+(?:{_NO_VERSION}\S+\s+){{1,4}}?)?"  # a place first: 'Instalar en todos los servidores …'
+    rf"(?:(?!(?:a|al|hacia|hasta|to|into)\b){_LEAD_WORD}){{0,5}}(?:['\"]?[\w.-]+(?:==?|>=|@)|{_OPENER})",
+    re.IGNORECASE,
+)
+# a bare number is a version only as a move target or an install object: 'a 126', 'to Chrome 126', 'a la 126',
+# 'Instalar Chrome 126', followed by the end of the clause, a mark or a joining word ('a 126 o posterior', 'to 126 on
+# every host'); never 'a 3 equipos', 'el 15 de', 'Instalar 2 parches', 'Aplicar el parche 2'
+_BARE_NUMBER = re.compile(r"(?<![\w.,:/+~-])\d+(?![\w:/+~*-]|[.,]\d)")
+_BARE_LEAD = re.compile(
+    rf"\b(?:a|al|to|into|{_INSTALL})\s+(?:(?:la|el|the)\s+)?(?:(?-i:[A-Z])[\w.+-]*\s+)?{_OPENER}$", re.IGNORECASE
+)
+# a bare floor needs a product name or a verb of running or having before it: 'Chrome 126 o posterior', 'ejecuten 126
+# o posterior'; never 'nivel 3 o superior'
+_BARE_FLOOR_LEAD = re.compile(
+    rf"(?:\b(?:ejecut\w*|corr(?:a|an|e|en)|tengan?|sean?|usen?|run\w*|have|has|is|are|be)|(?-i:\b[A-Z])[\w.+-]*)\s+{_OPENER}$",
+    re.IGNORECASE,
+)
+_BARE_REACH = 120  # the lead is a few words long: look no further back
+_BARE_TAIL = re.compile(rf"{_CLOSER}(?:\s*$|\s*[,;.!?)]|\s+{_STOP}\b)", re.IGNORECASE)
+# the end of a set of installed versions once the verb has its target: 'Actualizar a 3.0.23 los equipos con 3.0.0 a
+# 3.0.22' (before any target it is where the move goes: 'Upgrade hosts running 3.0.22 to 3.0.23')
+_SET_END_LEAD = re.compile(
+    r"\b(?:con|entre|with|between|running|ejecutando|afectad\w*|vulnerables?|affected|impacted)\s+"
+    rf"(?:{_NO_VERSION}\S+\s+){{0,2}}{_OPENER}[vV]?\d\S*\s+(?:a|al|hasta|to|through|y|and|-)\s+{_ARTICLES}{_OPENER}$",
+    re.IGNORECASE,
+)
+# 'con' and 'with' name what is installed, except as the replacement ('Replace 3.0.17 with 3.0.18')
+_CURRENT_LEAD = re.compile(rf"\b(?:con|with)\s+(?:{_NO_VERSION}\S+\s+){{0,2}}{_OPENER}$", re.IGNORECASE)
+_LIMIT_LEAD = re.compile(
+    rf"(?:\b(?:de|del)\s+{_ARTICLES}"
+    rf"|\b(?:desde|entre|from|between|running|ejecutando)\s+(?:{_NO_VERSION}\S+\s+){{0,2}}"
+    r"|\b(?:sin\s+llegar\s+a|sin\s+pasar\s+(?:a|de)|antes\s+de|por\s+(?:debajo|encima)\s+de"
+    r"|(?<!\bo )(?<!\bu )(?<!\bor )(?:anterior|inferior|posterior|superior)(?:es)?\s+a"
+    r"|(?:menor|mayor)(?:es)?\s+(?:a|que)|distint[ao]s?\s+(?:a|de)"
+    r"|en\s+(?:lugar|vez)\s+de|excepto|salvo|below|before|after|above|prior\s+to"
+    r"|(?:earlier|lower|less|older|later|newer|greater|higher|other)\s+than|without\s+reaching|instead\s+of|except"
+    rf"|not)\s+{_ARTICLES}){_OPENER}$",
+    re.IGNORECASE,
+)
+_MOVE_START_TAIL = re.compile(
+    rf"{_CLOSER}\s+(?:a|al|hacia|hasta|to|into)\s+{_LEAD_WORD}{{0,5}}(?:{_OPENER}[vV]?\d+\.\d|{_GAP})", re.IGNORECASE
+)
+_LOWER_TAIL = re.compile(
+    rf"{_CLOSER}\s*,?\s*(?:o|u|or|y|and)\s+(?:anterior|inferior|previa|menor|earlier|lower|older|below|prior)",
+    re.IGNORECASE,
+)
+_FLOOR_TAIL = re.compile(
+    rf"{_CLOSER}\s*,?\s*(?:(?:o|u|or|y|and)\s+(?:una\s+|a\s+|any\s+)?(?:posterior|superior|mayor|m[aá]s\s+reciente"
+    r"|later|higher|newer|above|greater)|en\s+adelante|onwards?)",
+    re.IGNORECASE,
+)
+# a floor of affected versions: it is the subject of 'están afectadas' / 'are affected', or 'versiones afectadas' /
+# 'affected versions' comes before it ('… is deployed to affected hosts' is still a floor)
+_AFFECTED = re.compile(
+    r"\b(?:est[aá]n?|son|es|siguen?|quedan?|are|is|were|was|remains?)\s+(?:(?:also|still|todav[ií]a|a[uú]n|tambi[eé]n)\s+)?"
+    r"(?:afectad\w*|vulnerables?|affected|impacted)\b",
+    re.IGNORECASE,
+)
+_AFFECTED_VERSIONS = re.compile(
+    r"\b(?:(?:versi[oó]n(?:es)?|versions?|releases?)\s+(?:afectad\w*|vulnerables?|affected|impacted)"
+    r"|(?:affected|vulnerable|impacted)\s+(?:versions?|releases?))\b",
+    re.IGNORECASE,
+)
+_FIXED_LEAD = re.compile(
+    r"\b(?:versi[oó]n(?:es)?\s+(?:corregidas?|parcheadas?|seguras?|recomendadas?|m[ií]nimas?)"
+    r"|(?:fixed|patched|safe|recommended|minimum)\s+(?:versions?|releases?))"
+    r"(?:\s+(?:de|del|para|of|for)(?:\s+\S+){1,3}?)?\s*(?::|\s(?:es|son|is|are)\b)?\s*(?:la\s+|the\s+)?"
+    rf"{_OPENER}$",
+    re.IGNORECASE,
+)
+# between the items of a list: a bracketed note or a short note after 'on', 'in', 'for', 'para' or 'en' ('3.0.23 on
+# branch 3.0 or 3.1.22', 'a 3.0.18 en los servidores web y 3.2.6')
+# the version as the subject: '3.0.22 is the fixed version', '3.0.23 es la primera versión corregida'
+_FIXED_TAIL = re.compile(
+    rf"{_CLOSER}\s+(?:is|es|ser[aá]|will\s+be)\s+(?:the|la)\s+(?:(?:first|primera|latest|[uú]ltima)\s+)?"
+    r"(?:(?:fixed|patched|safe|recommended|minimum)\s+(?:version|release)"
+    r"|versi[oó]n\s+(?:corregida|parcheada|segura|recomendada|m[ií]nima))",
+    re.IGNORECASE,
+)
+_LIST_GAP = re.compile(
+    rf"{_CLOSER}\s*(?:\([^()]{{0,80}}\)\s*)?(?:(?:on|in|for|para|en)(?:\s+{_NO_VERSION}[^\s,;()]+){{1,4}}\s*)?,?\s*\(?\s*(?:(?:o|u|y|e|or|and)\s+)?(?:(?:a|al|to)\s+)?(?:(?:la|the)\s+)?"
+    rf"(?:(?:versi[oó]n|version)\s+)?{_OPENER}",
+    re.IGNORECASE,
+)
+
 
 class FactKind(StrEnum):
     URL = "url"
@@ -90,10 +240,12 @@ class FactKind(StrEnum):
 
 @dataclass(frozen=True)
 class TraceableFact:
-    """A fact written in an action that its quote must back (JUE-MIT-03). A branch is written '3.0.x'."""
+    """A fact written in an action that its quote must back (JUE-MIT-03). A branch is written '3.0.x'. A version the
+    action recommends upgrading or moving to is `recommended` (D-101, JUE-MIT-10)."""
 
     kind: FactKind
     text: str
+    recommended: bool = False
 
     def in_quote(self, quote: str) -> bool:
         if self.kind is FactKind.BRANCH:
@@ -170,15 +322,16 @@ class _DiscardError(Exception):
 def validate_mitigation(raw_steps: Sequence[Mapping[str, Any]], package: ReviewPackage) -> MitigationResult:
     if not raw_steps:
         return MitigationResult.absent()
+    ranges = product_ranges(package)
     try:
-        steps = tuple(_step(raw, package) for raw in raw_steps)
+        steps = tuple(_step(raw, package, ranges) for raw in raw_steps)
         _check_order(steps)
     except _DiscardError as discard:
         return MitigationResult(MitigationStatus.DISCARDED, rule=discard.rule)
     return MitigationResult(MitigationStatus.ACCEPTED, steps=tuple(sorted(steps, key=lambda s: s.order)))
 
 
-def _step(raw: Mapping[str, Any], package: ReviewPackage) -> MitigationStep:
+def _step(raw: Mapping[str, Any], package: ReviewPackage, ranges: Sequence[AffectedRange]) -> MitigationStep:
     action = str(raw["action"]).strip()
     quote = normalize_text(str(raw["quote"]))
     if not action or len(action) > MAX_ACTION_CHARS or len(quote) > MAX_QUOTE_CHARS:
@@ -192,14 +345,34 @@ def _step(raw: Mapping[str, Any], package: ReviewPackage) -> MitigationStep:
     # a news item counts only if its source is N1 (vendor advisory).
     if element.quote_level(quote) is not SourceLevel.N1:
         raise _DiscardError("JUE-MIT-01")
-    if not all(fact.in_quote(quote) for fact in traceable_facts(action)):
+    facts = traceable_facts(action)
+    if not all(fact.in_quote(quote) for fact in facts):
         raise _DiscardError("JUE-MIT-03")
+    if not all(_outside(fact.text, ranges, package.group_cve) for fact in facts if fact.recommended):
+        raise _DiscardError("JUE-MIT-10")
     ci_id = str(raw["ci_id"]).strip()
     if ci_id and ci_id not in package.ci_ids:
         raise _DiscardError("JUE-MIT-04")
     return MitigationStep(
         order=int(raw["order"]), ci_id=ci_id or None, action=action, element_id=element.element_id, quote=quote
     )
+
+
+def _outside(version: str, ranges: Sequence[AffectedRange], cve: str | None) -> bool:
+    """D-101: the recommended version lies outside every affected range of the product. A range the comparator cannot
+    place it against counts as not outside: the draft is discarded and the comparison error logged (ESC-13)."""
+    for affected in ranges:
+        inside = affected.contains(version)
+        if inside is None:
+            logger.warning(
+                "JUE-MIT-10: %s cannot be compared with the affected range %r of %s; the draft is discarded",
+                repr(version),
+                affected.text,
+                repr(cve),
+            )
+        if inside is not False:
+            return False
+    return True
 
 
 def _check_order(steps: Sequence[MitigationStep]) -> None:
@@ -226,10 +399,98 @@ def traceable_facts(action: str) -> list[TraceableFact]:
     named = (next(number for number in groups if number) for groups in _NAMED_BRANCH.findall(without_hosts))
     facts += _facts(FactKind.BRANCH, (f"{number}.x" for number in named))
     without_branches = _NAMED_BRANCH.sub(_GAP, without_hosts)
-    facts += [_version_fact(token) for token in _VERSION.findall(without_branches)]
-    facts += _facts(FactKind.VERSION, _VERSION_WORD.findall(_VERSION.sub(_GAP, without_branches)))
+    tokens = list(_VERSION.finditer(without_branches))
+    # what is read becomes a run of gaps of its length, so the next patterns keep the positions of the text
+    masked = _blank(without_branches, (match.span() for match in tokens))
+    numbers = list(_VERSION_WORD.finditer(masked))
+    masked = _blank(masked, (match.span(1) for match in numbers))
+    spans = [match.span() for match in tokens] + [match.span(1) for match in numbers]
+    bare = _bare_numbers(without_branches, masked, spans)
+    targets = _recommended(without_branches, spans + bare)
+    facts += [_version_fact(match.group(1), match.span() in targets) for match in tokens]
+    facts += [TraceableFact(FactKind.VERSION, match.group(1), match.span(1) in targets) for match in numbers]
+    facts += [TraceableFact(FactKind.VERSION, without_branches[a:b], True) for a, b in bare if (a, b) in targets]
     facts += _facts(FactKind.PATH, (path.rstrip(_TRAILING) for path in _PATH.findall(without_hosts)))
     return facts
+
+
+def _bare_numbers(text: str, masked: str, spans: Sequence[tuple[int, int]]) -> list[tuple[int, int]]:
+    """The bare numbers that may be a recommended version: a move target or an install object ('a 126', 'Instalar
+    Chrome 126'), a floor ('126 o posterior') or the next item of a list after a version ('to 128 or 126')."""
+    found: list[tuple[int, int]] = []
+    for match in _BARE_NUMBER.finditer(masked):
+        start, end = match.span()
+        if not _BARE_TAIL.match(text, end):
+            continue
+        before = [span for span in (*spans, *found) if span[1] <= start]
+        listed = bool(before) and _LIST_GAP.fullmatch(text, max(before, key=_end)[1], start) is not None
+        lead = _BARE_LEAD.search(text, max(0, start - _BARE_REACH), start) is not None
+        floor = _FLOOR_TAIL.match(text, end) and _BARE_FLOOR_LEAD.search(text, max(0, start - _BARE_REACH), start)
+        if lead or listed or floor:
+            found.append((start, end))
+    return found
+
+
+def _end(span: tuple[int, int]) -> int:
+    return span[1]
+
+
+def _blank(text: str, spans: Iterable[tuple[int, int]]) -> str:
+    chars = list(text)
+    for start, end in spans:
+        chars[start:end] = _GAP * (end - start)
+    return "".join(chars)
+
+
+def _recommended(text: str, spans: Sequence[tuple[int, int]]) -> set[tuple[int, int]]:
+    """The spans of the versions the action recommends (D-101); the rules are above `_CLAUSE_BREAK`."""
+    targets: set[tuple[int, int]] = set()
+    bounds = [0, *(cut for match in _CLAUSE_BREAK.finditer(text) for cut in match.span()), len(text)]
+    for start, end in zip(bounds[::2], bounds[1::2], strict=True):
+        clause = sorted(span for span in spans if start <= span[0] and span[1] <= end)
+        limits = {span for span in clause if _is_limit(text, span, start, end)}
+        current = {span for span in clause if _CURRENT_LEAD.search(text, start, span[0])}
+        candidates = [span for span in clause if span not in limits and span not in current]
+        verbs = list(_VERB.finditer(text, start, end))
+        for index, verb in enumerate(verbs):
+            stop = verbs[index + 1].start() if index + 1 < len(verbs) else end
+            if _NEGATION.search(text, start, verb.start()):
+                continue
+            if verb.lastgroup == "install":  # its object: the first version, with no other version before it
+                first = next((span for span in clause if verb.end() <= span[0] < stop), None)
+                if first in candidates and _OBJECT_LEAD.fullmatch(text, verb.end(), first[0]):
+                    targets.add(first)
+                continue
+            replaces = verb.lastgroup == "replace"
+            lead = _REPLACEMENT_LEAD if replaces else _TARGET_LEAD
+            previous_end, has_target = verb.end(), False
+            for span in (span for span in clause if verb.end() <= span[0] < stop):
+                allowed = span in candidates or (replaces and span not in limits)
+                if has_target and _SET_END_LEAD.search(text, start, span[0]):
+                    allowed = False
+                up_to = not has_target and _FIRST_TARGET_LEAD.search(text, previous_end, span[0]) is not None
+                if allowed and (up_to or lead.search(text, previous_end, span[0])):
+                    targets.add(span)
+                    has_target = True
+                previous_end = span[1]
+        for span in candidates:
+            affected = _AFFECTED.search(text, span[1], end) or _AFFECTED_VERSIONS.search(text, start, span[0])
+            floor = affected is None and _FLOOR_TAIL.match(text, span[1], end)
+            if floor or _FIXED_LEAD.search(text, start, span[0]) or _FIXED_TAIL.match(text, span[1], end):
+                targets.add(span)
+        for previous, span in itertools.pairwise(clause):  # a list after a recommended version
+            if previous in targets and span in candidates and _LIST_GAP.fullmatch(text, previous[1], span[0]):
+                targets.add(span)
+    return targets
+
+
+def _is_limit(text: str, span: tuple[int, int], start: int, end: int) -> bool:
+    """A version that is a limit or where a move starts, never a recommendation (D-101)."""
+    return bool(
+        _LIMIT_LEAD.search(text, start, span[0])
+        or _LOWER_TAIL.match(text, span[1], end)
+        or _MOVE_START_TAIL.match(text, span[1], end)
+    )
 
 
 def _address(match: re.Match[str]) -> str:
@@ -257,12 +518,12 @@ def _split_hosts(text: str) -> tuple[list[str], str]:
     return hosts, _HOST.sub(take, text)
 
 
-def _version_fact(token: str) -> TraceableFact:
+def _version_fact(token: str, recommended: bool) -> TraceableFact:
     """A version token read whole: a bare wildcard is a branch ('3.0.X' -> '3.0.x'), anything else a version."""
     wildcard = _WILDCARD.fullmatch(token)
     if wildcard is not None:
         return TraceableFact(FactKind.BRANCH, f"{wildcard.group(1)}.x")
-    return TraceableFact(FactKind.VERSION, token)
+    return TraceableFact(FactKind.VERSION, token, recommended)
 
 
 def _facts(kind: FactKind, texts: Iterable[str]) -> list[TraceableFact]:
