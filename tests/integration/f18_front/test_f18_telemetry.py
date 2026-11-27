@@ -3,11 +3,11 @@
 from __future__ import annotations
 
 from collections.abc import Callable
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 from typing import Any
 
 import pytest
-from f18data import Front
+from f18data import NOW, Front
 from fastapi.testclient import TestClient
 from sqlalchemy import Engine, text
 
@@ -80,8 +80,11 @@ def test_daily_series_is_zero_filled_and_ends_today(get: Get) -> None:
     assert daily["days"] == 3 and len(daily["series"]) == 3
     today = datetime.now(UTC).date().isoformat()
     assert daily["series"][-1]["date"] == today
-    last = daily["series"][-1]
-    judge = next(a for a in last["agents"] if a["agent"] == "judge")
+    # The two recent judge reviews sit one hour back: on today's UTC day, or yesterday's in the first hour after
+    # midnight UTC (the series buckets by UTC day).
+    their_day = (NOW - timedelta(hours=1)).date().isoformat()
+    bucket = next(d for d in daily["series"] if d["date"] == their_day)
+    judge = next(a for a in bucket["agents"] if a["agent"] == "judge")
     assert judge["reviews"] >= 2
     assert [a["agent"] for a in daily["series"][0]["agents"]] == ["news_analyst", "cve_analyst", "judge"]
 
