@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import signal
+import time
 from typing import Any
 
 import pytest
@@ -437,6 +439,110 @@ def test_a_host_name_in_the_quote_does_not_back_a_branch_step() -> None:
         [step(action="Actualizar OpenSSL de la rama 3.0.", quote=quote)], openssl_package(f" {quote}")
     )
     assert result.rule == "JUE-MIT-03"
+
+
+@pytest.mark.parametrize(
+    ("action", "quote", "kinds"),
+    [
+        ("Consultar docs.example.org/ para el parche.", "Ver docs.example.org/ para el parche.", [FactKind.HOST]),
+        ("Consultar 3.0.23.example para el parche.", "Consultar 3.0.23.example para el parche.", [FactKind.HOST]),
+        ("Bloquear 192.0.2.10:8443/ en el firewall.", "Bloquear 192.0.2.10:8443/ en el firewall.", [FactKind.HOST]),
+        ("Actualizar a 2.17.1.redhat-00001.", "Fixed in 2.17.1.redhat-00001.", [FactKind.VERSION]),
+        (
+            "Actualizar la rama 2.17 a 2.17.1.redhat-00001.",
+            "Fixed in 2.17.1.redhat-00001.",
+            [FactKind.BRANCH, FactKind.VERSION],
+        ),
+    ],
+)
+def test_action_and_quote_read_a_dotted_name_the_same_way(action: str, quote: str, kinds: list[FactKind]) -> None:
+    assert [fact.kind for fact in traceable_facts(action)] == kinds
+    result = validate_mitigation([step(action=action, quote=quote)], openssl_package(f" {quote}"))
+    assert (result.status, result.rule) == (MitigationStatus.ACCEPTED, None)
+
+
+@pytest.mark.parametrize(
+    ("quote", "backed"),
+    [
+        ("For help, contact 3.0.23.dev.", False),  # qualifier words that are also domain endings do not count
+        ("For help, contact 3.0.23.ga.", False),
+        ("Fixed in 3.0.0.dev0.", True),  # with a number they are versions
+        ("Fixed in 3.0.17.redhat-00001.", True),
+    ],
+)
+def test_qualifier_words_that_are_domain_endings(quote: str, backed: bool) -> None:
+    assert TraceableFact(FactKind.BRANCH, "3.0.x").in_quote(quote) is backed
+
+
+def test_dotted_names_are_read_in_linear_time() -> None:
+    """Many numbered labels with a failing tail must not backtrack combinatorially (ReDoS, ~990 characters)."""
+    name = ".".join(["1" * 10] * 90) + "ab-"
+
+    def hang(*_: object) -> None:
+        raise TimeoutError("catastrophic backtracking")
+
+    previous = signal.signal(signal.SIGALRM, hang)
+    signal.alarm(10)
+    try:
+        start = time.perf_counter()
+        traceable_facts(f"Ver {name} ahora.")
+        TraceableFact(FactKind.BRANCH, "1.x").in_quote(f"Ver {name} ahora.")
+        assert time.perf_counter() - start < 1
+    finally:
+        signal.alarm(0)
+        signal.signal(signal.SIGALRM, previous)
+
+
+@pytest.mark.parametrize(
+    ("fact", "quote", "backed"),
+    [
+        (TraceableFact(FactKind.HOST, "3.0.23.example"), "Ver 3.0.23.example ahora.", True),
+        (TraceableFact(FactKind.HOST, "3.0.23.example"), "Ver 3.0.23.example:8443 ahora.", False),  # whole address
+        (TraceableFact(FactKind.HOST, "docs.example.org/"), "Ver docs.example.org/?x=1 ahora.", False),
+        (TraceableFact(FactKind.HOST, "vendor.example.com"), "Escribir a user@vendor.example.com.", True),
+        (TraceableFact(FactKind.URL, "https://a.example/x"), "Ver https://a.example/x.", True),
+        (TraceableFact(FactKind.URL, "https://a.example/x"), "Ver https://a.example/x?y=1 ahora.", False),
+    ],
+)
+def test_addresses_are_compared_whole(fact: TraceableFact, quote: str, backed: bool) -> None:
+    assert fact.in_quote(quote) is backed
+
+
+@pytest.mark.parametrize(
+    ("quote", "backed"),
+    [
+        ("Fixed in version 3.0.23.post.", True),  # an explicit version: '.post' is the qualifier, not a domain
+        ("Fixed in release 3.0.23.dev.", True),
+        ("For help, contact 3.0.23.post.", False),
+    ],
+)
+def test_a_qualifier_that_is_a_domain_ending_counts_after_a_version_word(quote: str, backed: bool) -> None:
+    assert TraceableFact(FactKind.BRANCH, "3.0.x").in_quote(quote) is backed
+
+
+@pytest.mark.parametrize(
+    ("action", "quote", "kinds", "status"),
+    [
+        # The version word classifies the same text as a version in the action and in the quote.
+        ("Actualizar a la versión 3.0.23.post.", "Fixed in version 3.0.23.post.", [FactKind.VERSION], "accepted"),
+        ("Actualizar a 3.0.23.post.", "Fixed in version 3.0.23.post.", [FactKind.HOST], "discarded"),
+        ("Actualizar a 3.0.23.dev+local.", "Fixed in version 3.0.23.dev.", [FactKind.HOST], "discarded"),  # whole
+        (
+            "Ver https://vendor.example/advisory.",
+            "See [https://vendor.example/advisory] now.",
+            [FactKind.URL],
+            "accepted",
+        ),
+        ("Ver https://vendor.example/adv.", "See [https://vendor.example/advisory] now.", [FactKind.URL], "discarded"),
+        ("Consultar vendor.example.", "Consultar vendor.exampleé hoy.", [FactKind.HOST], "discarded"),
+        ("Consultar vendor.exampleé.", "Consultar vendor.exampleé hoy.", [FactKind.HOST], "accepted"),
+    ],
+)
+def test_tokens_are_classified_whole_and_alike(action: str, quote: str, kinds: list[FactKind], status: str) -> None:
+    assert [fact.kind for fact in traceable_facts(action)] == kinds
+    result = validate_mitigation([step(action=action, quote=quote)], openssl_package(f" {quote}"))
+    assert result.status is MitigationStatus(status)
+    assert result.rule == (None if status == "accepted" else "JUE-MIT-03")
 
 
 def test_a_v_prefixed_version_matches_the_quote() -> None:

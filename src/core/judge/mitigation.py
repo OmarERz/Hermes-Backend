@@ -24,11 +24,13 @@ MAX_QUOTE_CHARS = 1000
 # v-prefixed, or a number after a version word) and file paths must appear in the quote as the same whole fact.
 _URL = re.compile(r"(?<![A-Za-z0-9+.-])[A-Za-z][A-Za-z0-9+.-]*://[^\s`'\"<>()]+")  # any scheme, any case
 # Dotted names are read whole, with any port, path or query ('vendor.example.invalid2', never 'vendor.example';
-# 'docs.example.org:8443/?id=3'). One that starts like a version ('3.0.23.post1', 'v3.0.0rc1') is a version token;
-# any other with two letters in a row is a host.
-_DOTTED_NAME = r"(?P<name>(?>[A-Za-z0-9-]+(?:\.[A-Za-z0-9-]+)+))(?::\d+)?(?:[/?#][^\s`'\"<>()]+)?"
-_HOST = re.compile(rf"(?<![\w@/.-])(?![vV]?\d+\.\d){_DOTTED_NAME}")
-_LETTERS = re.compile(r"[A-Za-z]{2}")  # 'e.g' and 'U.S.A' are not hosts
+# 'docs.example.org:8443/?id=3', 'docs.example.org/'). Action and quote classify them the same way: a version when
+# it is a qualified version below ('3.0.23.post1', 'v3.0.0rc1') or has no two letters in a row ('1.1.1w', 'e.g');
+# otherwise a host ('3.0.23.example', '1password.com').
+_DOTTED_NAME = r"(?P<name>(?>[\w+~-]+(?:\.[\w+~-]+)+))(?::\d+)?(?:/[^\s`'\"<>()]*|[?#][^\s`'\"<>()]+)?"
+_HOST = re.compile(rf"(?<![\w@/.-]){_DOTTED_NAME}")
+_LETTERS = re.compile(r"[^\W\d_]{2}")  # 'e.g' and 'U.S.A' are not hosts
+_URL_END = ".,;:]}"  # '[https://vendor.example/advisory]': the bracket delimits the link
 _COMMAND = re.compile(r"`([^`\n]+)`")
 # A branch (#176) names a release line, not one version: a wildcard ('3.0.x', '3.*') or a dotted number next to a
 # branch word ('la rama 3.0', 'the 3.0 branch'). It becomes the fact '3.0.x', where x stands for one or more numbers:
@@ -59,11 +61,19 @@ _VERSION_END = r"(?![\w/+~*-]|\.[\w*])"
 _SUFFIX = r"(?:[A-Za-z][0-9A-Za-z]*)?+(?:[-+~._][0-9A-Za-z]+)*+"
 # URLs and host names in a quote are not versions ('docs.example.org?id=3.0.23', '3.0.23.example'), so version
 # evidence is searched without them. A dotted name stays when it is a version: numbered labels and at most one final
-# qualifier with a digit or from the usual words ('3.0.23.post1', '2.4.57-5.el9', 'v3.0.0rc1', '5.4.24.Final').
+# qualifier with a digit or from the usual words that are no domain endings ('3.0.23.post1', '2.4.57-5.el9',
+# '2.17.1.redhat-00001', 'v3.0.0rc1', '5.4.24.Final'; not '3.0.23.dev' or '3.0.23.ga').
 _QUOTE_NAME = re.compile(rf"(?<![\w/.-]){_DOTTED_NAME}")
-_NUMBERED_LABEL = r"\d+[0-9A-Za-z]*(?:[-+~_][0-9A-Za-z]+)*"
-_QUALIFIER = r"(?:[A-Za-z]+\d[0-9A-Za-z]*|(?i:final|release|ga|alpha|beta|rc|pre|post|dev|snapshot|lts|stable))"
+# Possessive: a label never gives digits back, so a failing name is rejected in linear time (no ReDoS).
+_NUMBERED_LABEL = r"\d++[0-9A-Za-z]*+(?:[-+~_][0-9A-Za-z]++)*+"
+_QUALIFIER = (
+    r"(?:(?=[0-9A-Za-z+~_-]*\d)[A-Za-z][0-9A-Za-z]*+(?:[-+~_][0-9A-Za-z]++)*+"
+    r"|(?i:final|release|alpha|beta|rc|pre|snapshot|lts|stable))"
+)
 _QUALIFIED_VERSION = re.compile(rf"[vV]?{_NUMBERED_LABEL}(?:\.{_NUMBERED_LABEL})*(?:\.{_QUALIFIER})?")
+# Right after an explicit version word, the qualifiers that are also domain endings count: 'version 3.0.23.post'.
+_VERSION_CONTEXT = re.compile(r"(?i:\b(?:versi[oó]n|version|release)\s+)$")
+_CONTEXT_QUALIFIED = re.compile(rf"[vV]?{_NUMBERED_LABEL}(?:\.{_NUMBERED_LABEL})*\.(?i:post|dev|ga)")
 _GAP = "\x00"  # what a read fact leaves behind: no later pattern reads across it ('versión 3.0.23 64-bit')
 
 
@@ -97,18 +107,31 @@ class TraceableFact:
         if self.kind is FactKind.VERSION:
             pattern = rf"{_VERSION_START}{re.escape(self.text)}{_VERSION_END}"
             return re.search(pattern, _without_hosts(quote)) is not None
+        # Addresses are compared whole, as the same pattern reads them on both sides: 'docs.example.org/' is not
+        # backed by 'docs.example.org/?x=1', nor 'https://a.example/x' by 'https://a.example/x?y=1'.
+        if self.kind is FactKind.HOST:
+            return any(
+                _is_address(match) and match.group(0).rstrip(_TRAILING) == self.text
+                for match in _QUOTE_NAME.finditer(quote)
+            )
+        if self.kind is FactKind.URL:
+            return any(url.rstrip(_URL_END) == self.text for url in _URL.findall(quote))
         return appears_as_fact(self.text, quote)
 
 
-def _without_hosts(quote: str) -> str:
-    def scrub(match: re.Match[str]) -> str:
-        name, address = match.group("name"), match.group(0)
-        if address != name:  # with a port, path or query it is an address ('1.2.3.4:8443/?id=3.0.23')
-            return _GAP
-        is_host = _LETTERS.search(name) is not None and _QUALIFIED_VERSION.fullmatch(name) is None
-        return _GAP if is_host else address
+def _is_address(match: re.Match[str]) -> bool:
+    """Whether a dotted name is an address rather than a version, by the same rule in the action and the quote."""
+    address, name = match.group(0), match.group("name")
+    if address != name:  # with a port, path or query it is an address ('1.2.3.4:8443/?id=3.0.23')
+        return True
+    if _LETTERS.search(name) is None or _QUALIFIED_VERSION.fullmatch(name) is not None:
+        return False
+    explicit = _VERSION_CONTEXT.search(match.string, 0, match.start()) is not None
+    return not (explicit and _CONTEXT_QUALIFIED.fullmatch(name))
 
-    return _QUOTE_NAME.sub(scrub, _URL.sub(_GAP, quote))
+
+def _without_hosts(quote: str) -> str:
+    return _QUOTE_NAME.sub(lambda match: _GAP if _is_address(match) else match.group(0), _URL.sub(_GAP, quote))
 
 
 class MitigationStatus(StrEnum):
@@ -196,7 +219,7 @@ def appears_as_fact(fact: str, quote: str) -> bool:
 def traceable_facts(action: str) -> list[TraceableFact]:
     """Versions, branches, URLs, backticked commands and file paths written in an action (JUE-MIT-03)."""
     text = normalize_text(action)
-    facts = _facts(FactKind.URL, (url.rstrip(_TRAILING) for url in _URL.findall(text)))
+    facts = _facts(FactKind.URL, (url.rstrip(_URL_END) for url in _URL.findall(text)))
     facts += _facts(FactKind.COMMAND, (normalize_text(command) for command in _COMMAND.findall(text)))
     without_urls = _URL.sub(" ", text)
     hosts, without_hosts = _split_hosts(without_urls)
@@ -215,7 +238,7 @@ def _split_hosts(text: str) -> tuple[list[str], str]:
     hosts: list[str] = []
 
     def take(match: re.Match[str]) -> str:
-        if _LETTERS.search(match.group("name")) is None:
+        if not _is_address(match):
             return match.group(0)
         hosts.append(match.group(0).rstrip(_TRAILING))
         return " "
