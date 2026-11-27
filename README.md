@@ -288,7 +288,33 @@ capacidades extra; la consola escucha en `127.0.0.1:${ITOP_PORT:-8080}`.
    repositorio vuelve a correrlo: si la extensión cambió, recompila el modelo sin tocar los datos.
 4. Entra a `http://127.0.0.1:8080` como `admin` (la consola está en español). Puedes cambiar la contraseña en «Mi
    cuenta»; el archivo de secretos solo se usa en la instalación.
-5. Carga el inventario: `make itop-seed` (simulacro) y `make itop-seed APPLY=1` (escribe).
+5. Carga el inventario (ver «Cargar un inventario» abajo): `make itop-load INVENTORY=<archivo>` (simulacro) y
+   `make itop-load INVENTORY=<archivo> APPLY=1` (escribe). `make itop-seed` carga la pila sintética de prueba.
+
+**Cargar un inventario** (`tests/harness/itop_load.py`, una herramienta del operador que corre en tu equipo)
+
+Un inventario es un archivo YAML con los objetos de iTop en orden (organización, personas, equipos, CI, catálogo de
+software, instalaciones, servicios…); `docker/itop/stack.yaml` es un ejemplo. Cada objeto lleva `class`, `name` y
+`fields` (los nombres de campo de la API REST de iTop); una referencia a otro objeto se escribe `@Clase:nombre`. El
+software se identifica por **nombre y versión** (`@Software:PostgreSQL 15.4`), así que dos versiones del mismo
+producto son dos entradas del catálogo; `key` y `ref` cambian la identidad o el nombre de referencia de un objeto.
+Sirve cualquier campo de iTop, p. ej. `type` (categoría del software), `status` y `softwarelicence_id` (estado y
+licencia de una instalación, con la licencia como objeto `SoftwareLicence`), `description`, `cpu` y `ram`;
+`inventories/lyft-challenge.yaml` los usa todos. Pon entre comillas las fechas y los `yes`/`no`
+(`"2024-01-15"`, `"yes"`): sin comillas YAML los convierte en fecha o booleano y el cargador rechaza el archivo.
+
+- `make itop-load INVENTORY=<archivo>` es un simulacro: lista qué crearía (`+ create`), qué ya existe (`= exists`) y
+  un resumen; no escribe nada. Si una referencia no existe, no escribe nada y dice cuál falla.
+- `APPLY=1` crea lo que falta; repetirlo no duplica nada. `UPDATE=1` además compara los objetos que ya existen y solo
+  escribe los campos que cambiaron (`~ update … : campos`, `= unchanged`).
+- La sección `env:` del archivo hace que el cargador imprima al final `ITOP_ORG_ID`, `ITOP_CALLER_ID` e
+  `ITOP_SERVICE_ID`, listos para copiarlos a la configuración de Hermes.
+- La sección `cpe:` asigna el CPE de cada producto. Hermes conoce un producto después de sincronizar el inventario
+  (lo hace cada escaneo), así que: carga, pide un escaneo (`POST /api/scans`), corre
+  `HERMES_API_TOKEN=<token de un analista> make itop-map-cpe INVENTORY=<archivo>` y vuelve a escanear. Con el
+  emulador de Firebase el token sale de `make -s emulator-token ROLE=analyst`; con un proyecto real de Firebase hace
+  falta el token de ID de un usuario con rol de analista (o asigna los CPE en la pantalla de pendientes del front).
+  Un producto con `null` queda a propósito sin CPE (aparece en la pantalla de pendientes).
 
 **Conectar Hermes con iTop**
 
@@ -303,7 +329,7 @@ ITOP_CONSOLE_URL=http://127.0.0.1:8080
 ITOP_WEBHOOK_URL=http://api:8000/api/itop/webhook
 ITOP_TOKEN=<lo que imprime make itop-token>
 ITOP_WEBHOOK_TOKEN=<un valor largo al azar>
-# ids de iTop de la organización, de la persona «Hermes System» y del servicio de los tickets
+# ids de la organización, de la persona «Hermes System» y del servicio (los imprime make itop-load)
 ITOP_ORG_ID=…
 ITOP_CALLER_ID=…
 ITOP_SERVICE_ID=…
@@ -319,7 +345,7 @@ ya creados) y `make up`. Sin la red compartida, usa `ITOP_URL=http://host.docker
 | Usuario | Para qué |
 |---|---|
 | `hermes-rest` | El token del backend (`ITOP_TOKEN`): lee el CMDB, crea y actualiza tickets y solo los **reabre** (`ev_reopen`); asignar, resolver y cerrar lo hacen las personas en la consola. Ojo: la API REST de iTop no revisa los estímulos de un perfil, solo el permiso de modificar; lo que limita al backend a `ev_reopen` es su propio *outbox*. `make itop-rotate-token` le da un token nuevo (luego actualiza `ITOP_TOKEN` y corre `make compose-secrets` y `make up`) |
-| `hermes-seed` | Administrador por REST para el cargador de inventario. Está **desactivado** y sin token salvo mientras corre `make itop-seed`, que lo activa con un token nuevo y lo desactiva al terminar, aunque falle |
+| `hermes-seed` | Administrador por REST para el cargador de inventario. Está **desactivado** y sin token salvo mientras corre `make itop-load` (o `make itop-seed`), que lo activa con un token nuevo y lo desactiva al terminar, aunque falle |
 | `hermes-cron` | Administrador local con el que corre el cron de iTop (notificaciones, SLA, tareas asíncronas, respaldo nocturno). Su contraseña solo está en un archivo del volumen de datos |
 
 **Respaldo y restauración**
