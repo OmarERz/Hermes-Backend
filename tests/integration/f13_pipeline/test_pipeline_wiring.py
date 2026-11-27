@@ -5,7 +5,7 @@ from __future__ import annotations
 import uuid
 from collections.abc import Iterator
 from contextlib import contextmanager
-from typing import Any, cast
+from typing import Any, NamedTuple, cast
 
 import pytest
 from pipeline_support import make_story
@@ -91,6 +91,14 @@ class Tracking:
                 self.open -= 1
 
 
+class Parsed(NamedTuple):
+    """What the refresh reads of a parsed NVD record."""
+
+    n: int
+    cve_id: str
+    last_modified_at: None
+
+
 def test_the_vulnerability_refresh_downloads_outside_transactions(
     factory: sessionmaker[Session], monkeypatch: pytest.MonkeyPatch
 ) -> None:
@@ -103,6 +111,16 @@ def test_the_vulnerability_refresh_downloads_outside_transactions(
                 assert tracking.open == 0, "an NVD page is read inside a transaction"
                 yield {"n": n}
 
+        def iter_kev(self) -> Iterator[dict[str, int]]:
+            for n in (10, 11):
+                assert tracking.open == 0, "the NVD KEV page is read inside a transaction"
+                yield {"n": n}
+
+        def iter_cve(self, cve_id: str) -> Iterator[dict[str, int]]:
+            assert tracking.open == 0, "an NVD record is read inside a transaction"
+            calls.append(("by id", cve_id))
+            yield from ()
+
     def download(name: str, result: Any) -> Any:
         def fetch(_source: Any) -> Any:
             assert tracking.open == 0, f"{name} is downloaded inside a transaction"
@@ -113,9 +131,12 @@ def test_the_vulnerability_refresh_downloads_outside_transactions(
 
     monkeypatch.setattr("core.pipeline.wiring.NVD_BATCH", 2)
     monkeypatch.setattr("core.pipeline.wiring.ROW_BATCH", 2)
-    monkeypatch.setattr("core.pipeline.wiring.parse_cve", lambda item: None if item["n"] == 2 else item["n"])
     monkeypatch.setattr(
-        "core.pipeline.wiring.store_cve", lambda _s, record: calls.append(("cve", tracking.open, record))
+        "core.pipeline.wiring.parse_cve",
+        lambda item: None if item["n"] == 2 else Parsed(item["n"], f"CVE-2026-9{item['n']:04d}", None),
+    )
+    monkeypatch.setattr(
+        "core.pipeline.wiring.store_cve", lambda _s, record: calls.append(("cve", tracking.open, record.n))
     )
 
     def loader(name: str, result: type[Any]) -> Any:
@@ -131,8 +152,12 @@ def test_the_vulnerability_refresh_downloads_outside_transactions(
         "core.pipeline.wiring.fetch_daily", download("epss", [{"cve": "CVE-2026-10001"}, {"cve": "CVE-1999-0001"}])
     )
     monkeypatch.setattr("core.pipeline.wiring.load_epss", loader("epss-load", EpssResult))
-    nvd, kev, epss = refresh_vulndata(cast("sessionmaker[Session]", tracking), cast("Any", Nvd()), cast("Any", None))()
+    monkeypatch.setattr("core.pipeline.wiring._kev_lagging", lambda _factory: ["CVE-2026-0777"])
+    nvd, kev, epss, kev_records = refresh_vulndata(
+        cast("sessionmaker[Session]", tracking), cast("Any", Nvd()), cast("Any", None)
+    )()
     assert (nvd.stored, nvd.skipped, kev.stored, epss.stored, epss.skipped) == (4, 1, 3, 1, 1)
+    assert kev_records.stored == 2
     assert calls == [
         ("cve", 1, 0),
         ("cve", 1, 1),
@@ -143,6 +168,9 @@ def test_the_vulnerability_refresh_downloads_outside_transactions(
         ("kev-load", 1, ["k3"]),
         "epss",
         ("epss-load", 1, [{"cve": "CVE-2026-10001"}]),  # only the CVEs of the local catalogue
+        ("cve", 1, 10),  # every KEV record NVD holds, whatever its age (ESC-09/10)
+        ("cve", 1, 11),
+        ("by id", "CVE-2026-0777"),  # a CISA entry NVD does not flag yet
     ]
 
 

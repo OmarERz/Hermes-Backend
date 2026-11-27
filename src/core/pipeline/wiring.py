@@ -9,7 +9,7 @@ from __future__ import annotations
 
 import logging
 import uuid
-from collections.abc import Callable
+from collections.abc import Callable, Iterable
 from datetime import UTC, datetime, timedelta
 from typing import Any, Protocol
 
@@ -156,34 +156,43 @@ def engine_dismissal_package(session: Session, story_id: uuid.UUID) -> dict[str,
 
 NVD_BATCH = 200  # CVEs stored per transaction while the NVD pages are read
 ROW_BATCH = 2_000  # KEV entries or EPSS rows stored per transaction
+KEV_LAG_DAYS = 7  # a CISA entry NVD does not flag yet is looked up by id during its first week in KEV
+KEV_LAG_MAX = 20  # at most this many lookups by id per refresh (the public NVD limit is 5 requests per 30 s)
 
 
 def refresh_vulndata(
     factory: sessionmaker[Session], nvd: NvdClient, source: JsonSource
-) -> Callable[[], tuple[LoadResult, object, object]]:
-    """ESC-09: the recent NVD publications (recency window), the KEV catalogue and today's EPSS scores.
+) -> Callable[[], tuple[LoadResult, object, object, LoadResult]]:
+    """ESC-09: the recent NVD publications (recency window), the KEV catalogue, today's EPSS scores and the NVD
+    records of every KEV CVE, whatever its age (ESC-10: the window does not apply to KEV).
 
     No network call runs inside a database transaction: each download finishes first, then a short transaction
     stores it (NVD in batches of `NVD_BATCH`), so no write of the API ever waits on a download.
     """
 
-    def run() -> tuple[LoadResult, object, object]:
-        nvd_result = _load_nvd(factory, nvd)
+    def run() -> tuple[LoadResult, object, object, LoadResult]:
+        end = datetime.now(UTC)
+        nvd_result = _load_nvd(factory, nvd.iter_published(end - timedelta(days=RECENCY_DAYS), end))
         kev_result = _in_batches(factory, load_kev, fetch_catalogue(source), KevResult())
         epss_result = _load_epss(factory, fetch_daily(source))
-        return nvd_result, kev_result, epss_result
+        return nvd_result, kev_result, epss_result, _load_kev_records(factory, nvd)
 
     return run
 
 
-def _load_nvd(factory: sessionmaker[Session], nvd: NvdClient) -> LoadResult:
+def _load_nvd(
+    factory: sessionmaker[Session], items: Iterable[dict[str, Any]], *, skip: Callable[[CveRecord], bool] | None = None
+) -> LoadResult:
+    """Parse and store NVD entries in batches; `skip` leaves out records that need no write."""
     result = LoadResult()
-    end = datetime.now(UTC)
     batch: list[CveRecord] = []
-    for item in nvd.iter_published(end - timedelta(days=RECENCY_DAYS), end):
+    for item in items:
         record = parse_cve(item)
         if record is None:
             result.skipped += 1
+            continue
+        if skip is not None and skip(record):
+            result.unchanged += 1
             continue
         batch.append(record)
         if len(batch) >= NVD_BATCH:
@@ -191,6 +200,50 @@ def _load_nvd(factory: sessionmaker[Session], nvd: NvdClient) -> LoadResult:
             batch = []
     _store_cves(factory, batch, result)
     return result
+
+
+def _load_kev_records(factory: sessionmaker[Session], nvd: NvdClient) -> LoadResult:
+    """The NVD record of every KEV CVE, so the scan can compare its ranges whatever its age (F20 dry run, P0-1).
+
+    One query (`hasKev`, 2,000 records a page; about 1,800 in Nov 2026) brings them all, so the number of requests
+    does not grow with the inventory; a record whose `lastModified` we already hold is not written again. Every KEV
+    record is kept, not only those of mapped products: a product mapped later then matches at its next scan instead
+    of after the next refresh. NVD mirrors CISA with a lag (the two entries CISA added on 27 Nov 2026 were not
+    flagged yet that evening), so a CISA entry still without an NVD record is looked up by id during its first
+    `KEV_LAG_DAYS` in the catalogue, at most `KEV_LAG_MAX` per refresh.
+    """
+    held = _held_versions(factory)
+
+    def unchanged(record: CveRecord) -> bool:
+        return record.last_modified_at is not None and held.get(record.cve_id) == record.last_modified_at
+
+    result = _load_nvd(factory, nvd.iter_kev(), skip=unchanged)
+    for cve_id in _kev_lagging(factory):
+        found = _load_nvd(factory, nvd.iter_cve(cve_id))
+        result.stored, result.skipped = result.stored + found.stored, result.skipped + found.skipped
+    return result
+
+
+def _held_versions(factory: sessionmaker[Session]) -> dict[str, datetime]:
+    """The `lastModified` of each CVE whose record we already hold (a few tens of thousands of short rows)."""
+    with factory() as session:
+        rows = session.execute(select(m.Cve.id, m.Cve.last_modified_at).where(m.Cve.fetched_at.is_not(None)))
+        return {cve_id: modified for cve_id, modified in rows if modified is not None}
+
+
+def _kev_lagging(factory: sessionmaker[Session]) -> list[str]:
+    """CISA entries of the last `KEV_LAG_DAYS` that still have no NVD record, newest first."""
+    since = datetime.now(UTC).date() - timedelta(days=KEV_LAG_DAYS)
+    with factory() as session:
+        return list(
+            session.scalars(
+                select(m.KevEntry.cve_id)
+                .join(m.Cve, m.Cve.id == m.KevEntry.cve_id)
+                .where(m.Cve.fetched_at.is_(None), m.KevEntry.date_added >= since)
+                .order_by(m.KevEntry.date_added.desc(), m.KevEntry.cve_id)
+                .limit(KEV_LAG_MAX)
+            )
+        )
 
 
 class _Counted(Protocol):

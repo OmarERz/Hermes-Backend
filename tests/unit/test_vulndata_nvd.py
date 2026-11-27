@@ -178,3 +178,19 @@ def test_rate_limit_depends_on_the_key() -> None:
     with_key = nvd_client(SecretStr("k"))
     assert without.source.limiter is not None and with_key.source.limiter is not None
     assert (without.source.limiter.max_calls, with_key.source.limiter.max_calls) == (5, 50)
+
+
+def test_the_kev_query_asks_for_every_kev_cve_whatever_its_publication_date() -> None:
+    """ESC-09/10: `hasKev` is a flag; NVD takes it with an empty value (checked on 27 Nov 2026)."""
+    client, seen = client_over(page("nvd_kev_page.json"))
+    ids = [i["cve"]["id"] for i in client.iter_kev()]
+    assert "CVE-2016-5195" in ids and len(ids) == page("nvd_kev_page.json")["totalResults"]
+    assert seen[0].url.params["hasKev"] == ""
+    assert not {"pubStartDate", "pubEndDate", "virtualMatchString"} & set(seen[0].url.params)
+
+
+def test_one_cve_is_asked_by_its_id() -> None:
+    client, seen = client_over(page("nvd_page2.json") | {"totalResults": 1})
+    list(client.iter_cve("CVE-2026-0003"))
+    assert seen[0].url.params["cveId"] == "CVE-2026-0003"
+    assert len(seen) == 1

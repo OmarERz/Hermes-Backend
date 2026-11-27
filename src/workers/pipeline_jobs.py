@@ -48,7 +48,7 @@ RECALC_REQUEST_SECONDS = 10.0  # a saved formula is recalculated within seconds 
 NIGHTLY_RECALC_SECONDS = 24 * 3600.0  # F-17
 VULNDATA_SECONDS = (
     VULNDATA_REFRESH_MINUTES * 60.0
-)  # ESC-09: NVD recent publications, KEV and EPSS once a day (and at start)
+)  # ESC-09: NVD recent publications, KEV, EPSS and the NVD records of KEV CVEs once a day (and at start)
 INVENTORY_SECONDS = 6 * 3600.0  # ARQ-03
 
 
