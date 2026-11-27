@@ -307,6 +307,138 @@ def test_only_branch_facts_get_the_branch_match() -> None:
     assert not TraceableFact(FactKind.COMMAND, "3.0.23").in_quote("fixed in v3.0.23")
 
 
+@pytest.mark.parametrize(
+    ("action", "expected"),
+    [
+        ("Instalar la versión 3.0.23 64-bit de OpenSSL.", ["3.0.23"]),  # 64 is not a version once 3.0.23 is read
+        ("Actualizar la rama 4 de OpenSSL a 3.0.23.", ["4.x", "3.0.23"]),  # a major branch is a fact too
+        ("Actualizar OpenSSL de la rama «3.0» a 3.0.23.", ["3.0.x", "3.0.23"]),
+        ('Upgrade the "3.0" branch to 3.0.23.', ["3.0.x", "3.0.23"]),
+        ("Editar la línea 42 del archivo de configuración.", []),  # a line number is not a branch
+        ("Use the 4 branch of OpenSSL and update to 3.0.23.", ["4.x", "3.0.23"]),
+        ("Keep the 3 branches in sync.", []),  # a count of branches is not a branch
+        ("Actualizar la serie 4 de OpenSSL a 3.0.23.", ["4.x", "3.0.23"]),
+    ],
+)
+def test_forced_t1_findings_extraction(action: str, expected: list[str]) -> None:
+    assert texts(action) == expected
+
+
+@pytest.mark.parametrize(
+    ("action", "status"),
+    [
+        ("Instalar la versión 3.0.23 64-bit de OpenSSL.", MitigationStatus.ACCEPTED),
+        ("Actualizar OpenSSL de la rama «3.0» a 3.0.23.", MitigationStatus.ACCEPTED),
+        ("Actualizar OpenSSL de la rama “3.0” a 3.0.23.", MitigationStatus.ACCEPTED),
+        ("Actualizar la rama 3 de OpenSSL a 3.0.23.", MitigationStatus.ACCEPTED),
+        ("Actualizar la rama 4 de OpenSSL a 3.0.23.", MitigationStatus.DISCARDED),
+        ("Use the 4 branch of OpenSSL and update to 3.0.23.", MitigationStatus.DISCARDED),
+        ("Actualizar la serie 4 de OpenSSL a 3.0.23.", MitigationStatus.DISCARDED),
+        ("Actualizar la serie 3 de OpenSSL a 3.0.23.", MitigationStatus.ACCEPTED),
+        ("Actualizar OpenSSL de la rama «3.1» a 3.0.23.", MitigationStatus.DISCARDED),
+    ],
+)
+def test_forced_t1_findings_validation(action: str, status: MitigationStatus) -> None:
+    result = validate_mitigation([step(action=action, quote=OPENSSL_RANGE)], openssl_package())
+    assert result.status is status
+    assert result.rule == (None if status is MitigationStatus.ACCEPTED else "JUE-MIT-03")
+
+
+@pytest.mark.parametrize(
+    ("quote", "backed"),
+    [
+        ("For help, contact 3.0.23.support.example.", False),  # a host name is not a version
+        ("For help, contact 3.0.23-1.support.example.", False),
+        ("For help, contact 3.0.23.SUPPORT.EXAMPLE.", False),  # in any case
+        ("See DOCS.EXAMPLE.ORG/?id=3.0.23 for help.", False),
+        ("See docs.example.org?id=3.0.23 for help.", False),  # a query without a path
+        ("See docs.example.org:8443/?id=3.0.23 for help.", False),  # a port
+        ("See 10.0.0.1:8443/?id=3.0.23 for help.", False),
+        ("For help, contact 3.0.23.example.", False),  # one alphabetic label that is no version qualifier
+        ("Fixed in v3.0.0rc1.", True),
+        ("Fixed in 3.0.0.beta.", True),
+        ("Is it fixed in 3.0.23?", True),  # a question mark alone is no query
+        ("Fixed in 1.1.1w and 3.0.23.", True),
+        ("See https://docs.example.org/?id=3.0.23 for help.", False),  # nor a URL
+        ("See docs.example.org/?id=3.0.23 for help.", False),
+        ("see 3.0.23.tar.gz", False),
+        ("fixed in 3.0.23-1.el9_2", True),  # a Red Hat release of the line
+        ("fixed in 3.0.0rc1", True),
+        ("Fixed in version 3.0.23.post1.", True),
+        ("Fixed in 3.0.23.Final.", True),
+        ("Fixed in 3.0.23 (see docs.example.org).", True),
+    ],
+)
+def test_a_branch_is_not_backed_by_a_host_name(quote: str, backed: bool) -> None:
+    assert TraceableFact(FactKind.BRANCH, "3.0.x").in_quote(quote) is backed
+
+
+@pytest.mark.parametrize(
+    ("action", "version", "quote"),
+    [
+        ("Actualizar httpd a 2.4.57-5.el9_2.", "2.4.57-5.el9_2", "Fixed in httpd 2.4.57-5.el9_2 for RHEL 9."),
+        ("Actualizar OpenSSL a 3.0.23.post1.", "3.0.23.post1", "Fixed in version 3.0.23.post1."),
+    ],
+)
+def test_a_suffixed_version_copied_as_quoted_is_not_read_as_a_host(action: str, version: str, quote: str) -> None:
+    assert [(fact.kind, fact.text) for fact in traceable_facts(action)] == [(FactKind.VERSION, version)]
+    result = validate_mitigation([step(action=action, quote=quote)], openssl_package(f" {quote}"))
+    assert (result.status, result.rule) == (MitigationStatus.ACCEPTED, None)
+
+
+def test_hosts_are_still_facts_in_any_case() -> None:
+    assert [(f.kind, f.text) for f in traceable_facts("Descargar de EVIL.EXAMPLE.COM/x.")] == [
+        (FactKind.HOST, "EVIL.EXAMPLE.COM/x")
+    ]
+    assert [f.text for f in traceable_facts("Ver evil.example.com2 ahora.")] == ["evil.example.com2"]  # whole
+    assert texts("Ver e.g. U.S.A. y 1password.com") == ["1password.com"]
+    assert texts("Ver docs.example.org:8443/?id=3.0.23 ya.") == ["docs.example.org:8443/?id=3.0.23"]
+    assert texts("Ver docs.example.org?id=3.0.23 ya.") == ["docs.example.org?id=3.0.23"]
+
+
+def test_a_host_is_never_truncated_to_one_the_quote_has() -> None:
+    quote = "Contact vendor.example for the fix."
+    result = validate_mitigation(
+        [step(action="Consultar vendor.example.invalid2.", quote=quote)], openssl_package(f" {quote}")
+    )
+    assert result.rule == "JUE-MIT-03"
+
+
+def test_a_url_in_the_quote_does_not_back_a_version_either() -> None:
+    assert not TraceableFact(FactKind.VERSION, "3.0.23").in_quote("See https://docs.example.org/?id=3.0.23 now.")
+    assert not TraceableFact(FactKind.VERSION, "3.0.23").in_quote("See DOCS.EXAMPLE.ORG/?id=3.0.23 now.")
+    assert TraceableFact(FactKind.VERSION, "5.4.24.Final").in_quote("Fixed in 5.4.24.Final.")
+    assert TraceableFact(FactKind.VERSION, "2.4.57-5.el9").in_quote("Fixed in httpd-2.4.57-5.el9 too.") is False
+    assert TraceableFact(FactKind.VERSION, "2.4.57-5.el9").in_quote("Fixed in httpd 2.4.57-5.el9 too.")
+    assert TraceableFact(FactKind.VERSION, "3.0.23").in_quote("Fixed in 3.0.23, see https://docs.example.org/.")
+    assert TraceableFact(FactKind.VERSION, "3.0.23.post1").in_quote("Fixed in version 3.0.23.post1.")
+
+
+@pytest.mark.parametrize("action", ["Actualizar OpenSSL a 3.0.0rc1.", "Actualizar OpenSSL de la rama 3.0 a v3.0.0rc1."])
+def test_a_v_prefixed_suffixed_version_in_the_quote_backs_the_step(action: str) -> None:
+    quote = "Fixed in v3.0.0rc1."
+    assert all(fact.kind is not FactKind.HOST for fact in traceable_facts(action))
+    result = validate_mitigation([step(action=action, quote=quote)], openssl_package(f" {quote}"))
+    assert (result.status, result.rule) == (MitigationStatus.ACCEPTED, None)
+
+
+@pytest.mark.parametrize(
+    "quote", ["See docs.example.org?id=3.0.23 for help.", "For help, contact 3.0.23.example.", "See 3.0.23.com now."]
+)
+def test_an_address_in_the_quote_does_not_back_a_version_step(quote: str) -> None:
+    for action in ("Actualizar OpenSSL a 3.0.23.", "Actualizar OpenSSL de la rama 3.0."):
+        result = validate_mitigation([step(action=action, quote=quote)], openssl_package(f" {quote}"))
+        assert result.rule == "JUE-MIT-03", (action, quote)
+
+
+def test_a_host_name_in_the_quote_does_not_back_a_branch_step() -> None:
+    quote = "For help, contact 3.0.23.support.example."
+    result = validate_mitigation(
+        [step(action="Actualizar OpenSSL de la rama 3.0.", quote=quote)], openssl_package(f" {quote}")
+    )
+    assert result.rule == "JUE-MIT-03"
+
+
 def test_a_v_prefixed_version_matches_the_quote() -> None:
     assert validate_mitigation([step(action="Actualizar a v2.4.60.")], package()).status is MitigationStatus.ACCEPTED
 
