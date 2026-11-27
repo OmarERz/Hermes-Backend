@@ -28,11 +28,23 @@ tests {
       for (const category of item.categories) expect(classes).to.include(category);
     }
   });
+
+  test("every product counts its installations by status and licence", function () {
+    for (const item of res.body.items) {
+      expect(Object.keys(item.by_status).sort()).to.deep.equal(["active", "inactive", "unknown"]);
+      expect(Object.values(item.by_status).reduce((a, b) => a + b, 0)).to.equal(item.instances);
+      expect(Object.keys(item.by_category)).to.deep.equal(item.categories);
+      expect(item.licensed_instances).to.be.at.most(item.instances);
+      const covered = item.licences.reduce((total, licence) => total + licence.instances, 0);
+      expect(covered).to.be.at.most(item.licensed_instances);
+      for (const licence of item.licences) expect(licence.perpetual).to.be.a("boolean");
+    }
+  });
 }
 
 docs {
-  The software catalogue with the categories of each product's live installations (ST-2, user decision 1 of
-  the F18.3 proposal).
+  The software catalogue with, per product, the categories of its live installations (ST-2, user decision 1 of
+  the F18.3 proposal), its installations per category and per status, and its live licences (ST-3, §9.1).
 
   operationId: list_inventory_software
 }

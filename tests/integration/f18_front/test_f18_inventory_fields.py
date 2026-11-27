@@ -3,7 +3,8 @@
 Seeded: CI-1 (16 vCPU, 64 GB) and CI-2 (4 vCPU, 8 GB) with OpenSSL as `OtherSoftware`, active on CI-1 with the
 live licence "Soporte OpenSSL", inactive on CI-2. Added here: CI-3's OpenSSL is a `WebServer`, CI-2's unmapped
 product a `DBServer` with a removed licence, the decommissioned CI-4's OpenSSL a `Middleware` and a removed
-installation on CI-1 a `PCSoftware`; neither of the last two may count. CI-1 gets a description.
+installation on CI-1 a `PCSoftware`; neither of the last two may count. CI-1 gets a description and OpenSSL a
+second live licence assigned to no installation.
 """
 
 from __future__ import annotations
@@ -35,7 +36,14 @@ def categorised(database: tuple[str, Engine], front: Front) -> Front:
         retired = m.SoftwareLicence(
             itop_licence_id="LIC-90", name="Retirada", perpetual=True, synced_at=T0, removed_at=T0
         )
-        session.add(retired)
+        extended = m.SoftwareLicence(
+            itop_licence_id="LIC-2",
+            software_product_id=installs["SI-1"].software_product_id,
+            name="Soporte extendido",
+            perpetual=True,
+            synced_at=T0,
+        )
+        session.add_all([retired, extended])
         session.flush()
         unmapped = installs["SI-90"]
         unmapped.itop_class, unmapped.status, unmapped.software_licence_id = "DBServer", "active", retired.id
@@ -109,6 +117,31 @@ def test_software_catalogue_shows_and_filters_the_categories(get: Get, categoris
     assert names(category="DBServer") == ["Software sin mapeo CPE"]
     assert names(category="Middleware") == [] and names(category="PCSoftware") == []
     assert names(category="OtherSoftware", has_cpe=True) == ["OpenSSL"]
+
+
+def test_software_catalogue_counts_installations_by_category_status_and_licence(get: Get, categorised: Front) -> None:
+    items = {s["name"]: s for s in get("/api/inventory/software")["items"]}
+    openssl = items["OpenSSL"]
+    # CI-1 active, CI-2 inactive, CI-3 without a status; CI-4 (decommissioned) and SI-91 (removed) do not count
+    assert openssl["by_category"] == {"OtherSoftware": 2, "WebServer": 1}
+    assert openssl["by_status"] == {"active": 1, "inactive": 1, "unknown": 1}
+    assert openssl["licensed_instances"] == 1
+    assert [(lic["name"], lic["perpetual"], lic["instances"]) for lic in openssl["licences"]] == [
+        ("Soporte extendido", True, 0),  # live and tied to the product, assigned to no installation
+        ("Soporte OpenSSL", False, 1),
+    ]
+    assert openssl["licences"][1] == {
+        "name": "Soporte OpenSSL",
+        "usage_limit": "10 servidores",
+        "start_date": "2026-01-01",
+        "end_date": "2026-12-31",
+        "perpetual": False,
+        "instances": 1,
+    }
+    unmapped = items["Software sin mapeo CPE"]
+    # its installation points to a removed licence: neither counted nor listed
+    assert unmapped["by_status"] == {"active": 1, "inactive": 0, "unknown": 0}
+    assert unmapped["licensed_instances"] == 0 and unmapped["licences"] == []
 
 
 def test_software_catalogue_refuses_an_unknown_category(client: TestClient) -> None:

@@ -949,6 +949,12 @@ class SoftwareFilters(_Model):
     )
 
 
+class CatalogueLicence(SoftwareLicenceInfo):
+    """A live iTop licence of a catalogue product (F18.3 proposal §9.1). Its key is never read from iTop."""
+
+    instances: int = Field(description="Instalaciones vivas del producto con esta licencia asignada en iTop.")
+
+
 class SoftwareItem(_Model):
     id: str
     name: str
@@ -964,6 +970,25 @@ class SoftwareItem(_Model):
         default_factory=list,
         description="Categorías distintas (clase de iTop) de sus instalaciones vivas, en orden alfabético; vacía "
         "si ninguna se ha sincronizado con su clase.",
+    )
+    by_category: dict[str, int] = Field(
+        default_factory=dict,
+        description="Instalaciones vivas por categoría (clase de iTop); las que aún no tienen categoría no cuentan.",
+    )
+    by_status: dict[str, int] = Field(
+        default_factory=dict,
+        description="Instalaciones vivas por estado en iTop, siempre con las tres claves: `active`, `inactive` y "
+        "`unknown` (sin dato). Solo informativo: una instalación inactiva se sigue escaneando.",
+    )
+    licences: list[CatalogueLicence] = Field(
+        default_factory=list,
+        description="Licencias vivas del producto en iTop, asignadas o no, por nombre; cada una con las "
+        "instalaciones vivas del producto que la tienen asignada.",
+    )
+    licensed_instances: int = Field(
+        default=0,
+        description="Instalaciones vivas del producto con alguna licencia viva asignada en iTop (aunque iTop la haya "
+        "ligado a la licencia de otro software).",
     )
 
 

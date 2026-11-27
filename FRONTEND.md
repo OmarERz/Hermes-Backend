@@ -216,9 +216,13 @@ Todo error responde con:
   HTML. GPU y almacenamiento no existen en iTop. Editar cualquiera de estos datos es un enlace a iTop.
   Las rutas de inventario traen lo mismo (F18.4): cada CI de `GET /api/inventory/assets` trae `description`,
   `cpu` y `ram` (además de `itop_class`); cada instalación de `GET /api/inventory/assets/{ci_id}/software` trae
-  `category`, `status`, `description` y `licence`; cada producto de `GET /api/inventory/software` trae
-  `categories` (las categorías distintas de sus instalaciones vivas, en orden alfabético; vacía si ninguna está
-  sincronizada) y la lista acepta `?category=` (incluye el producto si **alguna** de sus instalaciones la tiene).
+  `category`, `status`, `description` y `licence`; cada producto de `GET /api/inventory/software` trae, sobre
+  sus instalaciones vivas, `categories` (las categorías distintas, en orden alfabético; vacía si ninguna está
+  sincronizada), `by_category` (instalaciones por categoría), `by_status` (instalaciones `active`, `inactive` y
+  `unknown`, siempre las tres claves), `licences` (las licencias vivas del producto, asignadas o no, por nombre,
+  cada una con `instances`: cuántas de sus instalaciones la tienen) y `licensed_instances` (instalaciones con
+  alguna licencia asignada). La lista acepta `?category=` (incluye el producto si **alguna** de sus instalaciones
+  la tiene). Las gráficas «por categoría», «por estado» y «por licencia» cuentan instalaciones: suma esos conteos.
 - **Privacidad:** el backend no devuelve correos de otros usuarios en vistas de lectura; usa el nombre que venga.
 - **Secretos:** ninguna respuesta trae una llave. El asistente y la pantalla de conexiones solo **verifican**; las
   llaves se configuran en el servidor (`.env` / Docker secrets), nunca desde el front.

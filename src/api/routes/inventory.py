@@ -16,6 +16,7 @@ from api.routes._db import SessionDep
 from api.routes._paths import CiId
 from api.routes.findings import ItopUrl, licence_info
 from api.routes.models import (
+    CatalogueLicence,
     Classification,
     Criticality,
     InstalledSoftwareItem,
@@ -135,8 +136,9 @@ def inventory_summary(session: SessionDep) -> InventorySummary:
 def inventory_software(
     params: PageQuery, signer: Signer, session: SessionDep, filters: Annotated[SoftwareFilters, Query()]
 ) -> Page[SoftwareItem]:
-    """Software installed on live CIs, alphabetical (ST-1): versions, instances, CPE, its worst open level and the
-    iTop categories of its live installations (ST-2), filtered by any of them."""
+    """Software installed on live CIs, alphabetical (ST-1): versions, instances, CPE, its worst open level and,
+    from iTop, its live installations per category (ST-2, filtered by any of them) and per status, and its live
+    licences with the installations each one covers (ST-3, proposal §9.1)."""
     found, next_key = assets.list_software(
         session,
         assets.SoftwareQuery(
@@ -163,6 +165,15 @@ def inventory_software(
                 open_vulnerabilities=s.open_vulnerabilities,
                 worst_level=cast(Level | None, s.worst_level),
                 categories=cast(list[SoftwareCategory], s.categories),
+                by_category=s.by_category,
+                by_status=s.by_status,
+                licences=[
+                    CatalogueLicence.model_validate(
+                        {**licence_info(item.licence).model_dump(), "instances": item.instances}
+                    )
+                    for item in s.licences
+                ],
+                licensed_instances=s.licensed_instances,
             )
             for s in found
         ],
@@ -192,7 +203,7 @@ def asset_software(ci_id: CiId, session: SessionDep) -> list[InstalledSoftwareIt
             category=cast(SoftwareCategory | None, i.category),
             status=cast(Literal["active", "inactive"] | None, i.status),
             description=i.description,
-            licence=licence_info(i.licence),
+            licence=None if i.licence is None else licence_info(i.licence),
         )
         for i in found
     ]

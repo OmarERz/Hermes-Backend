@@ -1021,6 +1021,73 @@
         "title": "CalibrationProposal",
         "type": "object"
       },
+      "CatalogueLicence": {
+        "additionalProperties": false,
+        "description": "A live iTop licence of a catalogue product (F18.3 proposal §9.1). Its key is never read from iTop.",
+        "properties": {
+          "end_date": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Vencimiento (AAAA-MM-DD); nulo si iTop no tiene fecha.",
+            "title": "End Date"
+          },
+          "instances": {
+            "description": "Instalaciones vivas del producto con esta licencia asignada en iTop.",
+            "title": "Instances",
+            "type": "integer"
+          },
+          "name": {
+            "description": "Nombre.",
+            "title": "Name",
+            "type": "string"
+          },
+          "perpetual": {
+            "description": "Licencia perpetua en iTop (sin vencimiento).",
+            "title": "Perpetual",
+            "type": "boolean"
+          },
+          "start_date": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Fecha de inicio (AAAA-MM-DD).",
+            "title": "Start Date"
+          },
+          "usage_limit": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Límite de uso tal como está en iTop (texto libre).",
+            "title": "Usage Limit"
+          }
+        },
+        "required": [
+          "name",
+          "usage_limit",
+          "start_date",
+          "end_date",
+          "perpetual",
+          "instances"
+        ],
+        "title": "CatalogueLicence",
+        "type": "object"
+      },
       "CompanyProfile": {
         "additionalProperties": false,
         "examples": [
@@ -5046,6 +5113,14 @@
         "additionalProperties": false,
         "examples": [
           {
+            "by_category": {
+              "OtherSoftware": 3
+            },
+            "by_status": {
+              "active": 2,
+              "inactive": 1,
+              "unknown": 0
+            },
             "categories": [
               "OtherSoftware"
             ],
@@ -5054,6 +5129,17 @@
             "has_cpe": true,
             "id": "0192f3a9-5061-7273-9e8f-9a0b1c2d3e4f",
             "instances": 3,
+            "licences": [
+              {
+                "end_date": "2026-12-31",
+                "instances": 1,
+                "name": "Soporte OpenSSL",
+                "perpetual": false,
+                "start_date": "2026-01-01",
+                "usage_limit": "10 servidores"
+              }
+            ],
+            "licensed_instances": 1,
             "name": "OpenSSL",
             "open_vulnerabilities": 2,
             "version_known": true,
@@ -5064,6 +5150,22 @@
           }
         ],
         "properties": {
+          "by_category": {
+            "additionalProperties": {
+              "type": "integer"
+            },
+            "description": "Instalaciones vivas por categoría (clase de iTop); las que aún no tienen categoría no cuentan.",
+            "title": "By Category",
+            "type": "object"
+          },
+          "by_status": {
+            "additionalProperties": {
+              "type": "integer"
+            },
+            "description": "Instalaciones vivas por estado en iTop, siempre con las tres claves: `active`, `inactive` y `unknown` (sin dato). Solo informativo: una instalación inactiva se sigue escaneando.",
+            "title": "By Status",
+            "type": "object"
+          },
           "categories": {
             "description": "Categorías distintas (clase de iTop) de sus instalaciones vivas, en orden alfabético; vacía si ninguna se ha sincronizado con su clase.",
             "items": {
@@ -5109,6 +5211,20 @@
           "instances": {
             "description": "Instalaciones del software en CIs vigentes.",
             "title": "Instances",
+            "type": "integer"
+          },
+          "licences": {
+            "description": "Licencias vivas del producto en iTop, asignadas o no, por nombre; cada una con las instalaciones vivas del producto que la tienen asignada.",
+            "items": {
+              "$ref": "#/components/schemas/CatalogueLicence"
+            },
+            "title": "Licences",
+            "type": "array"
+          },
+          "licensed_instances": {
+            "default": 0,
+            "description": "Instalaciones vivas del producto con alguna licencia viva asignada en iTop (aunque iTop la haya ligado a la licencia de otro software).",
+            "title": "Licensed Instances",
             "type": "integer"
           },
           "name": {
@@ -10649,7 +10765,7 @@
     },
     "/api/inventory/software": {
       "get": {
-        "description": "El software instalado en CIs vigentes, en orden alfabético: versiones, instancias, CIs, CPE, el peor nivel de sus vulnerabilidades abiertas y las categorías de iTop de sus instalaciones vivas (D-088). Filtros, entre ellos la categoría (incluye el producto si alguna instalación la tiene). Pagina por cursor. Rol mínimo: `reader`.",
+        "description": "El software instalado en CIs vigentes, en orden alfabético: versiones, instancias, CIs, CPE, el peor nivel de sus vulnerabilidades abiertas y, de iTop (D-088), sus instalaciones vivas por categoría y por estado, sus licencias vivas (asignadas o no) con las instalaciones que cubre cada una y cuántas instalaciones tienen licencia. Filtros, entre ellos la categoría (incluye el producto si alguna instalación la tiene). Pagina por cursor. Rol mínimo: `reader`.",
         "operationId": "list_inventory_software",
         "parameters": [
           {

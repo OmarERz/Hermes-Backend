@@ -438,9 +438,10 @@ OPERATIONS: Final[dict[tuple[str, str], Op]] = {
         "inventory",
         "Software del inventario",
         "El software instalado en CIs vigentes, en orden alfabético: versiones, instancias, CIs, CPE, el peor nivel "
-        "de sus vulnerabilidades abiertas y las categorías de iTop de sus instalaciones vivas (D-088). Filtros, "
-        "entre ellos la categoría (incluye el producto si alguna instalación la tiene). Pagina por cursor. "
-        "Rol mínimo: `reader`.",
+        "de sus vulnerabilidades abiertas y, de iTop (D-088), sus instalaciones vivas por categoría y por estado, "
+        "sus licencias vivas (asignadas o no) con las instalaciones que cubre cada una y cuántas instalaciones "
+        "tienen licencia. Filtros, entre ellos la categoría (incluye el producto si alguna instalación la tiene). "
+        "Pagina por cursor. Rol mínimo: `reader`.",
     ),
     ("GET", "/api/inventory/assets/{ci_id}/software"): Op(
         "list_asset_software",
@@ -1355,6 +1356,19 @@ EXAMPLES: Final[dict[str, list[dict[str, Any]]]] = {
             "open_vulnerabilities": 2,
             "worst_level": "critical",
             "categories": ["OtherSoftware"],
+            "by_category": {"OtherSoftware": 3},
+            "by_status": {"active": 2, "inactive": 1, "unknown": 0},
+            "licences": [
+                {
+                    "name": "Soporte OpenSSL",
+                    "usage_limit": "10 servidores",
+                    "start_date": "2026-01-01",
+                    "end_date": "2026-12-31",
+                    "perpetual": False,
+                    "instances": 1,
+                }
+            ],
+            "licensed_instances": 1,
         }
     ],
     "JudgeDetail": [
