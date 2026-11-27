@@ -1,0 +1,38 @@
+meta {
+  name: tickets-numeric-id
+  type: http
+  seq: 6
+}
+
+get {
+  url: {{baseUrl}}/api/tickets?limit=50
+  body: none
+  auth: bearer
+}
+
+auth:bearer {
+  token: {{readerToken}}
+}
+
+assert {
+  res.status: eq 200
+  res.body.items: isArray
+}
+
+tests {
+  test("every ticket gives the numeric iTop id its filters take, or null without one", function () {
+    for (const ticket of res.body.items) {
+      // A demo ticket (`make demo`, DEMO-n) has no numeric iTop id: shown by itop_id, never offered to a filter
+      expect(ticket.ticket_itop_id === null || /^[0-9]{1,12}$/.test(ticket.ticket_itop_id)).to.equal(true);
+      expect(ticket.itop_id).to.be.a("string");
+      if (ticket.ticket_itop_id === null) expect(ticket.itop_id).to.not.match(/^[0-9]{1,12}$/);
+    }
+  });
+}
+
+docs {
+  The ticket list shows the iTop reference once it exists (`itop_id`) and gives the numeric id (`ticket_itop_id`)
+  that the `ticket_itop_id` filters and the feedback take (F18.4); null for a ticket without one (demo ids).
+
+  operationId: list_tickets
+}

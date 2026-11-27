@@ -157,7 +157,11 @@ OPERATIONS: Final[dict[tuple[str, str], Op]] = {
         "usa Slack. Nunca cambia el puntaje por sí mismo. Rol mínimo: `analyst`.",
     ),
     ("GET", "/api/tickets"): Op(
-        "list_tickets", "tickets", "Listar tickets", "Tickets ya creados en iTop, los más urgentes primero."
+        "list_tickets",
+        "tickets",
+        "Listar tickets",
+        "Tickets ya creados en iTop, los más urgentes primero. Cada uno trae su referencia para mostrar (`itop_id`) "
+        "y su id numérico (`ticket_itop_id`), que es el que aceptan los filtros `ticket_itop_id` y el feedback.",
     ),
     ("GET", "/api/alerts"): Op(
         "list_alerts",
@@ -417,9 +421,9 @@ OPERATIONS: Final[dict[tuple[str, str], Op]] = {
         "inventory",
         "Inventario de activos",
         "Todos los CIs vigentes de la réplica de iTop, con o sin hallazgos, en orden alfabético: clase, criticidad, "
-        "exposición, clasificación, dueño, custodio, liga a iTop, hallazgos abiertos, en KEV y su riesgo (el mayor "
-        "final de sus hallazgos abiertos, nunca una suma). Búsqueda y filtros. Pagina por cursor. "
-        "Rol mínimo: `reader`.",
+        "exposición, clasificación, dueño, custodio, descripción, CPU y RAM de iTop (D-088), liga a iTop, hallazgos "
+        "abiertos, en KEV y su riesgo (el mayor final de sus hallazgos abiertos, nunca una suma). Búsqueda y "
+        "filtros. Pagina por cursor. Rol mínimo: `reader`.",
     ),
     ("GET", "/api/inventory/summary"): Op(
         "get_inventory_summary",
@@ -433,15 +437,19 @@ OPERATIONS: Final[dict[tuple[str, str], Op]] = {
         "list_inventory_software",
         "inventory",
         "Software del inventario",
-        "El software instalado en CIs vigentes, en orden alfabético: versiones, instancias, CIs, CPE y el peor nivel "
-        "de sus vulnerabilidades abiertas. Filtros. Pagina por cursor. Rol mínimo: `reader`.",
+        "El software instalado en CIs vigentes, en orden alfabético: versiones, instancias, CIs, CPE, el peor nivel "
+        "de sus vulnerabilidades abiertas y, de iTop (D-088), sus instalaciones vivas por categoría y por estado, "
+        "sus licencias vivas (asignadas o no) con las instalaciones que cubre cada una y cuántas instalaciones "
+        "tienen licencia. Filtros, entre ellos la categoría (incluye el producto si alguna instalación la tiene). "
+        "Pagina por cursor. Rol mínimo: `reader`.",
     ),
     ("GET", "/api/inventory/assets/{ci_id}/software"): Op(
         "list_asset_software",
         "inventory",
         "Software instalado en un activo",
-        "El software de un CI vigente con su versión, su CPE y el peor nivel de sus vulnerabilidades abiertas en ese "
-        "CI; 404 si el CI no está en el inventario vigente. Rol mínimo: `reader`.",
+        "El software de un CI vigente con su versión, su CPE, el peor nivel de sus vulnerabilidades abiertas en ese "
+        "CI y, de iTop, su categoría, estado, descripción y licencia viva (D-088); 404 si el CI no está en el "
+        "inventario vigente. Rol mínimo: `reader`.",
     ),
     ("GET", "/api/tickets/summary"): Op(
         "get_ticket_summary",
@@ -1030,6 +1038,8 @@ OVERRIDES: Final[dict[str, str]] = {
     "StixBundle.id": "Id del bundle (`bundle--` y un UUID).",
     "StixBundle.type": "Siempre `bundle`.",
     "Ticket.status": "Estado del ticket en iTop.",
+    "Ticket.itop_id": "Ticket en iTop para mostrar: su referencia (`R-000123`) cuando ya la tiene; si no, su id "
+    "numérico. Para filtrar usa `ticket_itop_id`.",
     "Ticket.cve": "CVE del ticket.",
     "Ticket.custodian": "Equipo custodio del ticket.",
     "VulnerabilityBand.level": "Nivel de la banda.",
@@ -1202,7 +1212,8 @@ EXAMPLES: Final[dict[str, list[dict[str, Any]]]] = {
     ],
     "Ticket": [
         {
-            "itop_id": "1234",
+            "itop_id": "R-001234",
+            "ticket_itop_id": "1234",
             "url": "https://itop.example.test/pages/UI.php?operation=details&class=UserRequest&id=1234",
             "cve": "CVE-2026-10001",
             "custodian": "Infraestructura Linux",
@@ -1327,6 +1338,9 @@ EXAMPLES: Final[dict[str, list[dict[str, Any]]]] = {
             "risk": 90,
             "level": "critical",
             "software_count": 4,
+            "description": "Servidor del front de pagos",
+            "cpu": "16 vCPU",
+            "ram": "64 GB",
         }
     ],
     "SoftwareItem": [
@@ -1341,6 +1355,20 @@ EXAMPLES: Final[dict[str, list[dict[str, Any]]]] = {
             "has_cpe": True,
             "open_vulnerabilities": 2,
             "worst_level": "critical",
+            "categories": ["OtherSoftware"],
+            "by_category": {"OtherSoftware": 3},
+            "by_status": {"active": 2, "inactive": 1, "unknown": 0},
+            "licences": [
+                {
+                    "name": "Soporte OpenSSL",
+                    "usage_limit": "10 servidores",
+                    "start_date": "2026-01-01",
+                    "end_date": "2026-12-31",
+                    "perpetual": False,
+                    "instances": 1,
+                }
+            ],
+            "licensed_instances": 1,
         }
     ],
     "JudgeDetail": [

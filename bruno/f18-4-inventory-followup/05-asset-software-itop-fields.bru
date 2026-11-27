@@ -1,0 +1,47 @@
+meta {
+  name: asset-software-itop-fields
+  type: http
+  seq: 5
+}
+
+get {
+  url: {{baseUrl}}/api/inventory/assets/{{inventoryCiId}}/software
+  body: none
+  auth: bearer
+}
+
+auth:bearer {
+  token: {{readerToken}}
+}
+
+script:pre-request {
+  const hermes = require("./lib/hermes");
+  const page = await hermes.api(bru, "GET", "/api/inventory/assets?limit=1", "readerToken");
+  const first = page.items[0] || null;
+  bru.setVar("inventoryCiId", first ? first.ci_id : "");
+  if (!hermes.needData(bru, first, "a CI in the inventory")) return;
+}
+
+assert {
+  res.status: eq 200
+  res.body: isArray
+}
+
+tests {
+  test("every installation carries its iTop category, status, description and licence or null", function () {
+    const classes = ["DBServer", "Middleware", "OtherSoftware", "PCSoftware", "WebServer", null];
+    for (const item of res.body) {
+      expect(classes).to.include(item.category);
+      expect(["active", "inactive", null]).to.include(item.status);
+      expect(item).to.have.property("description");
+      expect(item.licence === null || typeof item.licence.perpetual === "boolean").to.equal(true);
+    }
+  });
+}
+
+docs {
+  The software of the first CI of the inventory with its iTop category, status, description and live licence
+  (ST-3); skipped on an empty installation.
+
+  operationId: list_asset_software
+}

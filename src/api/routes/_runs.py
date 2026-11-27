@@ -19,7 +19,7 @@ from sqlalchemy import case, func, select, tuple_
 from sqlalchemy.orm import Session, sessionmaker
 
 from api.errors import ApiError
-from api.routes.models import Run, RunFilters
+from api.routes.models import Run, RunFilters, parse_moment
 from core.db import models as m
 from core.scan.engine import queue_scan
 
@@ -101,10 +101,6 @@ def _with_launcher(session: Session, run: m.Run) -> Run:
     return to_api(run, _launcher(run, name))
 
 
-def _moment(value: str | None) -> datetime | None:
-    return datetime.fromisoformat(value.upper()) if value else None
-
-
 @dataclass
 class SqlRunSource:
     session_factory: sessionmaker[Session]
@@ -129,9 +125,9 @@ class SqlRunSource:
             if filters.status is not None:  # the API says `failed` for cancelled runs too
                 wanted = [db for db, api in STATUSES.items() if api == filters.status]
                 query = query.where(m.Run.status.in_(wanted))
-            if (since := _moment(filters.date_from)) is not None:
+            if (since := parse_moment(filters.date_from)) is not None:
                 query = query.where(m.Run.started_at >= since)
-            if (until := _moment(filters.date_to)) is not None:
+            if (until := parse_moment(filters.date_to)) is not None:
                 query = query.where(m.Run.started_at <= until)
         if after is not None:
             try:

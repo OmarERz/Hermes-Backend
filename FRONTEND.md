@@ -80,11 +80,11 @@ Los requisitos de cada pantalla (FRO-xx) están en la especificación del produc
 | Historial de puntuación | `GET /api/findings/{id}/history`, con el `finding_id` de cada activo de `GET /api/vulnerabilities/{group_id}` | reader |
 | Comparación crudo vs. procesado y cascada del Δ | `GET /api/comparison/summary`, `GET /api/comparison/table`, `GET /api/assessments/{id}/breakdown` | reader |
 | Historial de recomendaciones y feedback | `GET /api/recommendations` (filtros `group_id`, `ci_id`, `ticket_itop_id`, `level`, `verdict`, `without_feedback`), `GET /api/recommendations/{assessment_id}`, `GET /api/recommendations/{assessment_id}/judge`, `GET /api/recommendations/{id}/feedback`, `POST /api/feedback` | reader ver; analyst dar feedback |
-| Tickets y alertas | `GET /api/tickets`, `GET /api/tickets/summary`, `GET /api/tickets/updates` (filtros `ticket_itop_id`, `action`), `GET /api/alerts` | reader |
+| Tickets y alertas | `GET /api/tickets` (cada ticket trae `itop_id` para mostrar y `ticket_itop_id` para filtrar), `GET /api/tickets/summary`, `GET /api/tickets/updates` (filtros `ticket_itop_id`, `action`), `GET /api/alerts` | reader |
 | Corridas (lanzar escaneo y ver progreso en vivo) | `POST /api/scans`, `GET /api/runs` (filtros `kind`, `status`, `date_from`, `date_to`), `GET /api/runs/{id}/events` (SSE) | analyst lanzar; reader ver |
 | Historial (línea de tiempo de corridas, revisiones LLM y cambios de configuración) | `GET /api/history` (filtros `type`, `status`, `date_from`, `date_to`) | reader |
 | Telemetría de agentes (analistas y juez) | `GET /api/telemetry/summary?window=24h\|7d\|30d`, `GET /api/telemetry/daily?days=1..90`, `GET /api/telemetry/reviews` (filtros `agent`, `status`, `date_from`, `date_to`) | reader |
-| Inventario de activos y software (solo lectura; iTop es el inventario) | `GET /api/inventory/assets` (filtros `q`, `itop_class`, `criticality`, `exposed`, `classification`, `owner`, `custodian`, `with_findings`), `GET /api/inventory/summary`, `GET /api/inventory/software` (filtros `q`, `has_cpe`, `worst_level`, `with_vulnerabilities`), `GET /api/inventory/assets/{ci_id}/software` | reader |
+| Inventario de activos y software (solo lectura; iTop es el inventario) | `GET /api/inventory/assets` (filtros `q`, `itop_class`, `criticality`, `exposed`, `classification`, `owner`, `custodian`, `with_findings`), `GET /api/inventory/summary`, `GET /api/inventory/software` (filtros `q`, `has_cpe`, `worst_level`, `with_vulnerabilities`, `category`), `GET /api/inventory/assets/{ci_id}/software` | reader |
 | Exportación STIX | `POST /api/stix/export` | analyst |
 | Propuestas de calibración (modo supervisado) | `GET /api/calibration/proposals`, `POST .../{id}/approve`, `POST .../{id}/reject` | reader ver; admin decidir |
 | Métricas | `GET /api/metrics` | reader |
@@ -167,6 +167,12 @@ Todo error responde con:
   `ticket_itop_id` (el ticket que el usuario tiene a la vista) para que «no sugerir más» y «falso positivo» solo
   afecten a ese ticket; sin él se aplican a todos los tickets de la evaluación. Errores: 404 si la evaluación no
   existe, 403 si el usuario no es analista o admin activo, 422 si el ticket no es de esa evaluación.
+- **Id de un ticket (F18.4):** `ticket_itop_id` es siempre el id **numérico** de iTop, en los filtros
+  (`GET /api/tickets/updates`, `GET /api/recommendations`), en `POST /api/feedback` y en las respuestas que lo
+  traen. En `GET /api/tickets`, `itop_id` es para mostrar (la referencia `R-000123` cuando ya existe, si no el id
+  numérico) y `ticket_itop_id` es el valor que pasas a esos filtros; nunca mandes la referencia a un filtro (422).
+  `ticket_itop_id` llega nulo si el ticket no tiene un id numérico de iTop (los tickets de `make demo`, `DEMO-n`):
+  no ofrezcas filtrar por ese ticket.
 - **Motivos del juez y su cita (FRO-13):** cada recomendación trae `accepted_reasons` (`code`, `label`, `points`,
   `quote`, `ci_id`), `judge_summary`, `judge_status` y `ticket_itop_id`; `accepted_reasons` llega vacío sin juez, con
   respaldo (`no_judge_review`) o con desacuerdo. El detalle completo (motivos rechazados con su regla, ajuste
@@ -208,6 +214,15 @@ Todo error responde con:
   perpetua). CPU y RAM son texto libre de iTop: muéstralos tal cual, sin convertir. Cualquiera puede llegar nulo
   (sin dato en iTop o aún no sincronizado); la descripción es texto de iTop: muéstrala como texto, nunca como
   HTML. GPU y almacenamiento no existen en iTop. Editar cualquiera de estos datos es un enlace a iTop.
+  Las rutas de inventario traen lo mismo (F18.4): cada CI de `GET /api/inventory/assets` trae `description`,
+  `cpu` y `ram` (además de `itop_class`); cada instalación de `GET /api/inventory/assets/{ci_id}/software` trae
+  `category`, `status`, `description` y `licence`; cada producto de `GET /api/inventory/software` trae, sobre
+  sus instalaciones vivas, `categories` (las categorías distintas, en orden alfabético; vacía si ninguna está
+  sincronizada), `by_category` (instalaciones por categoría), `by_status` (instalaciones `active`, `inactive` y
+  `unknown`, siempre las tres claves), `licences` (las licencias vivas del producto, asignadas o no, por nombre,
+  cada una con `instances`: cuántas de sus instalaciones la tienen) y `licensed_instances` (instalaciones con
+  alguna licencia asignada). La lista acepta `?category=` (incluye el producto si **alguna** de sus instalaciones
+  la tiene). Las gráficas «por categoría», «por estado» y «por licencia» cuentan instalaciones: suma esos conteos.
 - **Privacidad:** el backend no devuelve correos de otros usuarios en vistas de lectura; usa el nombre que venga.
 - **Secretos:** ninguna respuesta trae una llave. El asistente y la pantalla de conexiones solo **verifican**; las
   llaves se configuran en el servidor (`.env` / Docker secrets), nunca desde el front.

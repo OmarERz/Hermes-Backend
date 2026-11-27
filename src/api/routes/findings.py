@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import logging
-from datetime import datetime
 from typing import Annotated, Final, Literal, cast
 
 from fastapi import APIRouter, Depends, Query, Request
@@ -56,6 +55,8 @@ from api.routes.models import (
     VulnerabilityFilters,
     VulnerabilityGroup,
     VulnerabilityList,
+    filter_ticket_id,
+    parse_moment,
 )
 from core.feedback.service import FeedbackRejectedError, SqlFeedbackService
 from core.views import comparison, history, judge_detail, ticket_log
@@ -94,8 +95,8 @@ def _filters(f: VulnerabilityFilters) -> views.Filters:
         exposed=f.exposed,
         in_kev=f.in_kev,
         status=f.status,
-        date_from=datetime.fromisoformat(f.date_from.upper()) if f.date_from else None,
-        date_to=datetime.fromisoformat(f.date_to.upper()) if f.date_to else None,
+        date_from=parse_moment(f.date_from),
+        date_to=parse_moment(f.date_to),
     )
 
 
@@ -227,23 +228,25 @@ def asset_detail(ci_id: CiId, session: SessionDep) -> AssetDetail:
     )
 
 
+def licence_info(licence: views.Licence) -> SoftwareLicenceInfo:
+    """An iTop licence as the API shows it (F18.3); dates as AAAA-MM-DD."""
+    return SoftwareLicenceInfo(
+        name=licence.name,
+        usage_limit=licence.usage_limit,
+        start_date=licence.start_date.isoformat() if licence.start_date else None,
+        end_date=licence.end_date.isoformat() if licence.end_date else None,
+        perpetual=licence.perpetual,
+    )
+
+
 def _asset_software(item: views.AssetSoftware) -> AssetSoftware:
-    licence = item.licence
     return AssetSoftware(
         software=item.software,
         version=item.version,
         category=cast(SoftwareCategory | None, item.category),
         status=cast(Literal["active", "inactive"] | None, item.status),
         description=item.description,
-        licence=None
-        if licence is None
-        else SoftwareLicenceInfo(
-            name=licence.name,
-            usage_limit=licence.usage_limit,
-            start_date=licence.start_date.isoformat() if licence.start_date else None,
-            end_date=licence.end_date.isoformat() if licence.end_date else None,
-            perpetual=licence.perpetual,
-        ),
+        licence=None if item.licence is None else licence_info(item.licence),
     )
 
 
@@ -560,6 +563,7 @@ def list_tickets(
                 status=t.status,
                 fixed_cis=t.fixed_cis,
                 total_cis=t.total_cis,
+                ticket_itop_id=filter_ticket_id(t.itop_ticket_id),
             )
             for t in found
         ],

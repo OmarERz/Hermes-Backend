@@ -90,7 +90,8 @@ _ALERTS: Final = text(
 @dataclass(frozen=True)
 class TicketRow:
     id: uuid.UUID
-    itop_id: str
+    itop_id: str  # the iTop reference (R-000123) once known, else the numeric id: what people read
+    itop_ticket_id: str  # the numeric iTop id: what the `ticket_itop_id` filters and the feedback take
     url: str
     cve: str
     custodian: str
@@ -132,6 +133,7 @@ def list_tickets(
         TicketRow(
             id=r.id,
             itop_id=r.itop_id,
+            itop_ticket_id=r.itop_ticket_id,
             url=ticket_url(itop_base_url, r.itop_ticket_id),
             cve=r.cve,
             custodian=r.custodian,

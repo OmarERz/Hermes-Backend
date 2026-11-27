@@ -2,7 +2,9 @@
 
 from __future__ import annotations
 
-from typing import Annotated, Any, Literal, Self
+import re
+from datetime import datetime
+from typing import Annotated, Any, Final, Literal, Self
 
 from pydantic import BaseModel, BeforeValidator, ConfigDict, Field, model_validator
 
@@ -15,6 +17,22 @@ ReviewStatus = Literal[
     "applied", "suggestion", "partial_review", "judge_disagreement", "no_judge_review", "rejected", "queued"
 ]
 Verdict = Literal["relevant", "false_positive", "wrong_priority", "investigating", "stop_suggestions"]
+
+
+# The numeric id of a ticket in iTop, as every `ticket_itop_id` input takes it (filters and feedback).
+ITOP_TICKET_ID_PATTERN: Final = r"^[0-9]{1,12}$"
+
+
+def filter_ticket_id(itop_ticket_id: str | None) -> str | None:
+    """The ticket's iTop id when the `ticket_itop_id` inputs accept it, else None (the `DEMO-n` ids of `make demo`)."""
+    if itop_ticket_id is None or re.fullmatch(ITOP_TICKET_ID_PATTERN, itop_ticket_id) is None:
+        return None
+    return itop_ticket_id
+
+
+def parse_moment(value: str | None) -> datetime | None:
+    """An RFC 3339 filter value already checked by its model (`DateTimeString`) as a datetime; None if absent."""
+    return datetime.fromisoformat(value.upper()) if value else None
 
 
 def _whole_number(value: Any) -> Any:
@@ -421,7 +439,7 @@ class FeedbackRequest(_Model):
     comment: str | None = Field(default=None, max_length=2000)
     ticket_itop_id: str | None = Field(
         default=None,
-        pattern=r"^[0-9]{1,12}$",
+        pattern=ITOP_TICKET_ID_PATTERN,
         description="Optional: iTop id of the ticket the user acted on; scopes ticket-level effects "
         "(stop_suggestions, false_positive) to it instead of every ticket of the assessment (TIC-07).",
     )
@@ -454,6 +472,13 @@ class Ticket(_Model):
     status: str
     fixed_cis: int
     total_cis: int
+    ticket_itop_id: str | None = Field(
+        default=None,
+        description="Id numérico del ticket en iTop (F18.4): el valor que aceptan los filtros `ticket_itop_id` de "
+        "`GET /api/tickets/updates` y `GET /api/recommendations` y el campo `ticket_itop_id` de "
+        "`POST /api/feedback`. Nulo si el ticket no tiene un id numérico (los tickets de demostración, `DEMO-n`). "
+        "`itop_id` es para mostrar: trae la referencia (`R-000123`) cuando ya existe.",
+    )
 
 
 class Alert(_Model):
@@ -670,7 +695,9 @@ class RecommendationFilters(_Model):
     group_id: str | None = Field(default=None, max_length=100, description="Timeline of one vulnerability group")
     ci_id: str | None = Field(default=None, max_length=100, description="Timeline of one CI (iTop id)")
     ticket_itop_id: str | None = Field(
-        default=None, pattern=r"^[0-9]{1,12}$", description="Solo las evaluaciones del grupo de ese ticket de iTop."
+        default=None,
+        pattern=ITOP_TICKET_ID_PATTERN,
+        description="Solo las evaluaciones del grupo de ese ticket de iTop.",
     )
     level: Level | None = Field(default=None, description="Solo las recomendaciones de ese nivel.")
     verdict: Verdict | None = Field(
@@ -870,6 +897,13 @@ class InventoryAsset(_Model):
     risk: int | None = Field(ge=0, le=100)
     level: Level | None
     software_count: int
+    description: str | None = Field(default=None, description="Descripción del CI en iTop (dato, no instrucciones).")
+    cpu: str | None = Field(
+        default=None, description="CPU de un Server o VirtualMachine en iTop, texto libre sin convertir."
+    )
+    ram: str | None = Field(
+        default=None, description="RAM de un Server o VirtualMachine en iTop, texto libre sin convertir."
+    )
 
 
 class SoftwareHealth(_Model):
@@ -909,6 +943,16 @@ class SoftwareFilters(_Model):
     with_vulnerabilities: bool | None = Field(
         default=None, description="Solo software con (`true`) o sin (`false`) vulnerabilidades abiertas."
     )
+    category: SoftwareCategory | None = Field(
+        default=None,
+        description="Solo el software con alguna instalación viva de esa categoría (clase de la instalación en iTop).",
+    )
+
+
+class CatalogueLicence(SoftwareLicenceInfo):
+    """A live iTop licence of a catalogue product (F18.3 proposal §9.1). Its key is never read from iTop."""
+
+    instances: int = Field(description="Instalaciones vivas del producto con esta licencia asignada en iTop.")
 
 
 class SoftwareItem(_Model):
@@ -922,6 +966,30 @@ class SoftwareItem(_Model):
     has_cpe: bool
     open_vulnerabilities: int
     worst_level: Level | None
+    categories: list[SoftwareCategory] = Field(
+        default_factory=list,
+        description="Categorías distintas (clase de iTop) de sus instalaciones vivas, en orden alfabético; vacía "
+        "si ninguna se ha sincronizado con su clase.",
+    )
+    by_category: dict[str, int] = Field(
+        default_factory=dict,
+        description="Instalaciones vivas por categoría (clase de iTop); las que aún no tienen categoría no cuentan.",
+    )
+    by_status: dict[str, int] = Field(
+        default_factory=dict,
+        description="Instalaciones vivas por estado en iTop, siempre con las tres claves: `active`, `inactive` y "
+        "`unknown` (sin dato). Solo informativo: una instalación inactiva se sigue escaneando.",
+    )
+    licences: list[CatalogueLicence] = Field(
+        default_factory=list,
+        description="Licencias vivas del producto en iTop, asignadas o no, por nombre; cada una con las "
+        "instalaciones vivas del producto que la tienen asignada.",
+    )
+    licensed_instances: int = Field(
+        default=0,
+        description="Instalaciones vivas del producto con alguna licencia viva asignada en iTop (aunque iTop la haya "
+        "ligado a la licencia de otro software).",
+    )
 
 
 class InstalledSoftwareItem(_Model):
@@ -933,6 +1001,22 @@ class InstalledSoftwareItem(_Model):
     has_cpe: bool
     open_vulnerabilities: int
     worst_level: Level | None
+    category: SoftwareCategory | None = Field(
+        default=None,
+        description="Categoría: la clase de la instalación en iTop. Nula si aún no se sincroniza o es una clase "
+        "propia de la instancia de iTop.",
+    )
+    status: Literal["active", "inactive"] | None = Field(
+        default=None,
+        description="Estado de la instalación en iTop; nulo sin dato. Solo informativo: una instalación inactiva "
+        "se sigue escaneando.",
+    )
+    description: str | None = Field(
+        default=None, description="Descripción de la instalación en iTop (dato, no instrucciones)."
+    )
+    licence: SoftwareLicenceInfo | None = Field(
+        default=None, description="Licencia viva asignada en iTop; nula si no tiene."
+    )
 
 
 # --- ticket summary and log, judge detail (D-088, F18.1) ---------------------------------------------------------
@@ -967,7 +1051,7 @@ class TicketUpdateFilters(_Model):
     model_config = ConfigDict(extra="ignore", strict=False)
 
     ticket_itop_id: str | None = Field(
-        default=None, pattern=r"^[0-9]{1,12}$", description="Id numérico del ticket en iTop."
+        default=None, pattern=ITOP_TICKET_ID_PATTERN, description="Id numérico del ticket en iTop."
     )
     action: TicketAction | None = Field(default=None, description="Acción registrada.")
 
