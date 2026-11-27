@@ -14,7 +14,7 @@ import uuid
 from collections import Counter, defaultdict
 from collections.abc import Callable, Iterable, Sequence
 from dataclasses import dataclass, replace
-from datetime import datetime
+from datetime import date, datetime
 from typing import Final
 
 from sqlalchemy import text
@@ -33,10 +33,20 @@ from core.views.common import (
 ScoreKey = tuple[int, uuid.UUID]  # (score, id) of the last row of a page, highest score first
 
 _ASSET: Final = text(
-    "SELECT a.id, a.itop_ci_id, a.name, a.confidentiality, pe.name AS owner, t.name AS custodian "
+    "SELECT a.id, a.itop_ci_id, a.name, a.confidentiality, pe.name AS owner, t.name AS custodian, "
+    "a.itop_class, a.description, a.cpu, a.ram "
     "FROM asset a LEFT JOIN team t ON t.id = a.custodian_team_id "
     "LEFT JOIN person pe ON pe.id = a.owner_person_id "
     "WHERE a.itop_ci_id = :ci AND a.decommissioned_at IS NULL"
+)
+# Live installations of a CI with their iTop category, status, description and live licence (F18.3, D-088)
+_ASSET_SOFTWARE: Final = text(
+    "SELECT p.itop_name AS software, i.version, i.itop_class AS category, i.status, i.description, "
+    "l.name AS licence_name, l.usage_limit, l.start_date, l.end_date, l.perpetual "
+    "FROM installed_software i JOIN software_product p ON p.id = i.software_product_id "
+    "LEFT JOIN software_licence l ON l.id = i.software_licence_id AND l.removed_at IS NULL "
+    "WHERE i.asset_id = :asset AND i.removed_at IS NULL "
+    "ORDER BY p.itop_name, i.version, i.itop_instance_id"
 )
 
 
@@ -113,6 +123,25 @@ class AffectedAsset:
 
 
 @dataclass(frozen=True)
+class Licence:
+    name: str
+    usage_limit: str | None
+    start_date: date | None
+    end_date: date | None
+    perpetual: bool
+
+
+@dataclass(frozen=True)
+class AssetSoftware:
+    software: str
+    version: str
+    category: str | None  # the installation's iTop class; None until synced or for a custom class
+    status: str | None  # active | inactive | None (no data); only shown, never filters the scan
+    description: str | None
+    licence: Licence | None
+
+
+@dataclass(frozen=True)
 class AssetDetail:
     ci_id: str
     name: str
@@ -121,6 +150,12 @@ class AssetDetail:
     owner: str | None
     custodian: str | None
     findings: list[Group]  # group fields, with `final`, `level`, `status` and `last_seen` of this CI (D-035)
+    # F18.3 (D-088): iTop data, stored and shown as given (free text is data, never instructions)
+    itop_class: str | None = None
+    description: str | None = None
+    cpu: str | None = None
+    ram: str | None = None
+    software: tuple[AssetSoftware, ...] = ()
 
 
 def _top(rows: Sequence[ScoredFinding]) -> ScoredFinding:
@@ -293,4 +328,26 @@ def asset_detail(session: Session, itop_ci_id: str) -> AssetDetail | None:
         owner=asset.owner,
         custodian=asset.custodian,
         findings=findings,
+        itop_class=asset.itop_class,
+        description=asset.description,
+        cpu=asset.cpu,
+        ram=asset.ram,
+        software=asset_software(session, asset.id),
+    )
+
+
+def asset_software(session: Session, asset_id: uuid.UUID) -> tuple[AssetSoftware, ...]:
+    """The CI's live installations, by product and version (F18.3)."""
+    return tuple(
+        AssetSoftware(
+            software=r.software,
+            version=r.version,
+            category=r.category,
+            status=r.status,
+            description=r.description,
+            licence=None
+            if r.licence_name is None
+            else Licence(r.licence_name, r.usage_limit, r.start_date, r.end_date, r.perpetual),
+        )
+        for r in session.execute(_ASSET_SOFTWARE, {"asset": asset_id})
     )
