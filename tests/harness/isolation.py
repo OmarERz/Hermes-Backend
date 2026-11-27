@@ -11,7 +11,9 @@ container and image carries labels naming the run and its process:
 * a run killed outright (SIGKILL) cannot clean up: the next run on this host removes the containers and tags whose
   process is gone (`sweep_dead_runs`), and leaves everything of a live run alone. Compose stacks of the e2e tests
   are found by their project name (`run_name`, which carries the pid) and removed with their networks, volumes and
-  built images.
+  built images;
+* a container publishes its ports on the loopback interface only (`on_loopback`), like the Compose files do: a test
+  database or emulator never answers on the WSL or LAN address while the tests run.
 """
 
 from __future__ import annotations
@@ -31,6 +33,7 @@ from typing import Any, Final
 
 import docker
 from docker.errors import APIError, DockerException, NotFound
+from testcontainers.core.container import DockerContainer
 
 ROOT = Path(__file__).resolve().parents[2]
 RUN_ID = f"{hashlib.sha256(str(ROOT).encode()).hexdigest()[:8]}-{os.getpid()}-{secrets.token_hex(3)}"
@@ -39,6 +42,7 @@ HOST: Final = socket.gethostname()
 LABELS: Final = {LABEL: "1", f"{LABEL}.run": RUN_ID, f"{LABEL}.pid": str(os.getpid()), f"{LABEL}.host": HOST}
 COMPOSE_PROJECT: Final = "com.docker.compose.project"
 PORT_RANGE: Final = (20000, 39999)  # published test ports: below the 49152+ ranges Windows may reserve (WSL)
+LOOPBACK: Final = "127.0.0.1"  # the only host address a test container publishes on
 # A Compose project of the e2e tests: run_name("hermes-...e2e") = prefix-<repo hash>-<pid>-<random>
 E2E_PROJECT: Final = re.compile(r"^hermes-[a-z0-9-]*e2e-[0-9a-f]{8}-(\d+)-[0-9a-f]{6}$")
 
@@ -63,6 +67,19 @@ def free_port(attempts: int = 200) -> int:
                 continue  # taken: try another one
             return port
     raise RuntimeError(f"no free port in {PORT_RANGE} after {attempts} attempts")
+
+
+def on_loopback[C: DockerContainer](container: C) -> C:
+    """Publish every exposed port of `container` on 127.0.0.1 only, each on a host port Docker picks.
+
+    Testcontainers publishes an exposed port on every interface (0.0.0.0 and ::), reachable from the network for as
+    long as the tests run. docker-py takes a (host address, host port) pair for each container port, and a None port
+    lets Docker pick a free one as before. Call it after the ports are exposed and before the container starts. The
+    tests reach Docker on this host (GitHub runners included), so the loopback address is always theirs.
+    """
+    for port in list(container.ports):
+        container.ports[port] = (LOOPBACK, None)  # type: ignore[assignment]  # testcontainers types only the port
+    return container
 
 
 @contextmanager
