@@ -1,0 +1,15 @@
+# Optional, iTop side: puts the itop service on the Docker network it shares with the Hermes stack, so the backend
+# reaches http://itop:8080 (ITOP_URL) and iTop's webhook reaches http://api:8000/api/itop/webhook.
+# `make itop-up ITOP_LINK=1` creates the network (make itop-link) and adds this file; the Hermes side is
+# compose.itop-link.yaml. README, "Guía de operación" §9.
+services:
+  itop:
+    networks:
+      default:
+      hermes-itop-link:
+        aliases: [itop]
+
+networks:
+  hermes-itop-link:
+    name: hermes-itop-link
+    external: true

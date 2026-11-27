@@ -21,6 +21,47 @@ make up          # local stack: writes the Docker secret files from your env fil
 Copy `.env.example` to `.env` and set at least `POSTGRES_PASSWORD`, `MIGRATOR_DB_PASSWORD`, `APP_DB_PASSWORD` and
 `RETENTION_DB_PASSWORD` before `make up`.
 
+### Puerta antes del push (D-086)
+
+Hasta después de la entrega, el CI remoto es mínimo para ahorrar minutos de GitHub Actions: en un PR a `develop` solo
+corren `static`, `tests` y `commit-messages`; Schemathesis y SonarQube corren solo en PR y push a `main`; ya no hay
+corrida en push a `develop` (su PR ya pasó los checks); el flujo de seguridad (`security-weekly.yml`) solo se lanza a
+mano, y Dependabot no abre PR de versiones (las de seguridad siguen). Lo demás corre en tu equipo antes del push:
+
+```bash
+make prepush     # con el árbol limpio, sobre el commit que vas a publicar
+```
+
+`make prepush` (`scripts/prepush.sh`) reproduce el CI en este orden:
+
+1. `make verify`: formato, tipos, fronteras, pruebas con la puerta de cobertura, Semgrep, KICS, Gitleaks (historia desde
+   `origin/develop`, como en un PR) y pip-audit.
+2. Una pila de Compose aislada, como la de los jobs de Schemathesis y ZAP: nombre de proyecto y puertos (20000–39999)
+   propios de la corrida, contraseñas desechables en un directorio temporal fuera del repositorio, sin archivo de
+   entorno (ninguna llave real llega a la pila), el falso de embeddings (`compose.ci.yaml`) y la documentación de la API
+   activa.
+3. Tokens del emulador para admin, analista y lector; `make dynamic` (Schemathesis y la suite adversarial),
+   `make bruno` con los tres tokens y `make zap`.
+
+La pila y los secretos temporales siempre se borran (`down -v`), aunque algo falle. Tarda unos 15 minutos en un equipo
+de desarrollo: unos 5 de `make verify`, 7 de Schemathesis, 2 de ZAP y 1 de arrancar la pila. Usa los valores fijados
+en el repositorio aunque tu entorno defina otros (imágenes de los escáneres, opciones de `make` o de pytest, carpeta de
+Bruno). Si todo pasa, guarda el árbol del commit (`HEAD^{tree}`) en `.review/prepush.json` del checkout donde corrió y
+agrega una línea a `.review/prepush.log` del checkout principal, que comparten todos los worktrees (archivos locales,
+no versionados).
+
+- En el equipo de desarrollo, un hook local `pre-push` (no versionado; se instala una vez con
+  `bash scripts/hooks/pre-push --install`) rechaza el push de una rama `feat/*` si no hay una corrida en verde para el
+  árbol de ese commit. No tiene ninguna variable ni opción propia para saltarlo, y aunque un push se salte los hooks de
+  git, el merge sigue exigiendo la corrida.
+- El merge a `develop` (`scripts/hooks/merge-pr`, D-081) exige esa corrida para la cabeza del PR, y que `static`,
+  `tests` y `commit-messages` estén en verde.
+- Cualquier commit nuevo, incluido un merge de `develop`, cambia el árbol: hay que volver a correr `make prepush`. Las
+  ramas creadas antes de este cambio (por ejemplo, `feat/f15-3-worker-shutdown`) necesitan su propio `make prepush`
+  después de integrar `develop`; antes de integrarlo no tienen el target, pero pueden correr
+  `bash <checkout que lo tenga>/scripts/prepush.sh` desde su propio checkout.
+- Los títulos de los commits los revisan el hook local `commit-msg` y, en el PR, el job `commit-messages`.
+
 ## Front de personalización
 
 El front (React) lo construye otro equipo. Todo lo que necesita del backend está en [`FRONTEND.md`](FRONTEND.md).
@@ -53,6 +94,7 @@ devuelve y los registros las enmascaran.
 | Variable | Para qué |
 |---|---|
 | `ITOP_URL`, `ITOP_TOKEN`, `ITOP_SYSTEM_USER`, `ITOP_WEBHOOK_TOKEN` | Leer el CMDB y crear tickets en iTop; sin ellas no corren los trabajos de iTop |
+| `ITOP_CONSOLE_URL` | La consola de iTop que abren las personas desde los enlaces del front y de las notificaciones; vacío = `ITOP_URL`. Hace falta cuando `ITOP_URL` es un nombre que solo resuelven los contenedores (sección 9) |
 | `NVD_API_KEY` | Más cuota en NVD y consulta al diccionario CPE (sin llave solo hay candidatos locales). Sin llave, la primera carga de 90 días de NVD al arrancar tarda varios minutos y un escaneo pedido mientras tanto espera en cola |
 | `DEEPSEEK_API_KEY`, `LLM_BASE_URL_JUDGE`, `LLM_BASE_URL_ANALYSTS` | Juez y analistas de IA; **la demo nunca las usa** |
 | `LLM_PROVIDER`, `CLAUDE_CODE_MODEL_JUDGE`, `CLAUDE_CODE_MODEL_ANALYSTS`, `CLAUDE_CODE_EFFORT`, `CLAUDE_CODE_TIMEOUT_SECONDS` | Proveedor del juez y los analistas: `deepseek` (por defecto) o `claude-code`, la CLI de Claude Code con tu suscripción, solo en tu equipo (ver la sección 8) |
@@ -125,12 +167,13 @@ volumen**: no lo uses en producción.
 
 ### 6. Pasar las notificaciones a Slack
 
-Las notificaciones salen como eventos en la tabla `notification_event`; el consumidor por defecto es `log`. Cuando el
-módulo de Slack (otro equipo) esté integrado (F11), sus llaves `SLACK_BOT_TOKEN` y `SLACK_APP_TOKEN` se agregarán
-a `compose.yaml` junto con el módulo. El cambio de consumidor es entonces un parámetro que un admin edita
-(`PUT /api/config` con `{"expected_version": <versión actual>, "changes": {"notifications.consumer": "slack"}}`, o la
-pantalla de configuración); los eventos pendientes se entregan sin perderse y volver a `log` es repetir el cambio.
-Hasta entonces el único consumidor disponible es `log`.
+Las notificaciones salen como eventos en la tabla `notification_event`; el consumidor por defecto es `log`. El módulo
+de Slack (F11.1) corre como el servicio `slack` del perfil `slack` (`COMPOSE_PROFILES=slack make up`), con Bolt en
+Socket Mode; la instalación paso a paso (workspace, app desde `slack/manifest.yaml`, tokens, canales) está en
+[`SLACK.md`](SLACK.md). El cambio de consumidor es un parámetro que un admin edita (`PUT /api/config` con
+`{"expected_version": <versión actual>, "changes": {"notifications.consumer": "slack"}}`, o la pantalla de
+configuración): desde ese momento el trabajador deja los eventos y los entrega el servicio `slack`; los pendientes se
+entregan sin perderse y volver a `log` es repetir el cambio.
 
 ### 7. Proxy inverso: límites por IP y tamaño de petición
 
@@ -203,7 +246,8 @@ con lotes reales, el trabajador corre **en tu equipo**, contra la base de la pil
    `ITOP_URL=http://127.0.0.1:8080 make worker-host`.
 4. Pide un escaneo (`POST /api/scans`) y sigue el registro: cada llamada deja una línea `claude-code call` con el modelo,
    la latencia, los tokens y el costo que estima la CLI.
-5. Al terminar, `Ctrl+C` (puede tardar hasta que acabe el trabajo en curso) y `docker compose start workers` para
+5. Al terminar, `Ctrl+C` (el ciclo en curso se detiene en su siguiente descarga o llamada, y el trabajador sale en
+   menos de 10 s; una llamada de la CLI en curso se corta) y `docker compose start workers` para
    volver al trabajador del contenedor; `make up` devuelve el servicio de *embeddings* a su red interna.
 
 Ajustes (todos opcionales): `CLAUDE_CODE_MODEL_JUDGE` (por defecto `opus`) y `CLAUDE_CODE_MODEL_ANALYSTS` (por defecto
@@ -224,6 +268,107 @@ Qué conviene saber:
   de la API en lugar de usar tu suscripción.
 - La salida pasa por las mismas tres capas de validación que con DeepSeek, y las pruebas automáticas nunca llaman a la
   CLI real.
+
+### 9. iTop persistente con su consola web (D-085)
+
+`compose.itop.yaml` levanta iTop 3.2.2 (proyecto `hermes-itop`) con su base MariaDB, su cron y la extensión de Hermes
+(los cinco atributos de seguridad en cada CI y el perfil de mínimo privilegio del backend). Es un proyecto aparte: sus
+datos sobreviven a `make up` y a `docker compose down` de Hermes. Ningún contenedor corre como root ni con
+capacidades extra; la consola escucha en `127.0.0.1:${ITOP_PORT:-8080}`.
+
+**Primera vez**
+
+1. Si Hermes ya tiene `ITOP_WEBHOOK_TOKEN` en `.env` (un valor largo al azar), corre antes `make compose-secrets` para
+   que iTop use el mismo token en su *webhook*.
+2. `make itop-up ITOP_LINK=1`. Escribe los secretos de iTop en `.compose-secrets/itop_*` y crea la red compartida con
+   Hermes. Las contraseñas de MariaDB y del administrador se generan al azar la primera vez y nunca se reemplazan; la
+   del usuario `admin` está en `.compose-secrets/itop_admin_password`. Para elegirla tú, corre
+   `ITOP_ADMIN_PASSWORD='…' make itop-secrets` **antes** del primer `make itop-up`.
+3. `make itop-install ITOP_LINK=1`: instala iTop, compila el modelo y crea lo que Hermes necesita (organización
+   `Demo-Lab`, persona «Hermes System», usuarios y *webhook*). Repetirlo no cambia nada; después de actualizar el
+   repositorio vuelve a correrlo: si la extensión cambió, recompila el modelo sin tocar los datos.
+4. Entra a `http://127.0.0.1:8080` como `admin` (la consola está en español). Puedes cambiar la contraseña en «Mi
+   cuenta»; el archivo de secretos solo se usa en la instalación.
+5. Carga el inventario (ver «Cargar un inventario» abajo): `make itop-load INVENTORY=<archivo>` (simulacro) y
+   `make itop-load INVENTORY=<archivo> APPLY=1` (escribe). `make itop-seed` carga la pila sintética de prueba.
+
+**Cargar un inventario** (`tests/harness/itop_load.py`, una herramienta del operador que corre en tu equipo)
+
+Un inventario es un archivo YAML con los objetos de iTop en orden (organización, personas, equipos, CI, catálogo de
+software, instalaciones, servicios…); `docker/itop/stack.yaml` es un ejemplo. Cada objeto lleva `class`, `name` y
+`fields` (los nombres de campo de la API REST de iTop); una referencia a otro objeto se escribe `@Clase:nombre`. El
+software se identifica por **nombre y versión** (`@Software:PostgreSQL 15.4`), así que dos versiones del mismo
+producto son dos entradas del catálogo; `key` y `ref` cambian la identidad o el nombre de referencia de un objeto.
+Sirve cualquier campo de iTop, p. ej. `type` (categoría del software), `status` y `softwarelicence_id` (estado y
+licencia de una instalación, con la licencia como objeto `SoftwareLicence`), `description`, `cpu` y `ram`;
+`inventories/lyft-challenge.yaml` los usa todos. Pon entre comillas las fechas y los `yes`/`no`
+(`"2024-01-15"`, `"yes"`): sin comillas YAML los convierte en fecha o booleano y el cargador rechaza el archivo.
+
+- `make itop-load INVENTORY=<archivo>` es un simulacro: lista qué crearía (`+ create`), qué ya existe (`= exists`) y
+  un resumen; no escribe nada. Si una referencia no existe, no escribe nada y dice cuál falla.
+- `APPLY=1` crea lo que falta; repetirlo no duplica nada. `UPDATE=1` además compara los objetos que ya existen y solo
+  escribe los campos que cambiaron (`~ update … : campos`, `= unchanged`).
+- La sección `env:` del archivo hace que el cargador imprima al final `ITOP_ORG_ID`, `ITOP_CALLER_ID` e
+  `ITOP_SERVICE_ID`, listos para copiarlos a la configuración de Hermes.
+- La sección `cpe:` asigna el CPE de cada producto. Hermes conoce un producto después de sincronizar el inventario
+  (lo hace cada escaneo), así que: carga, pide un escaneo (`POST /api/scans`), corre
+  `HERMES_API_TOKEN=<token de un analista> make itop-map-cpe INVENTORY=<archivo>` y vuelve a escanear. Con el
+  emulador de Firebase el token sale de `make -s emulator-token ROLE=analyst`; con un proyecto real de Firebase hace
+  falta el token de ID de un usuario con rol de analista (o asigna los CPE en la pantalla de pendientes del front).
+  Un producto con `null` queda a propósito sin CPE (aparece en la pantalla de pendientes).
+
+**Conectar Hermes con iTop**
+
+Con la red compartida, los contenedores de Hermes llegan a iTop como `http://itop:8080` y el *webhook* de iTop llega a
+la API como `http://api:8000`. En `.env`:
+
+```
+COMPOSE_FILE=compose.yaml:compose.itop-link.yaml
+ITOP_URL=http://itop:8080
+# los enlaces que abren las personas: http://itop:8080 solo lo resuelven los contenedores
+ITOP_CONSOLE_URL=http://127.0.0.1:8080
+ITOP_WEBHOOK_URL=http://api:8000/api/itop/webhook
+ITOP_TOKEN=<lo que imprime make itop-token>
+ITOP_WEBHOOK_TOKEN=<un valor largo al azar>
+# ids de la organización, de la persona «Hermes System» y del servicio (los imprime make itop-load)
+ITOP_ORG_ID=…
+ITOP_CALLER_ID=…
+ITOP_SERVICE_ID=…
+```
+
+Después `make compose-secrets`, `make itop-install ITOP_LINK=1` (aplica la URL y el token del *webhook* a los objetos
+ya creados) y `make up`. Sin la red compartida, usa `ITOP_URL=http://host.docker.internal:8080` y deja
+`ITOP_WEBHOOK_URL` sin definir (por defecto apunta a la API publicada en el equipo). Para el trabajador en tu equipo
+(sección 8): `ITOP_URL=http://127.0.0.1:8080 make worker-host`.
+
+**Usuarios que crea Hermes en iTop**
+
+| Usuario | Para qué |
+|---|---|
+| `hermes-rest` | El token del backend (`ITOP_TOKEN`): lee el CMDB, crea y actualiza tickets y solo los **reabre** (`ev_reopen`); asignar, resolver y cerrar lo hacen las personas en la consola. Ojo: la API REST de iTop no revisa los estímulos de un perfil, solo el permiso de modificar; lo que limita al backend a `ev_reopen` es su propio *outbox*. `make itop-rotate-token` le da un token nuevo (luego actualiza `ITOP_TOKEN` y corre `make compose-secrets` y `make up`) |
+| `hermes-seed` | Administrador por REST para el cargador de inventario. Está **desactivado** y sin token salvo mientras corre `make itop-load` (o `make itop-seed`), que lo activa con un token nuevo y lo desactiva al terminar, aunque falle |
+| `hermes-cron` | Administrador local con el que corre el cron de iTop (notificaciones, SLA, tareas asíncronas, respaldo nocturno). Su contraseña solo está en un archivo del volumen de datos |
+
+**Respaldo y restauración**
+
+- Los datos viven en los volúmenes `hermes-itop_itop_db` (base), `_itop_conf` (configuración), `_itop_data` (datos y
+  tokens) e `_itop_env` (modelo compilado). `make itop-down` detiene iTop y **conserva** todo;
+  `make itop-destroy CONFIRM=yes` borra los volúmenes.
+- `make itop-backup` deja `backups/itop-<fecha>.tar.gz`: el volcado de la base más las carpetas `conf` y `data`. Contiene
+  la contraseña de la base, la llave de cifrado de iTop y los tokens: guárdalo como un secreto.
+- `make itop-restore BACKUP=backups/itop-<fecha>.tar.gz` reemplaza la base y los archivos por los del respaldo y
+  recompila el modelo. En otra máquina, copia también los archivos `.compose-secrets/itop_*` antes de `make itop-up`,
+  porque la configuración respaldada guarda la contraseña de la base de esa instalación.
+- iTop además hace su propio respaldo cada noche (23:30) dentro de su volumen de datos; `make itop-backup` no lo
+  incluye.
+
+**Salud y registros**
+
+- `docker compose -f compose.itop.yaml --profile itop ps` y `… logs -f itop itop-cron`.
+- Estado de las tareas del cron: `docker compose -f compose.itop.yaml --profile itop exec itop-cron php
+  /var/www/html/webservices/cron.php --param_file=/var/www/html/data/hermes-cron.params --status_only=1`.
+- Las contraseñas de MariaDB solo las usan los contenedores (nunca se publican). Cambiarlas después de instalar pide
+  pasos a mano: `ALTER USER` en MariaDB y el mismo valor en `db_pwd` de `conf/production/config-itop.php`.
 
 ## License
 

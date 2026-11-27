@@ -1,9 +1,9 @@
 <?php
 // Hermes datamodel extension (D-037): five attributes on FunctionalCI plus the least-privilege backend profile.
-// Test instance only: the production iTop owner installs the same module with the iTop setup (ESC-03b).
+// Console labels (Spanish and English) are in dictionaries/. Another iTop installs the same module with its setup (ESC-03b).
 SetupWebPage::AddModule(
 	__FILE__,
-	'hermes-ci-attributes/1.0.0',
+	'hermes-ci-attributes/1.1.0',
 	array(
 		'label' => 'Hermes CI attributes (D-037)',
 		'category' => 'business',

@@ -6,11 +6,13 @@ from pathlib import Path
 PYPROJECT = Path(__file__).resolve().parents[2] / "pyproject.toml"
 
 EXPECTED = {
-    "notifications_slack": {"core", "api", "workers"},
-    "notifications_api": {"api", "core", "workers", "notifications_slack"},
-    "core": {"api", "workers", "notifications_slack"},
-    "workers": {"api", "notifications_slack"},
-    "api": {"workers", "notifications_slack"},
+    "notifications_slack": {"core", "api", "workers", "slack_app"},
+    "notifications_api": {"api", "core", "workers", "notifications_slack", "slack_app"},
+    "core": {"api", "workers", "notifications_slack", "slack_app"},
+    "workers": {"api", "notifications_slack", "slack_app"},
+    "api": {"workers", "notifications_slack", "slack_app"},
+    # The Slack module's composition root (D-085): core + notifications_slack, never the API or the worker.
+    "slack_app": {"api", "workers"},
 }
 
 

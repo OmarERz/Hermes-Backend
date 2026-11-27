@@ -14,6 +14,7 @@ from typing import Any, Final
 
 import httpx
 
+from core.shutdown import StopSignal
 from core.textnum import retry_after_seconds
 
 DEFAULT_RETRYABLE: Final = frozenset({429, 500, 502, 503, 504})
@@ -61,7 +62,12 @@ class RateLimiter:
 
 @dataclass
 class JsonSource:
-    """A JSON-over-HTTP source. `http` is injectable (`httpx.MockTransport` in tests)."""
+    """A JSON-over-HTTP source. `http` is injectable (`httpx.MockTransport` in tests).
+
+    With the worker's `stop` signal, each attempt checks it first and the retry backoff sleeps on it, so a refresh
+    that pages through NVD stops at the next request when the worker is asked to stop (#170). The rate limiter gets
+    the same signal from `nvd_client`.
+    """
 
     timeout: float = 30.0
     max_attempts: int = 3
@@ -70,6 +76,7 @@ class JsonSource:
     limiter: RateLimiter | None = None
     http: httpx.Client | None = None
     sleep: Callable[[float], None] = time.sleep
+    stop: StopSignal | None = None
 
     def request(
         self,
@@ -139,6 +146,8 @@ class JsonSource:
         last = "no attempt made"
         for attempt in range(1, self.max_attempts + 1):
             delay: float | None = None
+            if self.stop is not None:
+                self.stop.check()
             if self.limiter:
                 self.limiter.acquire()
             try:
@@ -154,7 +163,8 @@ class JsonSource:
                 delay = _retry_after(response)
             if attempt < self.max_attempts:
                 backoff = min(self.backoff_seconds * 2 ** (attempt - 1), MAX_BACKOFF_SECONDS)
-                self.sleep(delay if delay is not None else backoff)
+                pause = self.stop.sleep if self.stop is not None else self.sleep
+                pause(delay if delay is not None else backoff)
         raise SourceUnavailableError(f"{last} after {self.max_attempts} attempts")
 
     @staticmethod

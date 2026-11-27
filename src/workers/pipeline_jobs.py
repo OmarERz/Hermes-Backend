@@ -14,8 +14,9 @@ from core.config import Settings
 from core.ingestion.embeddings import HttpEmbedder
 from core.ingestion.fetcher import Fetcher
 from core.itop.client import reader_from_settings
-from core.llm import ClaudeCodeClient, LlmClient, LlmRequestError, ToolCaller
+from core.llm import ClaudeCodeClient, LlmClient, LlmRequestError, RetryPolicy, ToolCaller
 from core.llm.client import Role
+from core.llm.stoppable import StoppableCaller, stoppable_runner
 from core.pipeline.cycles import Pipeline, Steps
 from core.pipeline.wiring import (
     cve_step,
@@ -29,6 +30,7 @@ from core.pipeline.wiring import (
     scan_step,
 )
 from core.scan.engine import ScanAlreadyRunningError, fail_stale_scans, next_queued_scan
+from core.shutdown import StopSignal
 from core.tickets.content import ItopIdentity
 from core.tickets.lifecycle import TicketLifecycle
 from core.vulndata.http import JsonSource
@@ -70,20 +72,27 @@ class QueuedScans:
         return True
 
 
-def _embedder(settings: Settings) -> HttpEmbedder | None:
+def _embedder(settings: Settings, stop: StopSignal) -> HttpEmbedder | None:
     """News deduplication needs the embeddings service (ING-07, `docker/embeddings`); without it the cycle is off."""
     if settings.embeddings_url is None:
         log.error("EMBEDDINGS_URL is not configured: the news cycle is off")
         return None
-    return HttpEmbedder(str(settings.embeddings_url))
+    return HttpEmbedder(str(settings.embeddings_url), stop=stop)
 
 
-def _llm(settings: Settings, role: str) -> ToolCaller | None:
-    """The LLM client of a role for the configured provider (D-084), or None (fail closed: that role is off)."""
+def _llm(settings: Settings, role: str, stop: StopSignal) -> ToolCaller | None:
+    """The LLM client of a role for the configured provider (D-084), or None (fail closed: that role is off).
+
+    Every call checks the worker's stop signal first and the retry backoff sleeps on it; the Claude Code CLI is
+    killed if the worker is asked to stop while it answers (#170).
+    """
     llm_role: Role = "judge" if role == "judge" else "analysts"
+    retry = RetryPolicy(sleep=stop.sleep)
     if settings.llm_provider == "claude-code":
         try:
-            return ClaudeCodeClient.from_settings(settings, llm_role)
+            return StoppableCaller(
+                ClaudeCodeClient.from_settings(settings, llm_role, retry=retry, runner=stoppable_runner(stop)), stop
+            )
         except LlmRequestError as exc:
             reason = str(exc)
         # Inside the containers the CLI is never there: claude-code is for a worker on the host (make worker-host).
@@ -91,7 +100,7 @@ def _llm(settings: Settings, role: str) -> ToolCaller | None:
         return None
     if settings.deepseek_api_key is None:
         return None
-    return LlmClient.from_settings(settings, llm_role)
+    return StoppableCaller(LlmClient.from_settings(settings, llm_role, retry=retry), stop)
 
 
 def _tickets(settings: Settings) -> TicketLifecycle | None:
@@ -99,24 +108,32 @@ def _tickets(settings: Settings) -> TicketLifecycle | None:
         log.info("ITOP_ORG_ID / ITOP_CALLER_ID are not configured: assessments do not open tickets")
         return None
     identity = ItopIdentity(settings.itop_org_id, settings.itop_caller_id, settings.itop_service_id)
-    return TicketLifecycle(identity, itop_base_url=str(settings.itop_url) if settings.itop_url else None)
+    return TicketLifecycle(identity, itop_base_url=settings.itop_link_url)
 
 
-def build_pipeline(settings: Settings, session_factory: sessionmaker[Session]) -> Pipeline:
-    """The pipeline with the production services (F1 to F6, scoring of F4.3, tickets of F5)."""
+def build_pipeline(
+    settings: Settings, session_factory: sessionmaker[Session], stop: StopSignal | None = None
+) -> Pipeline:
+    """The pipeline with the production services (F1 to F6, scoring of F4.3, tickets of F5).
+
+    `stop` is the worker's shutdown signal: every client that waits on the network checks it (#170).
+    """
+    stop = stop or StopSignal()
     reader = reader_from_settings(settings) if settings.itop_url and settings.itop_token else None
     tickets = _tickets(settings)
-    analyst = _llm(settings, "analysts")
+    analyst = _llm(settings, "analysts", stop)
+    fetcher = Fetcher(stop=stop)
+    embedder = _embedder(settings, stop)
     steps = Steps(
-        news=news_step(Fetcher(), embedder, analyst) if (embedder := _embedder(settings)) is not None else None,
-        analyze_cves=cve_step(analyst, Fetcher()) if analyst is not None else None,
-        refresh=refresh_vulndata(session_factory, nvd_client(settings.nvd_api_key), JsonSource()),
+        news=news_step(fetcher, embedder, analyst) if embedder is not None else None,
+        analyze_cves=cve_step(analyst, Fetcher(stop=stop)) if analyst is not None else None,
+        refresh=refresh_vulndata(session_factory, nvd_client(settings.nvd_api_key, stop=stop), JsonSource(stop=stop)),
         scan=scan_step(session_factory, reader),
         evaluate=engine_evaluate,
         recalculate=engine_recalculate(tickets),
         recalculate_queued=engine_recalculate_queued(tickets),
         dismissal_package=engine_dismissal_package,
-        judge_caller=_llm(settings, "judge"),
+        judge_caller=_llm(settings, "judge", stop),
         tickets=tickets,
     )
     return Pipeline(session_factory, steps)
@@ -126,8 +143,9 @@ def pipeline_jobs(
     settings: Settings,
     session_factory: sessionmaker[Session],
     job: Callable[[str, float, Callable[[], object]], PeriodicJob],
+    stop: StopSignal | None = None,
 ) -> list[PeriodicJob]:
-    pipeline = build_pipeline(settings, session_factory)
+    pipeline = build_pipeline(settings, session_factory, stop)
     jobs = [
         job("news_cycle", NEWS_SECONDS, pipeline.news_cycle),
         job("scan_requests", SCAN_REQUEST_SECONDS, QueuedScans(pipeline, session_factory)),

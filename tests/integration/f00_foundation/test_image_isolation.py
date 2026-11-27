@@ -47,14 +47,18 @@ def test_a_run_removes_only_its_own_tag(tmp_path: Path, client: docker.DockerCli
 def test_the_sweep_removes_what_a_dead_run_left_and_keeps_live_runs(
     tmp_path: Path, client: docker.DockerClient
 ) -> None:
-    dead = {**LABELS, f"{LABEL}.pid": dead_pid()}
+    # The planted run's pid is a marker that no other test session of this host reads as a dead pid (an unreadable
+    # label counts as alive), so their session-start sweeps leave it alone; this sweep is told the marker is dead.
+    # A real dead pid raced with the other lanes' sweeps, which could remove the orphan first.
+    marker = f"planted-dead-{RUN_ID}"
+    dead = {**LABELS, f"{LABEL}.pid": marker}
     orphan = client.containers.create(BASE, ["true"], labels=dead)
     mine = client.containers.create(BASE, ["true"], labels=LABELS)
     (tmp_path / "Dockerfile").write_text(f"FROM {BASE}\n", encoding="utf-8")
-    left_tag = f"hermes-test-isolation-dead-{dead[f'{LABEL}.pid']}:test"
+    left_tag = f"hermes-test-isolation-dead-{RUN_ID.split('-')[0]}:test"
     client.images.build(path=str(tmp_path), tag=left_tag, labels=dead)
     try:
-        removed = sweep_dead_runs(client)
+        removed = sweep_dead_runs(client, alive=lambda pid: pid != marker)
         assert orphan.name in removed
         assert left_tag in removed
         assert mine.name not in removed

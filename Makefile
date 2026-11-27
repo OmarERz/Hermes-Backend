@@ -4,12 +4,17 @@
 SHELL := /bin/bash
 .SHELLFLAGS := -eu -o pipefail -c
 
-.PHONY: up demo worker-host backup compose-secrets help openapi verify lint typecheck boundaries test coverage semgrep kics secrets audit verify-full schemathesis adversarial dynamic zap bruno ci-lint seed events emulator-token itop-up itop-install itop-seed itop-token itop-down review
+.PHONY: up demo worker-host backup compose-secrets help openapi verify prepush lint typecheck boundaries test coverage semgrep kics secrets audit verify-full schemathesis adversarial dynamic zap bruno ci-lint seed events emulator-token itop-secrets itop-link itop-up itop-install itop-load itop-seed itop-map-cpe itop-token itop-rotate-token itop-down itop-destroy itop-backup itop-restore review
 
 help: ## List the available targets
 	@grep -E '^[a-z-]+:.*## ' $(MAKEFILE_LIST) | awk 'BEGIN {FS = ":.*## "}; {printf "  %-12s %s\n", $$1, $$2}'
 
 verify: lint typecheck boundaries test coverage semgrep kics secrets audit ## Run the quality gate (same command locally and in CI)
+
+# D-086: the remote CI is lean, so everything it would run happens here before a feature branch is pushed. The local
+# pre-push hook and the merge helper require a green run recorded for the tree being pushed or merged.
+prepush: ## Pre-push gate: verify + isolated stack + Schemathesis, adversarial, Bruno (3 roles) and ZAP; records the tree
+	bash scripts/prepush.sh
 
 lint: ## Formatting and lint (ruff)
 	uv run --locked ruff format --check .
@@ -49,8 +54,10 @@ semgrep: ## Semgrep CE (Docker): registry packs + .semgrep/ project rules, fails
 	  --error --severity WARNING --severity ERROR --
 
 # --disable-secrets: Gitleaks already scans every file and the history for secrets (`make secrets`).
-kics: ## KICS (Docker, pinned) on compose.yaml: fails on CRITICAL, HIGH and MEDIUM (Trivy does not read Compose files)
-	docker run --rm -v "$(CURDIR)/compose.yaml:/scan/compose.yaml:ro" $(KICS_IMAGE) scan -p /scan/compose.yaml \
+kics: ## KICS (Docker, pinned) on compose.yaml and compose.itop.yaml: fails on CRITICAL, HIGH and MEDIUM
+	docker run --rm -v "$(CURDIR)/compose.yaml:/scan/compose.yaml:ro" \
+	  -v "$(CURDIR)/compose.itop.yaml:/scan/compose.itop.yaml:ro" $(KICS_IMAGE) scan \
+	  -p /scan/compose.yaml,/scan/compose.itop.yaml \
 	  --type DockerCompose --fail-on critical,high,medium --disable-secrets --no-progress --ci
 
 # Working tree: tracked and untracked files minus ignored ones, streamed as a tar into the container, so
@@ -88,7 +95,9 @@ ZAP_IMAGE ?= ghcr.io/zaproxy/zaproxy@sha256:9624669db72f54d86c4b46a7064518bd9bf7
 OPENAPI_SNAPSHOT ?= openapi/openapi.json
 # Operations with external effects are excluded from fuzzing (docs/14 §4.3). --exclude-path drops every
 # method of the path; later phases extend this list (e.g. SCHEMATHESIS_EXCLUDES += --exclude-path /api/x).
-SCHEMATHESIS_EXCLUDES ?= --exclude-path /api/scans --exclude-path /api/stix/export
+# The run progress stream (SSE) stays open while a run is in progress, so a request/response fuzzer reads nothing
+# for longer than its read timeout and reports a network error (pending #177); it keeps its own integration tests.
+SCHEMATHESIS_EXCLUDES ?= --exclude-path /api/scans --exclude-path /api/stix/export --exclude-path '/api/runs/{id}/events'
 
 # Not part of plain `make verify`. A step is skipped only while the phase that creates its prerequisite
 # has not landed, and says so with an explicit SKIPPED line; once the prerequisite exists it must pass.
@@ -141,26 +150,82 @@ events: ## List the latest notification events as JSON lines (optional LIMIT, ST
 	@uv run --locked python -m core.devtools.admin events --limit "$${LIMIT:-20}" \
 	  $${STATUS:+--status "$$STATUS"} $${TYPE:+--type "$$TYPE"}
 
-# iTop 3.2.2 test instance (compose.itop.yaml, docs/itop-test-instance.md). Needs ITOP_DB_ROOT_PASSWORD,
-# ITOP_DB_PASSWORD and ITOP_ADMIN_PASSWORD in the environment; every compose call below reads them.
-ITOP_COMPOSE ?= docker compose -f compose.itop.yaml --profile itop
+# Persistent iTop 3.2.2 with its web console (D-085): compose.itop.yaml, README "Guía de operación" §9. Its passwords
+# are Docker secret files (make itop-secrets); its data lives in named volumes that only itop-destroy deletes.
+# ITOP_LINK=1 also puts iTop on the Docker network shared with the Hermes stack (compose.itop.link.yaml).
+ITOP_LINK ?=
+ITOP_COMPOSE ?= docker compose -f compose.itop.yaml $(if $(ITOP_LINK),-f compose.itop.link.yaml) --profile itop
+ITOP_EXEC = $(ITOP_COMPOSE) exec -T -u www-data itop
+# The database root password stays inside the container: read from its secret file, passed in MYSQL_PWD.
+ITOP_DB_ROOT = $(ITOP_COMPOSE) exec -T itop-db sh -c 'MYSQL_PWD="$$(cat /run/secrets/itop_db_root_password)" exec "$$0" -uroot "$$@"'
 
-itop-up: ## Start the iTop test instance (Docker)
+itop-secrets: ## Write the iTop secret files (random passwords for missing files; existing ones are kept)
+	bash docker/itop/secrets.sh
+
+itop-link: ## Create the Docker network iTop shares with the Hermes stack (once; see compose.itop-link.yaml)
+	@docker network inspect hermes-itop-link >/dev/null 2>&1 || docker network create hermes-itop-link
+
+itop-up: itop-secrets $(if $(ITOP_LINK),itop-link) ## Start iTop (Docker); ITOP_LINK=1 joins the shared network
 	$(ITOP_COMPOSE) up -d --build --wait --wait-timeout 300
 
-itop-install: ## Unattended iTop install, extension and REST users (idempotent)
-	$(ITOP_COMPOSE) exec -T -u www-data itop /opt/hermes-itop/install.sh
+itop-install: ## Install iTop, recompile its model when needed, (re)apply the Hermes objects (idempotent)
+	$(ITOP_EXEC) /opt/hermes-itop/install.sh
 
-itop-seed: ## Load the synthetic stack into iTop (dry run; add APPLY=1 to write)
-	@ITOP_URL="http://127.0.0.1:$${ITOP_PORT:-8080}" \
-	  ITOP_TOKEN="$$($(ITOP_COMPOSE) exec -T itop cat /var/www/html/data/hermes-seed-token)" \
-	  PYTHONPATH=tests uv run --locked python -m harness.itop_seed docker/itop/stack.yaml $(if $(APPLY),--apply)
+# Inventory loader (tests/harness/itop_load.py, F16.2). Its administrator token only exists while it runs: enabled
+# with a fresh token, disabled afterwards even when the load fails. It lives with the test tooling because it writes
+# CMDB objects straight to iTop, which the Semgrep ARQ-01 rule allows only in the outbox and in tests/.
+INVENTORY ?= docker/itop/stack.yaml
 
-itop-token: ## Print the least-privilege REST token of the iTop test instance
-	@$(ITOP_COMPOSE) exec -T itop cat /var/www/html/data/hermes-rest-token
+itop-load: ## Load an inventory into iTop: INVENTORY=<file> (dry run; APPLY=1 writes, UPDATE=1 updates)
+	@test -f "$(INVENTORY)" || { echo "INVENTORY=$(INVENTORY): no such file" >&2; exit 2; }
+	@$(ITOP_EXEC) php /opt/hermes-itop/provision.php seed-user on >/dev/null
+	@status=0; ITOP_URL="http://$$($(ITOP_COMPOSE) port itop 8080)" \
+	  ITOP_TOKEN="$$($(ITOP_EXEC) cat /var/www/html/data/hermes-seed-token)" \
+	  PYTHONPATH=tests uv run --locked python -m harness.itop_load "$(INVENTORY)" $(if $(APPLY),--apply) $(if $(UPDATE),--update) \
+	  || status=$$?; \
+	$(ITOP_EXEC) php /opt/hermes-itop/provision.php seed-user off; exit $$status
 
-itop-down: ## Stop the iTop test instance and delete its data
+itop-seed: ## Load the synthetic stack (docker/itop/stack.yaml) into iTop (dry run; add APPLY=1 to write)
+	@$(MAKE) --no-print-directory itop-load INVENTORY=docker/itop/stack.yaml
+
+# After a scan synced the inventory into Hermes: HERMES_API_TOKEN is an analyst's token (with the local emulator:
+# HERMES_API_TOKEN=$$(make -s emulator-token ROLE=analyst)); HERMES_API_URL defaults to the published API.
+itop-map-cpe: ## Set the CPE of each product of INVENTORY=<file> through the Hermes API (needs HERMES_API_TOKEN)
+	@HERMES_API_URL="$${HERMES_API_URL:-http://127.0.0.1:$${API_PORT:-8000}}" \
+	  PYTHONPATH=tests uv run --locked python -m harness.itop_load "$(INVENTORY)" --map-cpe
+
+itop-token: ## Print the least-privilege REST token of iTop (ITOP_TOKEN of the backend)
+	@$(ITOP_EXEC) cat /var/www/html/data/hermes-rest-token
+
+itop-rotate-token: ## Give the backend's REST user a new token (then update ITOP_TOKEN and run make up)
+	$(ITOP_EXEC) php /opt/hermes-itop/provision.php rotate-rest-token
+
+itop-down: ## Stop iTop; its data stays in the Docker volumes
+	$(ITOP_COMPOSE) down --remove-orphans
+
+itop-destroy: ## Stop iTop and DELETE its data (volumes): make itop-destroy CONFIRM=yes
+	@test "$(CONFIRM)" = yes || { echo "this deletes the iTop database and files: repeat with CONFIRM=yes" >&2; exit 2; }
 	$(ITOP_COMPOSE) down -v --remove-orphans
+
+# The archive holds the database dump and the conf and data folders (configuration with the database password and
+# the encryption key, REST tokens): it is private to the user (umask 077) and backups/ is gitignored.
+itop-backup: ## Back up iTop (database + configuration + data) to backups/itop-<date>.tar.gz; iTop must be up
+	@mkdir -p backups; umask 077; work="$$(mktemp -d)"; trap 'rm -rf "$$work"' EXIT; \
+	name="backups/itop-$$(date +%Y%m%d-%H%M%S).tar.gz"; \
+	$(ITOP_DB_ROOT) mariadb-dump --single-transaction --routines --triggers --events --add-drop-database \
+	  --databases itop > "$$work/itop.sql"; \
+	$(ITOP_EXEC) tar -C /var/www/html --exclude=data/backups --exclude='data/cache-*' -cf - conf data \
+	  > "$$work/files.tar"; \
+	tar -C "$$work" -czf "$$name" itop.sql files.tar; echo "$$name"
+
+itop-restore: ## Restore an iTop backup (replaces its data): make itop-restore BACKUP=backups/itop-<date>.tar.gz
+	@test -f "$(BACKUP)" || { echo "BACKUP=<file> is required (an archive made by make itop-backup)" >&2; exit 2; }
+	@work="$$(mktemp -d)"; trap 'rm -rf "$$work"' EXIT; tar -C "$$work" -xzf "$(BACKUP)" itop.sql files.tar; \
+	tar -tf "$$work/files.tar" conf/production/config-itop.php >/dev/null; \
+	$(ITOP_DB_ROOT) mariadb < "$$work/itop.sql"; \
+	$(ITOP_EXEC) sh -c 'cd /var/www/html && rm -rf conf/* data/* && tar -xf - && rm -f data/hermes-model.sha256' \
+	  < "$$work/files.tar"
+	$(ITOP_EXEC) /opt/hermes-itop/install.sh
 
 ACTIONLINT_VERSION ?= 1.7.12.24
 

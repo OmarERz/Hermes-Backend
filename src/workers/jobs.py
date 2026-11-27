@@ -2,6 +2,10 @@
 
 Each job runs in turn on the worker thread; a failing job is logged and retried at its next interval, never
 stopping the others. Jobs are built only for the integrations that are configured (fail closed, prototype C5).
+
+Shutdown (#170): the stop event reaches the pipeline's network clients (`core.shutdown`), so a cycle unwinds at its
+next request, retry pause or LLM call; a request already on the wire is not waited for longer than
+`SHUTDOWN_GRACE_SECONDS`, which stays below Docker's default stop timeout (10 s) so the process exits on its own.
 """
 
 from __future__ import annotations
@@ -21,7 +25,14 @@ from core.itop.client import reader_from_settings
 from core.itop.outbox import ItopOutboxWorker, writer_from_settings
 from core.metrics.ladder import evaluate
 from core.metrics.nightly import NightlyMetrics
-from core.notifications.dispatcher import NotificationDispatcher, configured_consumer_name, consumer_for
+from core.notifications.dispatcher import (
+    NotificationDispatcher,
+    configured_consumer_name,
+    consumer_for,
+    delivered_by,
+    waiting_immediate_events,
+)
+from core.shutdown import ShutdownRequested, StopSignal
 from core.tickets.sync import TicketStateSync
 from notifications_api import NotificationConsumer
 from workers.pipeline_jobs import pipeline_jobs
@@ -32,6 +43,11 @@ ITOP_OUTBOX_SECONDS = 10.0
 TICKET_SYNC_SECONDS = 15 * 60.0  # ARQ-02
 DISPATCH_SECONDS = 5.0  # NOT-02: an immediate event must not wait
 NIGHTLY_SECONDS = 24 * 3600.0  # docs/10 §1: once a day (and once at worker start; the job is idempotent)
+SHUTDOWN_GRACE_SECONDS = 8.0  # how long a stopping worker waits for the lanes (Docker sends SIGKILL after 10 s)
+# While another service delivers (notifications.consumer = slack), warn when immediate events wait longer than this, at
+# most once per WAITING_WARN_EVERY: a stopped Slack service must not leave them waiting unseen (NOT-03).
+WAITING_WARN_AFTER = timedelta(minutes=5)
+WAITING_WARN_EVERY = timedelta(minutes=10)
 
 
 @dataclass(frozen=True)
@@ -60,6 +76,9 @@ def run_jobs(
                 continue
             try:
                 job.run()
+            except ShutdownRequested:
+                log.info("job %s stopped: the worker is shutting down", job.name)
+                return
             except Exception:
                 log.exception("job %s failed; retrying at its next interval", job.name)
             due[job.name] = now + job.interval
@@ -104,18 +123,57 @@ class DispatchJob:
     itop_base_url: str | None = None
     consumers: dict[str, NotificationConsumer] = field(default_factory=dict)
     stop: threading.Event | None = None  # the worker's shutdown signal, checked between events
+    clock: Callable[[], datetime] = field(default=lambda: datetime.now(UTC))
+    _left_to: str | None = field(default=None, init=False, repr=False)  # logs the hand-over once, not every cycle
+    _checked_at: datetime | None = field(default=None, init=False, repr=False)
 
     def __call__(self) -> int:
         with self.session_factory() as session:
             name = configured_consumer_name(session)
-        consumer = self.consumers.get(name) or self.consumers.setdefault(name, consumer_for(name))
+        consumer = self.consumers.get(name)
+        if consumer is None and delivered_by(name) != "worker":
+            # Delivered by its own service (python -m slack_app): the events stay pending for it.
+            if self._left_to != name:
+                log.info("notification events are delivered by the %s service; this worker leaves them", name)
+            self._left_to = name
+            self._warn_if_waiting(name)
+            return 0
+        self._left_to = None
+        consumer = consumer or self.consumers.setdefault(name, consumer_for(name))
         dispatcher = NotificationDispatcher(self.session_factory, consumer, itop_base_url=self.itop_base_url)
         return dispatcher.drain(stop=self.stop)
 
+    def _warn_if_waiting(self, name: str) -> None:
+        now = self.clock()
+        if self._checked_at is not None and now - self._checked_at < WAITING_WARN_EVERY:
+            return
+        self._checked_at = now
+        with self.session_factory() as session:
+            waiting = waiting_immediate_events(session, now - WAITING_WARN_AFTER)
+        if waiting:
+            log.warning(
+                "%d immediate notification event(s) have waited over %d minutes for the %s service; is it running?",
+                waiting,
+                int(WAITING_WARN_AFTER.total_seconds() // 60),
+                name,
+            )
 
-def run_jobs_in_threads(stop: threading.Event, jobs: Sequence[PeriodicJob], *, tick: float = 1.0) -> None:
+
+def run_jobs_in_threads(
+    stop: threading.Event,
+    jobs: Sequence[PeriodicJob],
+    *,
+    tick: float = 1.0,
+    grace: float = SHUTDOWN_GRACE_SECONDS,
+    clock: Callable[[], float] = time.monotonic,
+) -> None:
     """One thread per lane: a slow lane (iTop) never delays another (notifications, NOT-03), while the jobs of a
-    lane stay serialized (the iTop outbox and the ticket sync must not interleave, D-007)."""
+    lane stay serialized (the iTop outbox and the ticket sync must not interleave, D-007).
+
+    Returns once `stop` is set and every lane has finished, or after `grace` seconds with a lane still busy: that
+    lane is a daemon thread and ends with the process. Its open transaction is rolled back by PostgreSQL when the
+    connection closes, and its advisory locks are freed (they are session-level, ARQ-04).
+    """
     lanes: dict[str, list[PeriodicJob]] = {}
     for job in jobs:
         lanes.setdefault(job.lane, []).append(job)
@@ -127,8 +185,13 @@ def run_jobs_in_threads(stop: threading.Event, jobs: Sequence[PeriodicJob], *, t
     ]
     for thread in threads:
         thread.start()
+    stop.wait()
+    deadline = clock() + grace
     for thread in threads:
-        thread.join()
+        thread.join(max(0.0, deadline - clock()))
+    busy = [thread.name for thread in threads if thread.is_alive()]
+    if busy:
+        log.warning("shutdown: %s still busy after %.1fs; it ends with the process", ", ".join(busy), grace)
 
 
 def _pipeline_job(name: str, interval: float, run: Callable[[], object]) -> PeriodicJob:
@@ -145,16 +208,17 @@ def build_jobs(
     """The notification dispatcher, the nightly metrics and the pipeline cycles always (each on its own lane); the
     iTop jobs only when iTop is configured.
 
-    `consumers` registers consumers by the name `notifications.consumer` selects (the Slack module plugs in here in
-    F11); `log` is always available.
+    `consumers` registers consumers by the name `notifications.consumer` selects; `log` is always available. With
+    `slack` (and no consumer registered under that name) the dispatch job leaves the events to the Slack service.
     """
-    itop_url = str(settings.itop_url) if settings.itop_url is not None else None
+    itop_url = settings.itop_link_url  # links in the events: the console URL when it differs (F16.1)
     dispatch = DispatchJob(session_factory, itop_url, dict(consumers or {}), stop)
+    signal = StopSignal(stop) if stop is not None else None
     jobs = [
         PeriodicJob("notification_dispatch", DISPATCH_SECONDS, dispatch, lane="notifications"),
         PeriodicJob("nightly_metrics", NIGHTLY_SECONDS, NightlyJob(session_factory), lane="nightly"),
         PeriodicJob("weekly_calibration", NIGHTLY_SECONDS, WeeklyCalibrationJob(session_factory), lane="nightly"),
-        *pipeline_jobs(settings, session_factory, _pipeline_job),
+        *pipeline_jobs(settings, session_factory, _pipeline_job, signal),
     ]
     if settings.itop_url is None or settings.itop_token is None:
         log.info("iTop is not configured: the ticket jobs are off")
