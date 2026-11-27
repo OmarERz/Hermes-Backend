@@ -15,5 +15,8 @@ class NotificationConsumer(Protocol):
 
 class FeedbackService(Protocol):
     def record(self, feedback: FeedbackInput) -> FeedbackResult:
-        """Validate the user, store the feedback and apply its effects (NOT-06)."""
+        """Validate the user, store the feedback and apply its effects (NOT-06).
+
+        Raise `FeedbackRejected` (with a stable `code`) when the feedback is not accepted; nothing is stored then.
+        """
         ...
