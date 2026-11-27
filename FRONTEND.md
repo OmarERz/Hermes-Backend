@@ -81,7 +81,7 @@ Los requisitos de cada pantalla (FRO-xx) están en la especificación del produc
 | Comparación crudo vs. procesado y cascada del Δ | `GET /api/comparison/summary`, `GET /api/comparison/table`, `GET /api/assessments/{id}/breakdown` | reader |
 | Historial de recomendaciones y feedback | `GET /api/recommendations` (filtros `group_id`, `ci_id`, `ticket_itop_id`, `level`, `verdict`, `without_feedback`), `GET /api/recommendations/{assessment_id}`, `GET /api/recommendations/{assessment_id}/judge`, `GET /api/recommendations/{id}/feedback`, `POST /api/feedback` | reader ver; analyst dar feedback |
 | Tickets y alertas | `GET /api/tickets` (cada ticket trae `itop_id` para mostrar y `ticket_itop_id` para filtrar), `GET /api/tickets/summary`, `GET /api/tickets/updates` (filtros `ticket_itop_id`, `action`), `GET /api/alerts` | reader |
-| Corridas (lanzar escaneo y ver progreso en vivo) | `POST /api/scans`, `GET /api/runs` (filtros `kind`, `status`, `date_from`, `date_to`), `GET /api/runs/{id}/events` (SSE) | analyst lanzar; reader ver |
+| Corridas (lanzar escaneo y ver progreso en vivo) | `POST /api/scans`, `GET /api/runs` (filtros `kind`, `status`, `date_from`, `date_to`), `GET /api/runs/{id}` (una corrida), `GET /api/runs/{id}/events` (SSE) | analyst lanzar; reader ver |
 | Historial (línea de tiempo de corridas, revisiones LLM y cambios de configuración) | `GET /api/history` (filtros `type`, `status`, `date_from`, `date_to`) | reader |
 | Telemetría de agentes (analistas y juez) | `GET /api/telemetry/summary?window=24h\|7d\|30d`, `GET /api/telemetry/daily?days=1..90`, `GET /api/telemetry/reviews` (filtros `agent`, `status`, `date_from`, `date_to`) | reader |
 | Inventario de activos y software (solo lectura; iTop es el inventario) | `GET /api/inventory/assets` (filtros `q`, `itop_class`, `criticality`, `exposed`, `classification`, `owner`, `custodian`, `with_findings`), `GET /api/inventory/summary`, `GET /api/inventory/software` (filtros `q`, `has_cpe`, `worst_level`, `with_vulnerabilities`, `category`), `GET /api/inventory/assets/{ci_id}/software` | reader |
@@ -230,10 +230,18 @@ Todo error responde con:
 ## 6. Tiempo real (SSE)
 
 `GET /api/runs/{id}/events` es un *Server-Sent Events* (`text/event-stream`) con eventos `progress` mientras la
-corrida avanza, leídos de la tabla de corridas. `POST /api/scans` deja la corrida en cola y el worker la toma;
-el stream refleja su avance real y `GET /api/runs` su estado final. `EventSource` del navegador no permite cabecera `Authorization`: usa un cliente SSE que acepte
-cabeceras (por ejemplo `@microsoft/fetch-event-source`) y manda el Bearer. Si la conexión se corta, reconecta y
-consulta `GET /api/runs` para el estado final.
+corrida avanza, leídos de la tabla de corridas: uno cada vez que cambia el estado o el avance. El `data` de cada
+evento es un texto JSON con `run_id`, `progress` (0 a 100), `status` (`queued`, `running`, `succeeded` o `failed`,
+el mismo de `GET /api/runs`) y `message` (el estado en español); el flujo termina después del evento con estado
+final (`succeeded` o `failed`), o a los 15 minutos aunque la corrida siga (reconecta). `POST /api/scans` deja la
+corrida en cola y el worker la toma; el stream refleja su avance real. `EventSource` del navegador no permite cabecera `Authorization`:
+usa un cliente SSE que acepte cabeceras (por ejemplo `@microsoft/fetch-event-source`) y manda el Bearer.
+
+**Una corrida por su id (F18.6):** `GET /api/runs/{id}` (rol `reader`, como la lista) devuelve esa corrida con el
+mismo modelo que cada elemento de `GET /api/runs` (incluidos `trigger_reason` y `triggered_by`), con su estado
+actual: el final cuando ya terminó. 404 `not_found` si no existe. Úsala para el detalle y, si la conexión del
+stream se corta, para leer el estado final (o reconecta el stream), en lugar de buscar la corrida en la lista por
+tipo y fecha de inicio.
 
 ## 7. Idioma, formato y despliegue
 

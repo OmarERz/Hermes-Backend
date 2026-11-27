@@ -286,12 +286,21 @@ OPERATIONS: Final[dict[tuple[str, str], Op]] = {
         "Corridas de escaneo, ingesta, recálculo y nocturnas, las más recientes primero. Filtros opcionales por "
         "tipo, estado y fecha de inicio; cada corrida dice por qué se lanzó y quién la lanzó.",
     ),
+    ("GET", "/api/runs/{id}"): Op(
+        "get_run",
+        "runs",
+        "Una corrida",
+        "Una corrida por su id, con el mismo modelo que cada elemento de `GET /api/runs`: tipo, estado actual (el "
+        "final cuando termina), avance, fechas, por qué se lanzó y quién la lanzó. 404 si no existe. Rol mínimo: "
+        "`reader`.",
+    ),
     ("GET", "/api/runs/{id}/events"): Op(
         "stream_run_events",
         "runs",
         "Progreso de una corrida (SSE)",
-        "Flujo `text/event-stream` con el progreso hasta que la corrida termina. Si se corta, "
-        "reconecta con `Last-Event-ID`.",
+        "Flujo `text/event-stream` con un evento `progress` cada vez que cambia el estado o el avance, hasta que la "
+        "corrida termina. Cada evento trae `run_id`, `progress`, `status` y `message`. Si se corta, reconecta y "
+        "consulta `GET /api/runs/{id}` para el estado final.",
     ),
     ("POST", "/api/stix/export"): Op(
         "export_stix",

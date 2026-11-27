@@ -13808,9 +13808,143 @@
         ]
       }
     },
+    "/api/runs/{id}": {
+      "get": {
+        "description": "Una corrida por su id, con el mismo modelo que cada elemento de `GET /api/runs`: tipo, estado actual (el final cuando termina), avance, fechas, por qué se lanzó y quién la lanzó. 404 si no existe. Rol mínimo: `reader`.",
+        "operationId": "get_run",
+        "parameters": [
+          {
+            "description": "Identificador del recurso (UUID).",
+            "in": "path",
+            "name": "id",
+            "required": true,
+            "schema": {
+              "examples": [
+                "0196a6f0-0000-7000-8000-000000000001"
+              ],
+              "maxLength": 36,
+              "pattern": "^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$",
+              "title": "Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Run"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "La solicitud no es válida."
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Se requiere autenticación válida."
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "No tienes permiso para realizar esta acción."
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "El recurso solicitado no existe."
+          },
+          "405": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Método no permitido para esta ruta."
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "La solicitud entra en conflicto con el estado actual del recurso."
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Los datos enviados no son válidos."
+          },
+          "429": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Demasiadas solicitudes; intenta de nuevo más tarde."
+          },
+          "500": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Error interno del servidor."
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "Una corrida",
+        "tags": [
+          "runs"
+        ]
+      }
+    },
     "/api/runs/{id}/events": {
       "get": {
-        "description": "Flujo `text/event-stream` con el progreso hasta que la corrida termina. Si se corta, reconecta con `Last-Event-ID`.",
+        "description": "Flujo `text/event-stream` con un evento `progress` cada vez que cambia el estado o el avance, hasta que la corrida termina. Cada evento trae `run_id`, `progress`, `status` y `message`. Si se corta, reconecta y consulta `GET /api/runs/{id}` para el estado final.",
         "operationId": "stream_run_events",
         "parameters": [
           {
@@ -13836,10 +13970,47 @@
                 "schema": {
                   "properties": {
                     "data": {
-                      "description": "JSON text: run_id, progress (0-100) and message",
+                      "contentMediaType": "application/json",
+                      "contentSchema": {
+                        "properties": {
+                          "message": {
+                            "description": "El estado para la persona, en español.",
+                            "type": "string"
+                          },
+                          "progress": {
+                            "description": "Avance de 0 a 100.",
+                            "maximum": 100,
+                            "minimum": 0,
+                            "type": "integer"
+                          },
+                          "run_id": {
+                            "description": "Id (UUID) de la corrida.",
+                            "type": "string"
+                          },
+                          "status": {
+                            "description": "Estado de la corrida, el mismo de `GET /api/runs/{id}`; `succeeded` y `failed` son finales y cierran el flujo.",
+                            "enum": [
+                              "queued",
+                              "running",
+                              "succeeded",
+                              "failed"
+                            ],
+                            "type": "string"
+                          }
+                        },
+                        "required": [
+                          "run_id",
+                          "progress",
+                          "status",
+                          "message"
+                        ],
+                        "type": "object"
+                      },
+                      "description": "Texto JSON con `run_id`, `progress` (0 a 100), `status` (`queued`, `running`, `succeeded` o `failed`) y `message` (el estado en español). El flujo termina después del evento con estado final (`succeeded` o `failed`).",
                       "type": "string"
                     },
                     "event": {
+                      "description": "Nombre del evento: siempre `progress`.",
                       "enum": [
                         "progress"
                       ],

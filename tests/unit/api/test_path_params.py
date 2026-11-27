@@ -37,6 +37,7 @@ UUID_ROUTES: list[tuple[str, str, dict[str, object] | None]] = [
     ("POST", "/api/calibration/proposals/{}/reject", None),
     ("POST", "/api/notifications/events/{}/retry", None),
     ("GET", "/api/runs/{}/events", None),
+    ("GET", "/api/runs/{}", None),
 ]
 MALFORMED = ["nope", "0196a6f0000070008000000000000001", "0196a6f0-0000-7000-8000-00000000000g", "x" * 300]
 

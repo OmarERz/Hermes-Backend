@@ -1,8 +1,8 @@
-"""Runs for the API (ARQ-04, ARQ-05, FRO-19): scan requests, the run list and the progress stream, over `run`.
+"""Runs for the API (ARQ-04, ARQ-05, FRO-19): scan requests, the run list, one run and the progress stream, over `run`.
 
-`POST /api/scans` leaves a `queued` scan run that the worker picks up and runs on that same row; the run list and
-the server-sent events read the `run` table, so the frontend follows the real progress of scans, news runs and
-recalculations.
+`POST /api/scans` leaves a `queued` scan run that the worker picks up and runs on that same row; the run list, the
+single run and the server-sent events read the `run` table, so the frontend follows the real progress of scans, news
+runs and recalculations and reads a run's final state by its id (F18.6).
 """
 
 from __future__ import annotations
@@ -54,6 +54,10 @@ class RunSource(Protocol):
 
     def queue_scan(self, firebase_uid: str | None) -> Run: ...
 
+    def get(self, run_id: str) -> Run:
+        """One run as the list shows it, with who launched it; raises ApiError 404 when it does not exist."""
+        ...
+
     def progress(self, run_id: str) -> Iterator[Run]:
         """Snapshots of the run until it ends; raises ApiError 404 when it does not exist."""
         ...
@@ -99,6 +103,14 @@ def _with_launcher(session: Session, run: m.Run) -> Run:
         return to_api(run)
     name = session.scalar(select(m.AppUser.display_name).where(m.AppUser.id == run.triggered_by))
     return to_api(run, _launcher(run, name))
+
+
+def _run_key(run_id: str) -> uuid.UUID:
+    """The run's UUID; a 404 for anything else (the path pattern already answers 422 before this)."""
+    try:
+        return uuid.UUID(run_id)
+    except ValueError:
+        raise ApiError(404, "not_found", "La corrida no existe.") from None
 
 
 @dataclass
@@ -154,16 +166,21 @@ class SqlRunSource:
             )
             return _with_launcher(session, queue_scan(session, self.clock(), user_id))
 
+    def get(self, run_id: str) -> Run:
+        key = _run_key(run_id)
+        with self.session_factory() as session:
+            row = session.get(m.Run, key)
+            if row is None or row.kind not in KINDS:
+                raise ApiError(404, "not_found", "La corrida no existe.")
+            return _with_launcher(session, row)
+
     def _read(self, key: uuid.UUID) -> Run | None:
         with self.session_factory() as session:
             row = session.get(m.Run, key)
             return to_api(row) if row is not None and row.kind in KINDS else None  # the stream omits the launcher
 
     def progress(self, run_id: str) -> Iterator[Run]:
-        try:
-            key = uuid.UUID(run_id)
-        except ValueError:
-            raise ApiError(404, "not_found", "La corrida no existe.") from None
+        key = _run_key(run_id)
         first = self._read(key)
         if first is None:
             raise ApiError(404, "not_found", "La corrida no existe.")

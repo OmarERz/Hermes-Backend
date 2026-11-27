@@ -108,3 +108,39 @@ def test_the_run_list_pages_in_sql_without_a_size_cap(factory: sessionmaker[Sess
     assert [r["kind"] for r in seen] == ["recalculation"] + ["ingestion"] * 5
     starts = [r["started_at"] for r in seen[1:]]
     assert starts == sorted(starts, reverse=True)
+
+
+def test_one_run_by_id_is_the_list_item_with_its_final_state(factory: sessionmaker[Session]) -> None:
+    """F18.6: GET /api/runs/{id} reads one run of the `run` table as the list shows it, launcher included."""
+    with factory() as session, session.begin():
+        user = session.scalars(select(m.AppUser)).first()
+        uid = user.firebase_uid if user is not None else "nobody"
+    with api(factory, uid) as client:
+        run = client.post("/api/scans", json={}).json()
+        assert client.get(f"/api/runs/{run['id']}").json() == run  # queued, launched by this person
+        with factory() as session, session.begin():
+            row = session.get_one(m.Run, run["id"])
+            row.status, row.progress = "running", 30
+            row.started_at = datetime(2026, 11, 27, 10, tzinfo=UTC)
+        running = client.get(f"/api/runs/{run['id']}").json()
+        assert (running["status"], running["progress"], running["started_at"]) == (
+            "running",
+            30,
+            "2026-11-27T10:00:00Z",
+        )
+        with factory() as session, session.begin():
+            row = session.get_one(m.Run, run["id"])
+            row.status, row.progress = "cancelled", 30  # the API says `failed` for a cancelled run, as the list does
+            row.finished_at = datetime(2026, 11, 27, 10, 5, tzinfo=UTC)
+        final = client.get(f"/api/runs/{run['id']}").json()
+        assert (final["status"], final["finished_at"]) == ("failed", "2026-11-27T10:05:00Z")
+        listed = client.get("/api/runs", params={"kind": "scan", "status": "failed"}).json()["items"]
+        assert final == next(r for r in listed if r["id"] == run["id"])
+        with factory() as session, session.begin():
+            hidden = m.Run(kind="inventory_sync", status="succeeded", progress=100, trigger_reason="schedule")
+            session.add(hidden)
+            session.flush()
+            hidden_id = str(hidden.id)
+        unlisted = client.get(f"/api/runs/{hidden_id}")  # a kind the list never shows is not found here either
+        assert (unlisted.status_code, unlisted.json()["error"]["code"]) == (404, "not_found")
+        assert client.get("/api/runs/01936b2e-0000-7000-8000-000000000001").status_code == 404
