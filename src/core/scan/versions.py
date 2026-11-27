@@ -18,7 +18,9 @@ PRE_RELEASE: Final = {
 POST_RELEASE: Final = frozenset({"post", "p", "sp", "patch"})
 MAX_LENGTH: Final = 100
 DIGITS: Final = "0123456789"
-LETTER_RELEASE: Final = re.compile(r"([0-9]+(?:\.[0-9]+)*)([a-z]+)")  # OpenSSL style: `1.1.1zd`, `1.0.2zm`
+# OpenSSL letter releases only: one letter, or `z` and one letter after it (`1.1.1w`, `1.1.1zd`, `1.0.2zm`); never a
+# word such as `fips` or `beta1`
+LETTER_RELEASE: Final = re.compile(r"([0-9]+(?:\.[0-9]+)*)(z?[a-z])")
 WILDCARD: Final = "x"  # `1.2x` names a line, not one version
 
 
@@ -74,7 +76,7 @@ def compare_versions(left: str, right: str) -> int | None:
 
 def release_of(raw: str) -> tuple[int, ...] | None:
     """The release numbers of a version, also for an OpenSSL letter release off the scale (`1.1.1zd` -> (1, 1, 1));
-    None for any other version the comparator cannot read (`3.0.23-fips`, `1.2.x`, `1.2x`, `latest`)."""
+    None for any other version the comparator cannot read (`3.0.23-fips`, `3.0.22fips`, `1.2.x`, `1.2x`, `latest`)."""
     parsed = parse_version(raw)
     if parsed is not None:
         return parsed.release

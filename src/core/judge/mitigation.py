@@ -178,10 +178,17 @@ _SET_END_LEAD = re.compile(
     re.IGNORECASE,
 )
 # 'con' and 'with' name what is installed, except as the replacement ('Replace 3.0.17 with 3.0.18')
-_CURRENT_LEAD = re.compile(rf"\b(?:con|with)\s+(?:{_NO_VERSION}\S+\s+){{0,2}}{_OPENER}$", re.IGNORECASE)
+# the words between a marker of what is installed and its version never include a target preposition ('Actualizar
+# los servidores con OpenSSL a 3.0.22' moves to 3.0.22)
+_INSTALLED_WORD = rf"(?:(?!(?:a|al|hacia|hasta|to|into|por|by)\b){_NO_VERSION}\S+\s+)"
+_CURRENT_LEAD = re.compile(  # 'with a 3.0.22 release': after 'with', 'a' is an article
+    rf"\b(?:con\s+|with\s+(?:(?:a|an|the)\s+)?){_INSTALLED_WORD}{{0,2}}{_OPENER}$", re.IGNORECASE
+)
 _LIMIT_LEAD = re.compile(
     rf"(?:\b(?:de|del)\s+{_ARTICLES}"
-    rf"|\b(?:desde|entre|from|between|running|ejecutando)\s+(?:{_NO_VERSION}\S+\s+){{0,2}}"
+    rf"|\b(?:desde|entre|from|between|running|ejecutando)\s+{_INSTALLED_WORD}{{0,2}}"
+    # an installed limit: 'running up to 3.0.22', 'con versiones hasta 3.0.22'
+    rf"|\b(?:running|ejecutando|with|con)\s+{_INSTALLED_WORD}{{0,2}}(?:up\s+to|hasta)\s+{_ARTICLES}"
     r"|\b(?:sin\s+llegar\s+a|sin\s+pasar\s+(?:a|de)|antes\s+de|por\s+(?:debajo|encima)\s+de"
     r"|(?<!\bo )(?<!\bu )(?<!\bor )(?:anterior|inferior|posterior|superior)(?:es)?\s+a"
     r"|(?:menor|mayor)(?:es)?\s+(?:a|que)|distint[ao]s?\s+(?:a|de)"
@@ -198,15 +205,18 @@ _LOWER_TAIL = re.compile(
     re.IGNORECASE,
 )
 _FLOOR_TAIL = re.compile(
-    rf"{_CLOSER}\s*,?\s*(?:(?:o|u|or|y|and)\s+(?:una\s+|a\s+|any\s+)?(?:posterior|superior|mayor|m[aá]s\s+reciente"
-    r"|later|higher|newer|above|greater)|en\s+adelante|onwards?)",
+    rf"{_CLOSER}\s*,?\s*(?:(?:o|u|or|y|and)\s+(?:una\s+|a\s+|any\s+)?(?:(?:posterior|superior|mayor)(?:es)?"
+    r"|m[aá]s\s+recientes?|later|higher|newer|above|greater)\b|en\s+adelante|onwards?)",
     re.IGNORECASE,
 )
-# a floor of affected versions: it is the subject of 'están afectadas' / 'are affected', or comes right after
+# a floor of affected versions: it is the subject of 'están afectadas' / 'are affected' right after it ('3.0.0 o
+# posteriores están afectadas'; not 'run 3.0.22 or later, as earlier versions are affected'), or comes right after
 # 'versiones afectadas:' / 'affected versions are' ('… is deployed to affected hosts' and 'Revisar las versiones
 # afectadas y comprobar que los equipos ejecuten 3.0.22 o posterior' are still floors)
-_AFFECTED = re.compile(
-    r"\b(?:est[aá]n?|son|es|siguen?|quedan?|are|is|were|was|remains?)\s+(?:(?:also|still|todav[ií]a|a[uú]n|tambi[eé]n)\s+)?"
+_AFFECTED = re.compile(  # the subject may end in its noun: '3.0.0 and later versions are affected'
+    r"(?:\s+(?:versi[oó]n(?:es)?|versions?|releases?|builds?)(?:\s+(?:of|de|del|for|para|on|in|en)(?:\s+[^\s,;]+){1,3}?)?)?"
+    r"\s+(?:est[aá]n?|son|es|siguen?|quedan?|are|is|were|was"
+    r"|remains?)\s+(?:(?:also|still|todav[ií]a|a[uú]n|tambi[eé]n)\s+)?"
     r"(?:afectad\w*|vulnerables?|affected|impacted)\b",
     re.IGNORECASE,
 )
@@ -490,8 +500,9 @@ def _recommended(text: str, spans: Sequence[tuple[int, int]]) -> set[tuple[int, 
                     has_target = True
                 previous_end = span[1]
         for span in candidates:
-            affected = _AFFECTED.search(text, span[1], end) or _AFFECTED_VERSIONS.search(text, start, span[0])
-            floor = affected is None and _FLOOR_TAIL.match(text, span[1], end)
+            tail = _FLOOR_TAIL.match(text, span[1], end)
+            subject = tail is not None and _AFFECTED.match(text, tail.end(), end) is not None
+            floor = tail is not None and not subject and _AFFECTED_VERSIONS.search(text, start, span[0]) is None
             if floor or _FIXED_LEAD.search(text, start, span[0]) or _FIXED_TAIL.match(text, span[1], end):
                 targets.add(span)
         for previous, span in itertools.pairwise(clause):  # a list after a recommended version

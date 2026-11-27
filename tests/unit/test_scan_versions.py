@@ -67,6 +67,8 @@ def test_range_with_an_incomparable_version_is_unknown() -> None:
         ("1.2x", None),  # a wildcard names a line, not one version
         ("1.2.x", None),
         ("3.0.23-fips", None),  # an unknown label after a separator stays unknown
+        ("3.0.22fips", None),  # a word glued to the numbers is no OpenSSL letter release
+        ("1.1.1zzz", None),
         ("3.0.11-1~deb12u2", None),
         ("latest", None),
         ("1" + "a" * 100, None),  # too long, as in parse_version
@@ -89,6 +91,7 @@ def test_release_of_reads_numbers_before_an_unknown_letter_suffix(raw: str, rele
         ("1.1.1", "1.1.1w", None),
         ("1.1.1-rc1", "1.1.1w", None),
         ("3.0.23-fips", "3.0.0", None),  # not a letter release: never guessed
+        ("3.0.22fips", "3.0.21", None),
         ("1.2.x", "1.3.0", None),
         ("3.0.18", "latest", None),
         ("2.0.0-rc1", "2.0.0", -1),  # readable versions keep the comparator's order

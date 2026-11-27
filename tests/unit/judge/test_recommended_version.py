@@ -151,6 +151,19 @@ def recommended(action: str) -> list[str]:
         ("Fixed version for On-Premises Data Gateway is 3.0.22.", ["3.0.22"]),  # T3 round 3 findings
         ("Revisar las versiones afectadas de OpenSSL, comprobar 3.0.22 o posterior.", ["3.0.22"]),
         ("Actualizar Chrome hasta 126 según el aviso.", ["126"]),
+        ("Actualizar los servidores con OpenSSL a 3.0.22.", ["3.0.22"]),  # feature review findings
+        ("Upgrade the servers with OpenSSL to 3.0.22.", ["3.0.22"]),
+        ("Ensure hosts run OpenSSL 3.0.22 or later, as earlier versions are affected.", ["3.0.22"]),
+        ("3.0.0 and later are also affected.", []),
+        ("Upgrade hosts running up to 3.0.22 to the latest supported release.", []),  # T4 round 1 findings
+        ("Upgrade hosts running OpenSSL to 3.0.23.", ["3.0.23"]),
+        ("Upgrade to 3.0.23. 3.0.0 and later versions are affected.", ["3.0.23"]),
+        ("Las versiones 3.0.0 o posteriores versiones están afectadas.", []),
+        ("Upgrade OpenSSL from 3.0.20 up to 3.0.22.", ["3.0.22"]),  # T4 round 2 findings
+        ("Upgrade only hosts with a 3.0.22 or later release to the latest supported release.", []),
+        ("OpenSSL 3.0.0 and later versions of this library are affected.", []),
+        ("Actualizar los equipos con versiones hasta 3.0.22 a la última versión compatible.", []),  # T4 round 3
+        ("OpenSSL 3.0.0 and later versions on Windows are affected.", []),
         ("Validar que todos los servidores afectados ejecuten 3.0.22 o posterior.", ["3.0.22"]),
         ("Affected versions: 3.0.0 and later.", []),
         ("La versión corregida de OpenSSL es 3.0.22.", ["3.0.22"]),
@@ -374,6 +387,18 @@ def test_t3_round_2_findings_are_checked() -> None:
     floor = package("openssl:openssl", ["openssl:openssl [3.0.0,3.0.23)"], " Fixed in 3.0.22.")
     action = "Revisar las versiones afectadas de OpenSSL y ejecutar 3.0.22 o posterior."
     assert check(action, "Fixed in 3.0.22.", floor) == OUTSIDE_RULE
+
+
+def test_feature_review_findings_are_checked() -> None:
+    floor = package("openssl:openssl", ["openssl:openssl [3.0.0,3.0.23)"], " Fixed in 3.0.22.")
+    for action in (
+        "Actualizar los servidores con OpenSSL a 3.0.22.",
+        "Upgrade the servers with OpenSSL to 3.0.22.",
+        "Ensure hosts run OpenSSL 3.0.22 or later, as earlier versions are affected.",
+    ):
+        assert check(action, "Fixed in 3.0.22.", floor) == OUTSIDE_RULE, action
+    fips = package("openssl:openssl", ["openssl:openssl [3.0.0,3.0.21)"], " Fixed in 3.0.22fips.")
+    assert check("Actualizar OpenSSL a 3.0.22fips.", "Fixed in 3.0.22fips.", fips) == OUTSIDE_RULE  # never guessed
 
 
 def test_without_a_cpe_or_a_range_of_the_product_nothing_is_checked() -> None:

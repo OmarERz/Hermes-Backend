@@ -118,7 +118,10 @@ def test_arabic_indic_digits_are_not_a_version() -> None:
     assert compare_versions("\u0661.\u0662", "1.2") is None
 
 
-letters = st.text(alphabet="abcdefghijklmnopqrstuvwyz", min_size=1, max_size=3)  # no "x": a wildcard
+letters = st.one_of(  # OpenSSL letters: one letter (no "x", a wildcard) or "z" and one letter
+    st.sampled_from("abcdefghijklmnopqrstuvwyz"),
+    st.builds(lambda c: f"z{c}", st.sampled_from("abcdefghijklmnopqrstuvwxyz")),
+)
 letter_releases = st.builds(lambda base, tail: base + tail, release, letters)
 off_scale = letter_releases.filter(lambda v: parse_version(v) is None)  # `1.1.1zd`, not `1.0a` (alpha) or `2.0p` (post)
 
