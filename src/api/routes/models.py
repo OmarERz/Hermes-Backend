@@ -454,6 +454,12 @@ class Ticket(_Model):
     status: str
     fixed_cis: int
     total_cis: int
+    ticket_itop_id: str | None = Field(
+        default=None,
+        description="Id numérico del ticket en iTop (F18.4): el valor que aceptan los filtros `ticket_itop_id` de "
+        "`GET /api/tickets/updates` y `GET /api/recommendations` y el campo `ticket_itop_id` de "
+        "`POST /api/feedback`. `itop_id` es para mostrar: trae la referencia (`R-000123`) cuando ya existe.",
+    )
 
 
 class Alert(_Model):

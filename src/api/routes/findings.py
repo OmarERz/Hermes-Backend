@@ -564,6 +564,7 @@ def list_tickets(
                 status=t.status,
                 fixed_cis=t.fixed_cis,
                 total_cis=t.total_cis,
+                ticket_itop_id=t.itop_ticket_id,
             )
             for t in found
         ],

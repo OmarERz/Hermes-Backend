@@ -157,7 +157,11 @@ OPERATIONS: Final[dict[tuple[str, str], Op]] = {
         "usa Slack. Nunca cambia el puntaje por sí mismo. Rol mínimo: `analyst`.",
     ),
     ("GET", "/api/tickets"): Op(
-        "list_tickets", "tickets", "Listar tickets", "Tickets ya creados en iTop, los más urgentes primero."
+        "list_tickets",
+        "tickets",
+        "Listar tickets",
+        "Tickets ya creados en iTop, los más urgentes primero. Cada uno trae su referencia para mostrar (`itop_id`) "
+        "y su id numérico (`ticket_itop_id`), que es el que aceptan los filtros `ticket_itop_id` y el feedback.",
     ),
     ("GET", "/api/alerts"): Op(
         "list_alerts",
@@ -1033,6 +1037,8 @@ OVERRIDES: Final[dict[str, str]] = {
     "StixBundle.id": "Id del bundle (`bundle--` y un UUID).",
     "StixBundle.type": "Siempre `bundle`.",
     "Ticket.status": "Estado del ticket en iTop.",
+    "Ticket.itop_id": "Ticket en iTop para mostrar: su referencia (`R-000123`) cuando ya la tiene; si no, su id "
+    "numérico. Para filtrar usa `ticket_itop_id`.",
     "Ticket.cve": "CVE del ticket.",
     "Ticket.custodian": "Equipo custodio del ticket.",
     "VulnerabilityBand.level": "Nivel de la banda.",
@@ -1205,7 +1211,8 @@ EXAMPLES: Final[dict[str, list[dict[str, Any]]]] = {
     ],
     "Ticket": [
         {
-            "itop_id": "1234",
+            "itop_id": "R-001234",
+            "ticket_itop_id": "1234",
             "url": "https://itop.example.test/pages/UI.php?operation=details&class=UserRequest&id=1234",
             "cve": "CVE-2026-10001",
             "custodian": "Infraestructura Linux",

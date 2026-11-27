@@ -46,6 +46,20 @@ def test_ticket_log_refuses_a_malformed_ticket_id(client: TestClient) -> None:
         assert client.get("/api/tickets/updates", params=params).status_code == 422
 
 
+def test_ticket_list_gives_the_numeric_id_the_filters_take(get: Get, front: Front) -> None:
+    """`itop_id` shows the iTop reference once it exists; `ticket_itop_id` (F18.4) is the numeric id the
+    `ticket_itop_id` filters take, so a ticket picked from the list filters its log and its recommendations."""
+    tickets = {t["itop_id"]: t for t in get("/api/tickets")["items"]}
+    assert {shown: t["ticket_itop_id"] for shown, t in tickets.items()} == {"R-000777": "777", "778": "778"}
+    picked = tickets["R-000777"]["ticket_itop_id"]
+    log = get("/api/tickets/updates", ticket_itop_id=picked)["items"]
+    assert [u["id"] for u in log] == [str(front.updates["raise"]), str(front.updates["create"])]
+    assert {u["ticket_ref"] for u in log} == {"R-000777"}
+    a = front.scenario.assessments
+    by_ticket = {r["assessment_id"] for r in get("/api/recommendations", ticket_itop_id=picked)["items"]}
+    assert by_ticket == {str(a["A1"]), str(a["A2"])}
+
+
 def test_judge_detail_shows_reasons_quotes_and_the_double_review(get: Get, front: Front) -> None:
     detail = get(f"/api/recommendations/{front.scenario.assessments['A2']}/judge")
     assert detail["review_id"] == str(front.reviews["first"])

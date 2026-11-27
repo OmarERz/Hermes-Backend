@@ -5758,8 +5758,9 @@
             "custodian": "Infraestructura Linux",
             "cve": "CVE-2026-10001",
             "fixed_cis": 1,
-            "itop_id": "1234",
+            "itop_id": "R-001234",
             "status": "En atención",
+            "ticket_itop_id": "1234",
             "total_cis": 3,
             "urgency": 1,
             "url": "https://itop.example.test/pages/UI.php?operation=details&class=UserRequest&id=1234"
@@ -5782,7 +5783,7 @@
             "type": "integer"
           },
           "itop_id": {
-            "description": "Id del ticket en iTop.",
+            "description": "Ticket en iTop para mostrar: su referencia (`R-000123`) cuando ya la tiene; si no, su id numérico. Para filtrar usa `ticket_itop_id`.",
             "title": "Itop Id",
             "type": "string"
           },
@@ -5790,6 +5791,18 @@
             "description": "Estado del ticket en iTop.",
             "title": "Status",
             "type": "string"
+          },
+          "ticket_itop_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Id numérico del ticket en iTop (F18.4): el valor que aceptan los filtros `ticket_itop_id` de `GET /api/tickets/updates` y `GET /api/recommendations` y el campo `ticket_itop_id` de `POST /api/feedback`. `itop_id` es para mostrar: trae la referencia (`R-000123`) cuando ya existe.",
+            "title": "Ticket Itop Id"
           },
           "total_cis": {
             "description": "Activos totales del ticket.",
@@ -15277,7 +15290,7 @@
     },
     "/api/tickets": {
       "get": {
-        "description": "Tickets ya creados en iTop, los más urgentes primero.",
+        "description": "Tickets ya creados en iTop, los más urgentes primero. Cada uno trae su referencia para mostrar (`itop_id`) y su id numérico (`ticket_itop_id`), que es el que aceptan los filtros `ticket_itop_id` y el feedback.",
         "operationId": "list_tickets",
         "parameters": [
           {

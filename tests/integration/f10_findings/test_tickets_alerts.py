@@ -25,6 +25,7 @@ def test_tickets_in_itop_most_urgent_first(get: Get) -> None:
             "status": "Abierto",
             "fixed_cis": 1,
             "total_cis": 2,
+            "ticket_itop_id": "777",  # F18.4: the numeric id the filters take, next to the reference shown
         },
         {
             "itop_id": "778",
@@ -35,6 +36,7 @@ def test_tickets_in_itop_most_urgent_first(get: Get) -> None:
             "status": "Resuelto",
             "fixed_cis": 0,
             "total_cis": 1,
+            "ticket_itop_id": "778",
         },
     ]  # the ticket still waiting for iTop is not listed
 

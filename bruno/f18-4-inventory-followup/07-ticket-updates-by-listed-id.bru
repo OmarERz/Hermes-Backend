@@ -1,0 +1,41 @@
+meta {
+  name: ticket-updates-by-listed-id
+  type: http
+  seq: 7
+}
+
+get {
+  url: {{baseUrl}}/api/tickets/updates?ticket_itop_id={{listedTicketId}}&limit=20
+  body: none
+  auth: bearer
+}
+
+auth:bearer {
+  token: {{readerToken}}
+}
+
+script:pre-request {
+  const hermes = require("./lib/hermes");
+  const page = await hermes.api(bru, "GET", "/api/tickets?limit=1", "readerToken");
+  const first = page.items[0] || null;
+  bru.setVar("listedTicketId", first ? first.ticket_itop_id : "");
+  if (!hermes.needData(bru, first, "a ticket in iTop")) return;
+}
+
+assert {
+  res.status: eq 200
+  res.body.items: isArray
+}
+
+tests {
+  test("the log of the ticket picked from the list is only that ticket's", function () {
+    const id = bru.getVar("listedTicketId");
+    for (const entry of res.body.items) expect(entry.ticket_itop_id).to.equal(id);
+  });
+}
+
+docs {
+  The `ticket_itop_id` of the first listed ticket filters its log; skipped when no ticket exists in iTop yet.
+
+  operationId: list_ticket_updates
+}

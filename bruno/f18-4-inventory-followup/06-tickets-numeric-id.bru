@@ -1,0 +1,36 @@
+meta {
+  name: tickets-numeric-id
+  type: http
+  seq: 6
+}
+
+get {
+  url: {{baseUrl}}/api/tickets?limit=50
+  body: none
+  auth: bearer
+}
+
+auth:bearer {
+  token: {{readerToken}}
+}
+
+assert {
+  res.status: eq 200
+  res.body.items: isArray
+}
+
+tests {
+  test("every ticket gives the numeric iTop id its filters take, next to the id it shows", function () {
+    for (const ticket of res.body.items) {
+      expect(ticket.ticket_itop_id).to.match(/^[0-9]{1,12}$/);
+      expect(ticket.itop_id).to.be.a("string");
+    }
+  });
+}
+
+docs {
+  The ticket list shows the iTop reference once it exists (`itop_id`) and gives the numeric id (`ticket_itop_id`)
+  that the `ticket_itop_id` filters and the feedback take (F18.4).
+
+  operationId: list_tickets
+}
