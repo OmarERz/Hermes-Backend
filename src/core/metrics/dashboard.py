@@ -43,6 +43,7 @@ CATALOG: Final[dict[str, MetricInfo]] = {
     "fallback_rate": MetricInfo("Revisiones con respaldo (sin juez)", "ratio"),
     "validation_failure_rate": MetricInfo("Respuestas del juez que no validan", "ratio"),
     "wrong_priority_judged": MetricInfo("«Prioridad incorrecta» en ajustes del juez", "ratio"),
+    "original_score_accepted": MetricInfo("«Aceptar puntaje original» en ajustes del juez", "ratio"),
     "first_pass_validation": MetricInfo("Validación a la primera (peor pieza)", "ratio", "min"),
     "retries": MetricInfo("Reintentos de LLM", "count", "sum"),
     "cost_usd": MetricInfo("Costo de LLM del día", "usd", "sum"),

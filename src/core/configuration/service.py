@@ -4,13 +4,16 @@ One configuration version covers the formula and every editable parameter. Histo
 (`setting_value` rows and `formula_version` rows), so the number is derived: version 1 is the factory state and
 every distinct change moment after it adds one. A change writes all its rows with the same timestamp, which is what
 makes it one version. Every write is audited (`audit_log`, entity `config`) in the same transaction.
+
+The judge reasons (`reasons.<code>.enabled`, FRO-03) live in the formula version, so switching one saves a new
+version like a formula edit; the stored scores do not depend on them, so that alone queues no recalculation.
 """
 
 from __future__ import annotations
 
 import json
 import uuid
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from datetime import UTC, datetime
 from decimal import Decimal, InvalidOperation
 from typing import Any, Final
@@ -28,7 +31,10 @@ from core.configuration.errors import (
     VersionConflictError,
     check_text,
 )
+from core.configuration.judge_estimate import JudgeEstimate
 from core.db import models as m
+from core.judge.catalog import SensitivityProfile
+from core.judge.store import load_judge_settings
 from core.scoring.engine import Formula
 from core.scoring.formula_repo import NoActiveFormulaError, load_formula
 from core.scoring.formula_repo import load_active_formula as _load_active
@@ -56,6 +62,8 @@ API_TYPES: Final = {
     "enum": "enum",
     "json": "string",
 }
+# FRO-04: settings the simulation can estimate without calling the judge; the formula and the reason switches too.
+SIMULABLE_SETTINGS: Final = frozenset({"sensitivity_profile", "dead_zone"})
 GENERIC: Final = "Los datos enviados no son válidos."
 STALE: Final = "La configuración cambió desde que la leíste; vuelve a cargarla."
 
@@ -154,10 +162,33 @@ def _formula_parameter(key: str, formula: Formula) -> Parameter:
     )
 
 
+def _reason_parameters(session: Session) -> list[Parameter]:
+    """One switch per judge reason (FRO-03); the default is the factory version's."""
+    factory = session.scalar(select(m.FormulaVersion.id).order_by(m.FormulaVersion.version_no).limit(1))
+    flags = fs.reason_flags(session, factory) if factory is not None else {}
+    return [
+        Parameter(
+            key=fs.reason_key(code),
+            group="judge",
+            type="boolean",
+            default="true" if flags.get(code, True) else "false",
+            level="validated",
+            min_role="admin",
+            description=f"Motivo del juez activo: {description}",
+        )
+        for code, description in session.execute(
+            select(m.JudgeReasonType.code, m.JudgeReasonType.description).order_by(m.JudgeReasonType.code)
+        )
+        if code in flags
+    ]
+
+
 def catalog(session: Session) -> list[Parameter]:
-    """Every editable parameter: the formula (defaults are the active version's) and the settings catalog."""
+    """Every editable parameter: the formula (defaults are the active version's), the judge reason switches and the
+    settings catalog."""
     _, formula = load_active_formula(session)
     parameters = [_formula_parameter(key, formula) for key in fs.formula_values(formula)]
+    parameters.extend(_reason_parameters(session))
     options: dict[str, list[str]] = {}
     for key, option in session.execute(
         select(m.SettingOption.setting_key, m.SettingOption.option_value).order_by(m.SettingOption.option_value)
@@ -211,8 +242,9 @@ def current_version(session: Session) -> int:
 
 
 def current_values(session: Session) -> dict[str, str]:
-    _, formula = load_active_formula(session)
-    return {**fs.formula_values(formula), **_setting_values(session)}
+    formula_id, formula = load_active_formula(session)
+    reasons = fs.reason_values(fs.reason_flags(session, formula_id))
+    return {**fs.formula_values(formula), **reasons, **_setting_values(session)}
 
 
 def _user_label(session: Session, user_id: uuid.UUID | None) -> str:
@@ -331,6 +363,16 @@ def _summary(prefix: str, keys: list[str]) -> str:
 
 
 @dataclass(frozen=True)
+class _FormulaChange:
+    """A new formula version to save: from `source_id`, with `formula` and, if given, these reason switches."""
+
+    source_id: uuid.UUID
+    formula: Formula
+    reasons: dict[str, bool] | None  # None copies the source's
+    rescore: bool  # the engine formula itself changed: the stored scores follow it (FRO-08)
+
+
+@dataclass(frozen=True)
 class _Change:
     before: dict[str, str]
     after: dict[str, str]
@@ -365,7 +407,8 @@ def update(
     current = _lock_and_check(session, expected_version)
     definitions = _definitions(session)
     formula_changes = {k: v for k, v in changes.items() if fs.is_formula_key(k)}
-    unknown = [k for k in changes if k not in definitions and k not in formula_changes]
+    reason_changes = {k: v for k, v in changes.items() if fs.is_reason_key(k)}
+    unknown = [k for k in changes if k not in definitions and k not in formula_changes and k not in reason_changes]
     if unknown:
         raise ValidationFailedError(GENERIC, tuple(Problem(f"body.changes.{k}", "unknown_parameter") for k in unknown))
     _check_roles(list(changes), actor.role, definitions)
@@ -373,16 +416,11 @@ def update(
     ctx = _Context(session, actor.now, actor.user_id, actor.origin)
     stored: dict[str, Any] = {}
     for key, raw in changes.items():
-        if key in definitions and key not in formula_changes:
+        if key in definitions and key not in formula_changes and key not in reason_changes:
             parsed = parse_setting(session, definitions[key], raw)
             if _text(parsed, definitions[key].value_type) != before[key]:
                 stored[key] = parsed
-    new_formula = None
-    if formula_changes:
-        formula_id, formula = load_active_formula(session)
-        candidate = fs.apply_changes(formula, formula_changes)
-        if candidate != formula:
-            new_formula = (formula_id, candidate)
+    new_formula = _formula_change(session, formula_changes, reason_changes)
     if not stored and new_formula is None:
         return current, before
     _write(ctx, stored, new_formula)
@@ -393,7 +431,22 @@ def update(
     return current + 1, after
 
 
-def _write(ctx: _Context, stored: dict[str, Any], new_formula: tuple[uuid.UUID, Formula] | None) -> None:
+def _formula_change(
+    session: Session, formula_changes: dict[str, str], reason_changes: dict[str, str]
+) -> _FormulaChange | None:
+    """The new formula version the changes need, or None when they change nothing in it."""
+    if not formula_changes and not reason_changes:
+        return None
+    formula_id, formula = load_active_formula(session)
+    candidate = fs.apply_changes(formula, formula_changes) if formula_changes else formula
+    flags = fs.reason_flags(session, formula_id)
+    wanted = fs.apply_reason_changes(flags, reason_changes)
+    if candidate == formula and wanted == flags:
+        return None
+    return _FormulaChange(formula_id, candidate, wanted if wanted != flags else None, candidate != formula)
+
+
+def _write(ctx: _Context, stored: dict[str, Any], new_formula: _FormulaChange | None) -> None:
     session = ctx.session
     for key, value in stored.items():
         version = (
@@ -415,20 +468,23 @@ def _write(ctx: _Context, stored: dict[str, Any], new_formula: tuple[uuid.UUID, 
                 changed_at=ctx.now,
             )
         )
-    if new_formula is None and "dead_zone" in stored:
-        # The dead zone is a setting but part of the scoring formula (it decides which judge adjustments apply):
-        # the stored scores follow it too (F-18).
-        queue_recalculation(session, ctx.now, _load_active(session)[0], ctx.user_id)
+    saved_id: uuid.UUID | None = None
     if new_formula is not None:
-        source_id, formula = new_formula
         saved = fs.save_new_version(
             session,
-            source_id,
-            formula,
-            fs.NewVersion(ctx.user_id, ctx.now, "Cambio desde la configuración", ctx.origin),
+            new_formula.source_id,
+            new_formula.formula,
+            fs.NewVersion(
+                ctx.user_id, ctx.now, "Cambio desde la configuración", ctx.origin, reasons_enabled=new_formula.reasons
+            ),
         )
-        # FRO-08: the worker recalculates with the saved version, without the judge
-        queue_recalculation(session, ctx.now, saved.id, ctx.user_id)
+        saved_id = saved.id
+    # FRO-08: the worker recalculates with the saved version, without the judge. The dead zone is a setting but part
+    # of the scoring formula (it decides which judge adjustments apply): the stored scores follow it too (F-18). A save
+    # that only switches judge reasons keeps the engine formula and queues nothing; a request an earlier save left
+    # waiting still runs, with the new version (`core.pipeline.wiring.engine_recalculate_queued`).
+    if (new_formula is not None and new_formula.rescore) or "dead_zone" in stored:
+        queue_recalculation(session, ctx.now, saved_id or _load_active(session)[0], ctx.user_id)
     session.flush()
 
 
@@ -444,9 +500,14 @@ def restore(session: Session, actor: Actor, version: int, expected_version: int)
     stored = {
         key: value for key, value in target_values.items() if _text(value, definitions[key].value_type) != before[key]
     }
-    _, active = load_active_formula(session)
+    active_id, active = load_active_formula(session)
     target = load_formula(session, target_formula_id)
-    new_formula = (target_formula_id, target) if target != active else None
+    same_reasons = fs.reason_flags(session, target_formula_id) == fs.reason_flags(session, active_id)
+    new_formula = (
+        _FormulaChange(target_formula_id, target, None, target != active)
+        if target != active or not same_reasons
+        else None
+    )
     if not stored and new_formula is None:
         return current, before
     if new_formula is not None and ROLE_RANK[actor.role] < ROLE_RANK["admin"]:
@@ -457,3 +518,39 @@ def restore(session: Session, actor: Actor, version: int, expected_version: int)
     after = current_values(session)
     _audit(ctx, "config.restore", current + 1, _change(before, after, f"Restauró la versión {version}"))
     return current + 1, after
+
+
+# --- simulation input (FRO-04) ---------------------------------------------------------------------------------
+@dataclass(frozen=True)
+class SimulationInput:
+    formula: Formula  # the proposed formula, with the proposed dead zone
+    estimate: JudgeEstimate | None  # None keeps every stored judge proposal as it is
+    not_simulable: list[str]  # known parameters the simulation cannot estimate
+
+
+def simulation_input(session: Session, changes: dict[str, str]) -> SimulationInput:
+    """What `changes` mean for the simulation: formula keys, `dead_zone`, `sensitivity_profile` and the reason switches
+    are validated and simulated; any other known parameter is listed as not simulable; an unknown one is refused."""
+    for key, raw in changes.items():
+        check_text(f"body.changes.{key[:60]}", key, raw)
+    definitions = _definitions(session)
+    formula_changes = {k: v for k, v in changes.items() if fs.is_formula_key(k)}
+    reason_changes = {k: v for k, v in changes.items() if fs.is_reason_key(k)}
+    settings = {k: v for k, v in changes.items() if k not in formula_changes and k not in reason_changes}
+    unknown = [k for k in settings if k not in definitions]
+    if unknown:
+        raise ValidationFailedError(GENERIC, tuple(Problem(f"body.changes.{k}", "unknown_parameter") for k in unknown))
+    parsed = {k: parse_setting(session, definitions[k], v) for k, v in settings.items() if k in SIMULABLE_SETTINGS}
+    formula_id, formula = load_active_formula(session)
+    proposed = fs.apply_changes(formula, formula_changes) if formula_changes else formula
+    profile = SensitivityProfile.named(str(parsed["sensitivity_profile"])) if "sensitivity_profile" in parsed else None
+    # The dead zone resolves as a save would: the one sent, or the current one. A profile alone does not change it
+    # (`PUT /api/config` keeps it), so the front sends the profile's dead zone (docs/07 §12) with both calls.
+    if "dead_zone" in parsed:
+        proposed = replace(proposed, dead_zone=int(parsed["dead_zone"]))
+    estimate = None
+    if reason_changes or profile is not None:
+        flags = fs.apply_reason_changes(fs.reason_flags(session, formula_id), reason_changes)
+        max_diff = load_judge_settings(session)[0].double_review_max_diff
+        estimate = JudgeEstimate(profile, flags, max_diff)
+    return SimulationInput(proposed, estimate, sorted(k for k in settings if k not in SIMULABLE_SETTINGS))

@@ -143,6 +143,17 @@ QUERIES: Final[dict[str, TextClause]] = {
         f.superseded_at IS NULL AND a.judge_adjustment <> 0 AND f.created_at >= :start AND f.created_at <
         :end"""
     ),
+    # RE-9 · «Accept the original score»: share of the day's current feedback on assessments the judge adjusted that
+    # is a `wrong_priority` proposing the recommendation's base (the base of its driving CI: the highest final, live
+    # CIs first, then the name), i.e. a person discarding the judge's adjustment. Calibration skips the same feedback
+    # (`core.calibration.weights`): it says nothing about the weights.
+    "original_score_accepted": text(
+        """SELECT '' AS dimension, (count(*) FILTER (WHERE f.verdict = 'wrong_priority' AND f.proposed_score = (
+        SELECT s.base FROM asset_score s JOIN asset x ON x.id = s.asset_id WHERE s.assessment_id = a.id ORDER BY
+        (x.decommissioned_at IS NOT NULL), s.final DESC, x.name, s.asset_id LIMIT 1)))::numeric / NULLIF(count(*),
+        0) AS value FROM feedback f JOIN assessment a ON a.id = f.assessment_id WHERE f.superseded_at IS NULL AND
+        a.judge_adjustment <> 0 AND f.created_at >= :start AND f.created_at < :end"""
+    ),
     # MET-18 · Error queue: size and age of the oldest pending item (snapshot).
     "error_queue_size": text(
         """SELECT '' AS dimension, count(*)::numeric AS value FROM error_queue WHERE status = 'pending'"""

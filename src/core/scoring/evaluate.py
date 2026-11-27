@@ -617,9 +617,16 @@ def _last_finals(session: Session, group_id: uuid.UUID) -> tuple[m.Assessment, d
     return previous, dict(rows.all())
 
 
-def simulate(session: Session, proposed: Formula, now: datetime | None = None) -> Simulation:
+ProposalFn = Callable[[Session, m.Assessment | None], int | None]
+
+
+def simulate(
+    session: Session, proposed: Formula, now: datetime | None = None, proposal: ProposalFn | None = None
+) -> Simulation:
     """FRO-06: how many open findings would change level with `proposed`, with nothing written. The stored judge
-    adjustments are kept (no judge call), the levels are the urgency bands of each formula."""
+    proposals are kept (no judge call), the levels are the urgency bands of each formula. `proposal` replaces the
+    stored proposal with an estimate (FRO-04: another sensitivity profile or other reasons switched on)."""
+    proposal_of = proposal or _proposal
     moment = now or utc_now()
     total = 0
     changes: list[SimulatedChange] = []
@@ -630,7 +637,7 @@ def simulate(session: Session, proposed: Formula, now: datetime | None = None) -
         if last is None:
             continue
         previous, finals = last
-        adjustment = _proposal(session, previous)
+        adjustment = proposal_of(session, previous)
         stories = [n.story_id for n in _matches(session, group.id)]
         result = compute_group(session, group, Basis(proposed, stories, adjustment, moment))
         for ci in result.cis:

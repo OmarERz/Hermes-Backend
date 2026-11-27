@@ -76,7 +76,8 @@ def test_simulate_compares_the_open_findings_with_the_proposed_formula(client: T
     reply = client.post("/api/formula/simulate", json={"changes": shifted})
     assert reply.status_code == 200, reply.text
     body = reply.json()
-    assert set(body) == {"changed_findings", "level_matrix", "last_30_days_effect", "top_movers"}
+    assert set(body) == {"changed_findings", "level_matrix", "last_30_days_effect", "top_movers", "not_simulable"}
+    assert body["not_simulable"] == []  # only formula keys: everything was simulated (FRO-04)
     matrix = body["level_matrix"]
     off_diagonal = sum(n for before, row in matrix.items() for after, n in row.items() if before != after)
     assert body["changed_findings"] == off_diagonal

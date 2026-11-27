@@ -31,8 +31,8 @@ from api.routes.models import (
     SimulationRequest,
     SimulationResult,
 )
-from core.configuration import formula_store, profile, service
-from core.configuration.errors import ConfigError, Problem, ValidationFailedError
+from core.configuration import profile, service
+from core.configuration.errors import ConfigError
 from core.db import models as m
 from core.scoring.evaluate import simulate as simulate_formula
 
@@ -133,19 +133,15 @@ TOP_MOVERS: Final = 5
 @router.post("/api/formula/simulate", dependencies=[guard("POST", "/api/formula/simulate")])
 def simulate(request: SimulationRequest, session: SessionDep) -> SimulationResult:
     """Preview only: it never changes data (FRO-06). The proposed formula is validated (FRO-05) and compared with
-    the last assessment of every open finding, keeping the stored judge adjustments (no judge call)."""
-    foreign = [key for key in request.changes if not formula_store.is_formula_key(key)]
+    the last assessment of every open finding, without calling the judge: the stored judge proposals are kept, or
+    estimated from the reasons the judge accepted when the sensitivity profile or a reason switch changes (FRO-04).
+    Other known parameters come back in `not_simulable`."""
     try:
-        if foreign:
-            raise ValidationFailedError(
-                "Solo los parámetros de la fórmula se pueden simular.",
-                tuple(Problem(f"body.changes.{key}", "unknown_parameter") for key in foreign),
-            )
-        _, formula = service.load_active_formula(session)
-        proposed = formula_store.apply_changes(formula, request.changes)
+        given = service.simulation_input(session, request.changes)
     except ConfigError as error:
         raise to_api_error(error) from None
-    result = simulate_formula(session, proposed)
+    proposed = given.formula
+    result = simulate_formula(session, proposed, proposal=given.estimate)
     matrix: dict[str, dict[str, int]] = {}
     for change in result.moves:
         before, after = LEVEL_OF_URGENCY[change.before_urgency], LEVEL_OF_URGENCY[change.after_urgency]
@@ -171,6 +167,7 @@ def simulate(request: SimulationRequest, session: SessionDep) -> SimulationResul
             f"{c.cve_id} en {names.get(c.asset_id, 'un activo')}: {c.before_final} a {c.after_final}"
             for c in movers[:TOP_MOVERS]
         ],
+        not_simulable=given.not_simulable,
     )
 
 

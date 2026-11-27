@@ -1,0 +1,26 @@
+meta {
+  name: error-queue-bad-kind
+  type: http
+  seq: 4
+}
+
+get {
+  url: {{baseUrl}}/api/error-queue?kind=slack
+  body: none
+  auth: bearer
+}
+
+auth:bearer {
+  token: {{token}}
+}
+
+assert {
+  res.status: eq 422
+  res.body.error.code: eq validation_error
+}
+
+docs {
+  The origin filter takes notification, itop or llm_validation.
+
+  operationId: list_error_queue
+}

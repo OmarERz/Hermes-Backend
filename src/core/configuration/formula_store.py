@@ -4,11 +4,15 @@ Keys: `weights.<factor>`, `levels.<factor>.<code>`, `formula.s_without_cvss`, `f
 `bands.<urgency>` (minimum score) and `decay.<step>.multiplier` / `decay.<step>.max_age_days` (the open last
 step has no day limit). `core.scoring.engine.validate_formula` is the single source of the structural rules.
 An edit never changes a version in place: it creates a new active one and supersedes the old.
+
+The judge reasons are switched on and off per formula version too (`formula_reason_range.enabled`, FRO-03), as
+`reasons.<code>.enabled`; they are not part of the engine's `Formula` (only the judge reads them).
 """
 
 from __future__ import annotations
 
 import uuid
+from collections.abc import Mapping
 from dataclasses import dataclass, replace
 from datetime import datetime
 from decimal import Decimal, InvalidOperation
@@ -27,11 +31,49 @@ BONUS: Final = "personal_data_bonus"
 LEVEL_PARTS: Final = 2  # factor and level code after the `levels.` prefix
 DECAY_PARTS: Final = 2  # step number and field after the `decay.` prefix
 FORMULA_PREFIXES: Final = ("weights.", "levels.", "formula.", "bands.", "decay.")
+REASON_PREFIX: Final = "reasons."
+REASON_SUFFIX: Final = ".enabled"
 MESSAGE: Final = "La fórmula no es válida."
 
 
 def is_formula_key(key: str) -> bool:
     return key.startswith(FORMULA_PREFIXES)
+
+
+def is_reason_key(key: str) -> bool:
+    return key.startswith(REASON_PREFIX)
+
+
+def reason_key(code: str) -> str:
+    return f"{REASON_PREFIX}{code}{REASON_SUFFIX}"
+
+
+def reason_flags(session: Session, formula_version_id: uuid.UUID) -> dict[str, bool]:
+    """Whether each judge reason is enabled in a formula version, by reason code."""
+    rows = session.execute(
+        select(m.FormulaReasonRange.reason_code, m.FormulaReasonRange.enabled).where(
+            m.FormulaReasonRange.formula_version_id == formula_version_id
+        )
+    )
+    return {code: bool(enabled) for code, enabled in rows}
+
+
+def reason_values(flags: Mapping[str, bool]) -> dict[str, str]:
+    return {reason_key(code): "true" if enabled else "false" for code, enabled in sorted(flags.items())}
+
+
+def apply_reason_changes(flags: Mapping[str, bool], changes: Mapping[str, str]) -> dict[str, bool]:
+    """`flags` with the `reasons.<code>.enabled` changes applied; an unknown reason or a value other than `true` or
+    `false` raises `ValidationFailedError`."""
+    result = dict(flags)
+    for key, raw in changes.items():
+        code = key.removeprefix(REASON_PREFIX).removesuffix(REASON_SUFFIX)
+        if not key.endswith(REASON_SUFFIX) or code not in result:
+            raise _bad(key, "unknown_parameter")
+        if raw not in {"true", "false"}:
+            raise _bad(key, "invalid_boolean")
+        result[code] = raw == "true"
+    return result
 
 
 def formula_values(formula: Formula) -> dict[str, str]:
@@ -192,6 +234,7 @@ class NewVersion:
     now: datetime
     note: str
     origin: str = "frontend"  # frontend | mode4
+    reasons_enabled: Mapping[str, bool] | None = None  # FRO-03: flags to set; None copies the source's
 
 
 def save_new_version(session: Session, source_id: uuid.UUID, formula: Formula, meta: NewVersion) -> m.FormulaVersion:
@@ -249,7 +292,7 @@ def save_new_version(session: Session, source_id: uuid.UUID, formula: Formula, m
                 reason_code=rng.reason_code,
                 min_points=rng.min_points,
                 max_points=rng.max_points,
-                enabled=rng.enabled,
+                enabled=(meta.reasons_enabled or {}).get(rng.reason_code, rng.enabled),
             )
         )
     session.flush()

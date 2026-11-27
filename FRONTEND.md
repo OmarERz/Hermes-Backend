@@ -69,9 +69,9 @@ Los requisitos de cada pantalla (FRO-xx) están en la especificación del produc
 | Pantalla | Rutas | Rol mínimo |
 |---|---|---|
 | Sesión / perfil propio | `GET /api/me` | reader |
-| Usuarios y roles | `PUT /api/admin/users/{uid}/role` | admin |
-| Parámetros (sensibilidad del juez, fórmula, niveles) | `GET /api/config/schema`, `GET /api/config`, `PUT /api/config` (cada parámetro trae su `min_role`), `GET /api/config/versions`, `POST /api/config/versions/{v}/restore` | reader para ver; editar según el parámetro; restaurar: admin |
-| Simulación antes de guardar la fórmula | `POST /api/formula/simulate` | admin |
+| Usuarios y roles | `GET /api/admin/users`, `PUT /api/admin/users/{uid}/role` | admin |
+| Parámetros (sensibilidad del juez, motivos del juez, fórmula, niveles) | `GET /api/config/schema`, `GET /api/config`, `PUT /api/config` (cada parámetro trae su `min_role`; los motivos son `reasons.<code>.enabled`), `GET /api/config/versions`, `POST /api/config/versions/{v}/restore` | reader para ver; editar según el parámetro; restaurar: admin |
+| Simulación antes de guardar la fórmula o la sensibilidad | `POST /api/formula/simulate` | admin |
 | Perfil de la empresa y empresas pares | `GET/PUT /api/profile`, `GET/POST /api/peer-companies`, `PUT/DELETE /api/peer-companies/{id}` | reader para ver; admin para editar |
 | Fuentes | `GET /api/sources`, `POST /api/sources`, `PATCH /api/sources/{id}` | reader ver; admin alta y nivel; analyst activar/desactivar |
 | Pendientes de inventario y mapeo CPE | `GET /api/pending/inventory`, `GET /api/cpe/candidates?q=`, `PUT /api/mappings/{software}` | reader ver; analyst buscar y mapear |
@@ -88,6 +88,7 @@ Los requisitos de cada pantalla (FRO-xx) están en la especificación del produc
 | Exportación STIX | `POST /api/stix/export` | analyst |
 | Propuestas de calibración (modo supervisado) | `GET /api/calibration/proposals`, `POST .../{id}/approve`, `POST .../{id}/reject` | reader ver; admin decidir |
 | Métricas | `GET /api/metrics` | reader |
+| Cola de errores (notificaciones, escrituras en iTop y validación LLM) | `GET /api/error-queue` (filtro `kind`), `POST /api/notifications/events/{id}/retry` para los `retryable` | admin |
 | Eventos de notificación en error | `GET /api/notifications/events`, `POST /api/notifications/events/{id}/retry` | admin |
 | Conexiones (estado de llaves y servicios) | `GET /api/connections/status`, `POST /api/connections/test` | admin |
 | Asistente de primera configuración | `GET /api/setup/status`, `PUT /api/setup/steps/{n}` | admin |
@@ -144,10 +145,18 @@ Todo error responde con:
   ruta para cambiarse**; no muestres controles para ellos.
 - **Fuentes estructurales** (🔒): no se pueden apagar (409 `structural_source`). Un feed nuevo entra como N4 e
   inactivo.
-- **Simulación antes de guardar** la fórmula: llama a `POST /api/formula/simulate` y muestra el impacto; guardar
-  recalcula sin llamar al juez. La simulación es real y solo acepta parámetros de la fórmula (los demás, como la
-  sensibilidad del juez, dan 422: no tienen vista previa). Compara cada hallazgo abierto con su última evaluación
-  usando la fórmula propuesta (sin llamar al juez) y devuelve `changed_findings` (los que cambian de nivel),
+- **Simulación antes de guardar** la fórmula o la sensibilidad: llama a `POST /api/formula/simulate` y muestra el
+  impacto; guardar recalcula sin llamar al juez. Simula los parámetros de la fórmula, `dead_zone`,
+  `sensitivity_profile` y los motivos `reasons.<code>.enabled` (FRO-04): para el perfil y los motivos **estima** el
+  ajuste del juez a partir de los motivos que ya aceptó, reescalados al perfil propuesto (sin llamar al juez; un
+  motivo que el juez no propuso nunca aparece; si hubo doble revisión ciega, combina las dos con su regla). La zona
+  muerta se resuelve como al guardar: la que mandes o la actual (guardar solo el perfil no la cambia). Cada perfil
+  trae su zona muerta (mínima 6, normal 4, amplia 2): **al cambiar de perfil, manda también su `dead_zone`, igual en
+  la simulación y al guardar**, para que la vista previa sea lo que se guarda. Cualquier otro parámetro conocido (por
+  ejemplo `judge_model`) se
+  ignora y vuelve en `not_simulable`: avisa a la persona que ese cambio no tiene vista previa. Una clave desconocida
+  o un valor inválido siguen dando 422. Compara cada hallazgo abierto con su última evaluación
+  usando la fórmula propuesta y devuelve `changed_findings` (los que cambian de nivel),
   `level_matrix` (nivel antes -> nivel después -> cuántos, incluidos los que se quedan en su nivel), `top_movers`
   (hasta 5, por mayor cambio de puntaje) y `last_30_days_effect` (un resumen del impacto sobre los hallazgos
   abiertos de hoy; el motor no reproduce los últimos 30 días). Guardar o restaurar una fórmula encola una corrida
@@ -167,6 +176,19 @@ Todo error responde con:
 - **Telemetría e historial:** solo metadatos (agente, modelo, estado, latencia, tokens, costo, nivel de la
   escalera); ninguna ruta devuelve prompts, paquetes ni llamadas crudas. Las series diarias vienen rellenas con
   cero. Costos y porcentajes llegan como texto decimal: no los conviertas a `float` para sumarlos.
+- **Motivos del juez (FRO-03):** cada motivo es un interruptor booleano `reasons.<code>.enabled` del grupo `judge`
+  (solo admin). Activar o desactivar uno guarda una versión nueva de la configuración (como un cambio de fórmula, con
+  la misma `expected_version`) y aplica desde la siguiente revisión del juez; **no** recalcula puntajes guardados ni
+  encola una corrida.
+- **Usuarios:** `GET /api/admin/users` lista todas las cuentas de Firebase, hayan iniciado sesión o no, ordenadas
+  por correo y paginadas. Cada una trae `role` (el guardado: mándalo como `expected_role` al cambiarlo; nulo si
+  nunca inició sesión), `claim_role`, `effective_role` (el que tendría una petición suya ahora; nulo si se
+  rechazaría), `active`, `signed_in` y `last_login_at`. Responde 503 `auth_unavailable` si Firebase no responde.
+- **Cola de errores (FRO-18):** `GET /api/error-queue` junta, de lo más reciente a lo más antiguo, los eventos de
+  notificación y las escrituras en iTop que agotaron sus reintentos y los elementos que un analista o el juez no
+  pudieron validar (`kind`: `notification`, `itop`, `llm_validation`). Solo los que traen `retryable: true` (hoy, los
+  eventos de notificación) se reintentan, con `POST /api/notifications/events/{id}/retry`. `error` es un texto corto
+  (máximo 500 caracteres): muéstralo como dato.
 - **Inventario:** es de solo lectura; un activo, su dueño o su software se registran o cambian en iTop. Los totales
   y porcentajes del resumen ya vienen calculados.
 - **Historial de un hallazgo:** abre el detalle `GET /api/vulnerabilities/{group_id}`; cada activo trae su

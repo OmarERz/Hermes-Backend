@@ -73,6 +73,25 @@ checks.positive_data_acceptance.expected-statuses = ["2xx", "3xx", "400", "401",
 include-name = "GET /api/tickets/updates"
 checks.positive_data_acceptance.expected-statuses = ["2xx", "3xx", "400", "401", "403", "404", "409", "429", "5xx"]
 
+[[operations]]
+include-name = "GET /api/admin/users"
+checks.positive_data_acceptance.expected-statuses = ["2xx", "3xx", "400", "401", "403", "404", "409", "429", "5xx"]
+
+[[operations]]
+include-name = "GET /api/error-queue"
+checks.positive_data_acceptance.expected-statuses = ["2xx", "3xx", "400", "401", "403", "404", "409", "429", "5xx"]
+
+# The role assignment revokes the sessions of the user it changes (D-030). Since `GET /api/admin/users` lists real
+# uids (F18.2), Schemathesis would reuse them (stateful links and response data) and change the roles of the test
+# identities, revoking the reader and analyst tokens the later Bruno step needs. The route is still fuzzed, only with
+# generated uids (404 `user_not_found`), never with ones taken from other responses.
+[[operations]]
+include-name = "PUT /api/admin/users/{uid}/role"
+phases.stateful.enabled = false
+phases.examples.extra-data-sources.responses = false
+phases.coverage.extra-data-sources.responses = false
+phases.fuzzing.extra-data-sources.responses = false
+
 # Configuration and catalog writes validate semantics the schema cannot express (parameter keys of the formula and
 # settings catalog, ISO country and language codes, formula rules of FRO-05, catalog sector codes, the source rules of D-041). A request that is
 # schema-valid but breaks one of those rules is correctly refused with 422 `validation_error` (documented on every

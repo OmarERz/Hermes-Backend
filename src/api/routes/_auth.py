@@ -67,6 +67,8 @@ ROUTE_ROLES: dict[tuple[str, str], Role] = {
 # including the display name of whoever launched a run or changed the configuration (as `/api/config/versions` does);
 # account lists and operational errors are admin only.
 FRONT_ROUTE_ROLES: dict[tuple[str, str], Role] = {
+    ("GET", "/api/admin/users"): Role.ADMIN,
+    ("GET", "/api/error-queue"): Role.ADMIN,
     ("GET", "/api/telemetry/summary"): Role.READER,
     ("GET", "/api/telemetry/daily"): Role.READER,
     ("GET", "/api/telemetry/reviews"): Role.READER,
