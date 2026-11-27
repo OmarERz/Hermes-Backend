@@ -170,12 +170,14 @@ Todo error responde con:
 - **Id de un ticket (F18.4, F18.5):** `ticket_itop_id` es siempre el id **numérico** de iTop, en los filtros
   (`GET /api/tickets/updates`, `GET /api/recommendations`), en `POST /api/feedback` y en **todas** las respuestas
   que lo traen: `GET /api/tickets`, `GET /api/recommendations` y su detalle, `GET /api/tickets/updates` y
-  `GET /api/error-queue`. Cualquier `ticket_itop_id` que recibas se puede mandar tal cual a esos filtros y al
-  feedback. En `GET /api/tickets`, `itop_id` es para mostrar (la referencia `R-000123` cuando ya existe, si no el id
-  numérico); nunca mandes la referencia a un filtro (422). `ticket_itop_id` llega nulo si no hay ticket o si el
-  ticket no tiene un id numérico de iTop (los tickets de `make demo`, `DEMO-n`): no ofrezcas filtrar por ese
-  ticket y manda el feedback sin `ticket_itop_id` (se aplica a todos los tickets de la evaluación). Para
-  mostrarlo usa `itop_id` (lista de tickets), `ticket_ref` (bitácora y cola de errores) o el enlace
+  `GET /api/error-queue`. Cualquier `ticket_itop_id` que recibas tiene el formato que aceptan esos filtros y el
+  feedback; el feedback además exige que el ticket sea de esa evaluación (422 si no). En `GET /api/tickets`,
+  `itop_id` es para mostrar (la referencia `R-000123` cuando ya existe, si no el id numérico); nunca mandes la
+  referencia a un filtro (422). `ticket_itop_id` llega nulo si no hay ticket o si el ticket no tiene un id numérico
+  de iTop (los tickets de `make demo`, `DEMO-n`): no ofrezcas filtrar por ese ticket ni las acciones de ese ticket
+  («No sugerir más» y «Falso positivo» sobre él). Sin `ticket_itop_id` esas dos acciones se aplican a **todos** los
+  tickets de la evaluación: omítelo solo cuando la persona elija explícitamente actuar sobre toda la evaluación.
+  Para mostrar el ticket usa `itop_id` (lista de tickets), `ticket_ref` (bitácora y cola de errores) o el enlace
   (`url`, `ticket_url`).
 - **Motivos del juez y su cita (FRO-13):** cada recomendación trae `accepted_reasons` (`code`, `label`, `points`,
   `quote`, `ci_id`), `judge_summary`, `judge_status` y `ticket_itop_id`; `accepted_reasons` llega vacío sin juez, con
@@ -188,9 +190,10 @@ Todo error responde con:
   cero. Costos y porcentajes llegan como texto decimal: no los conviertas a `float` para sumarlos.
 - **Tablero de métricas:** `GET /api/metrics` trae, en orden de catálogo, el último valor guardado de cada métrica
   (`key` estable, `label` en español, `value` ya formateado y `unit`) y al final `judge_ladder_level`. Una métrica
-  aparece solo cuando el job nocturno ya guardó un valor: las de feedback (`precision`, `feedback_rate`,
-  `wrong_priority_judged`, `original_score_accepted`…) faltan mientras no haya feedback del día, como con
-  `make demo`, que no crea feedback. No esperes una lista fija de claves.
+  aparece cuando el job nocturno guardó al menos un valor suyo, y se muestra el último guardado. Una proporción no
+  se guarda el día en que su denominador es cero: `wrong_priority_judged` y `original_score_accepted` necesitan
+  feedback sobre evaluaciones que ajustó el juez, y `precision` feedback `relevant` o `false_positive`; con
+  `make demo`, que no crea feedback, no aparecen. No esperes una lista fija de claves.
 - **«Aceptar puntaje original» (RE-9):** es un `POST /api/feedback` con `verdict: wrong_priority` y
   `proposed_score` igual a la `base` de la recomendación (`wrong_priority` siempre exige además `proposed_level`);
   la métrica `original_score_accepted` es la proporción de esos votos en el feedback del día sobre evaluaciones que

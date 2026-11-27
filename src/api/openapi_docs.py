@@ -1094,8 +1094,10 @@ OVERRIDES: Final[dict[str, str]] = {
     "Recommendation.judge_summary": "Resumen del juez, si hubo revisión.",
     "Recommendation.judge_status": "Resultado de la revisión del juez; nulo sin revisión.",
     "Recommendation.ticket_itop_id": "Id numérico del ticket de iTop que se muestra (el del custodio del CI "
-    "mostrado), el que aceptan el filtro `ticket_itop_id` y `POST /api/feedback` (F18.5); nulo sin ticket o si el "
-    "ticket no tiene un id numérico (los de demostración, `DEMO-n`): entonces el feedback va sin `ticket_itop_id`.",
+    "mostrado), con el formato que aceptan el filtro `ticket_itop_id` y `POST /api/feedback` (F18.5; el feedback "
+    "además exige que el ticket sea de la evaluación). Nulo sin ticket o si el ticket no tiene un id numérico (los de "
+    "demostración, `DEMO-n`): entonces no hay a qué ticket acotar «No sugerir más» ni «Falso positivo», y sin "
+    "`ticket_itop_id` se aplican a todos los tickets de la evaluación.",
     "JudgeReasonItem.seq": "Orden en que el juez propuso el motivo.",
     "JudgeReasonItem.code": "Código del motivo.",
     "JudgeReasonItem.label": "Descripción del motivo, en español.",
