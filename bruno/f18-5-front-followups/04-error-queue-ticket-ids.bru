@@ -1,0 +1,36 @@
+meta {
+  name: error-queue-ticket-ids
+  type: http
+  seq: 4
+}
+
+get {
+  url: {{baseUrl}}/api/error-queue?kind=itop&limit=50
+  body: none
+  auth: bearer
+}
+
+auth:bearer {
+  token: {{token}}
+}
+
+assert {
+  res.status: eq 200
+  res.body.items: isArray
+}
+
+tests {
+  test("every failed iTop write gives a ticket id the filters take, or null", function () {
+    for (const item of res.body.items) {
+      const id = item.ticket_itop_id;
+      expect(id === null || /^[0-9]{1,12}$/.test(id)).to.equal(true);
+    }
+  });
+}
+
+docs {
+  `ticket_itop_id` of an error queue item is the numeric iTop id the ticket log filter takes; null without a
+  ticket or for a demo ticket (DEMO-n: `make demo` parks its iTop writes as failed), shown by `ticket_ref` (F18.5).
+
+  operationId: list_error_queue
+}

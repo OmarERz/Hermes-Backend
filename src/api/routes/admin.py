@@ -29,6 +29,7 @@ from api.routes.models import (
     SetupStep,
     SetupStepUpdate,
     UserAccount,
+    filter_ticket_id,
     parse_moment,
 )
 from core.connections.checker import ConnectionChecker, ConnectionState
@@ -218,7 +219,7 @@ def list_error_queue(
                 error=e.error,
                 component=e.component,
                 cve=e.cve,
-                ticket_itop_id=e.ticket_itop_id,
+                ticket_itop_id=filter_ticket_id(e.ticket_itop_id),
                 ticket_ref=e.ticket_ref,
                 assessment_id=str(e.assessment_id) if e.assessment_id else None,
                 retryable=e.retryable,

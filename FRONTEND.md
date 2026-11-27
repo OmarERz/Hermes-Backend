@@ -167,12 +167,16 @@ Todo error responde con:
   `ticket_itop_id` (el ticket que el usuario tiene a la vista) para que «no sugerir más» y «falso positivo» solo
   afecten a ese ticket; sin él se aplican a todos los tickets de la evaluación. Errores: 404 si la evaluación no
   existe, 403 si el usuario no es analista o admin activo, 422 si el ticket no es de esa evaluación.
-- **Id de un ticket (F18.4):** `ticket_itop_id` es siempre el id **numérico** de iTop, en los filtros
-  (`GET /api/tickets/updates`, `GET /api/recommendations`), en `POST /api/feedback` y en las respuestas que lo
-  traen. En `GET /api/tickets`, `itop_id` es para mostrar (la referencia `R-000123` cuando ya existe, si no el id
-  numérico) y `ticket_itop_id` es el valor que pasas a esos filtros; nunca mandes la referencia a un filtro (422).
-  `ticket_itop_id` llega nulo si el ticket no tiene un id numérico de iTop (los tickets de `make demo`, `DEMO-n`):
-  no ofrezcas filtrar por ese ticket.
+- **Id de un ticket (F18.4, F18.5):** `ticket_itop_id` es siempre el id **numérico** de iTop, en los filtros
+  (`GET /api/tickets/updates`, `GET /api/recommendations`), en `POST /api/feedback` y en **todas** las respuestas
+  que lo traen: `GET /api/tickets`, `GET /api/recommendations` y su detalle, `GET /api/tickets/updates` y
+  `GET /api/error-queue`. Cualquier `ticket_itop_id` que recibas se puede mandar tal cual a esos filtros y al
+  feedback. En `GET /api/tickets`, `itop_id` es para mostrar (la referencia `R-000123` cuando ya existe, si no el id
+  numérico); nunca mandes la referencia a un filtro (422). `ticket_itop_id` llega nulo si no hay ticket o si el
+  ticket no tiene un id numérico de iTop (los tickets de `make demo`, `DEMO-n`): no ofrezcas filtrar por ese
+  ticket y manda el feedback sin `ticket_itop_id` (se aplica a todos los tickets de la evaluación). Para
+  mostrarlo usa `itop_id` (lista de tickets), `ticket_ref` (bitácora y cola de errores) o el enlace
+  (`url`, `ticket_url`).
 - **Motivos del juez y su cita (FRO-13):** cada recomendación trae `accepted_reasons` (`code`, `label`, `points`,
   `quote`, `ci_id`), `judge_summary`, `judge_status` y `ticket_itop_id`; `accepted_reasons` llega vacío sin juez, con
   respaldo (`no_judge_review`) o con desacuerdo. El detalle completo (motivos rechazados con su regla, ajuste
