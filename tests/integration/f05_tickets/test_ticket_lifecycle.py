@@ -124,6 +124,67 @@ def test_a_ci_without_custodian_goes_to_the_default_team(session: Session) -> No
     assert [t.custodian_team_id for t in tickets(session, sc)] == [default.id]
 
 
+@pytest.mark.parametrize("name", ["Seguridad", "  seguridad "])
+def test_a_ci_without_custodian_goes_to_the_team_the_default_team_setting_names(session: Session, name: str) -> None:
+    """F20 dry run, P2-2: the sync creates every team unflagged; the `default_team` setting ("Seguridad") names it."""
+    sc = Scenario(session)
+    analytics, security = sc.team("Analítica"), sc.team(name)
+    sc.ci("emr-nodo-01", analytics)
+    sc.ci("emr-nodo-02", None)
+    run = sc.scan({"emr-nodo-01": "new", "emr-nodo-02": "new"})
+
+    report = lifecycle(sc).apply(session, sc.assess({"emr-nodo-01": 40, "emr-nodo-02": 36}, run).id)
+
+    assert report.created == 2
+    assert sorted(t.custodian_team_id for t in tickets(session, sc)) == sorted([analytics.id, security.id])
+    fallback = next(t for t in tickets(session, sc) if t.custodian_team_id == security.id)
+    created = [payload for action, payload in writes(session, fallback) if action == "create"]
+    assert created[0]["fallback_team_id"] == security.itop_team_id  # TIC-09 falls back to the same team
+
+
+def test_the_default_team_setting_wins_over_a_flagged_team(session: Session) -> None:
+    sc = Scenario(session)
+    flagged = sc.team("Guardia")
+    flagged.is_default = True
+    security = sc.team("Seguridad")
+    sc.ci("orphan-01", None)
+    run = sc.scan({"orphan-01": "new"})
+
+    lifecycle(sc).apply(session, sc.assess({"orphan-01": 55}, run).id)
+
+    assert [t.custodian_team_id for t in tickets(session, sc)] == [security.id]
+
+
+def test_a_setting_that_names_no_team_falls_back_to_the_flagged_team(session: Session) -> None:
+    sc = Scenario(session)
+    flagged = sc.team("Guardia")
+    flagged.is_default = True
+    gone = sc.team("Seguridad")
+    gone.removed_at = T0  # left iTop: never the default team
+    sc.ci("orphan-01", None)
+    run = sc.scan({"orphan-01": "new"})
+
+    lifecycle(sc).apply(session, sc.assess({"orphan-01": 55}, run).id)
+
+    assert [t.custodian_team_id for t in tickets(session, sc)] == [flagged.id]
+
+
+@pytest.mark.parametrize("flagged", [False, True])
+def test_a_setting_that_names_two_teams_picks_neither(session: Session, flagged: bool) -> None:
+    """Feature review: two live teams called "Seguridad" (iTop allows it) are ambiguous; the flag decides, or nobody."""
+    sc = Scenario(session)
+    sc.team("Seguridad")
+    sc.team(" SEGURIDAD")
+    guard = sc.team("Guardia")
+    guard.is_default = flagged
+    sc.ci("orphan-01", None)
+    run = sc.scan({"orphan-01": "new"})
+
+    lifecycle(sc).apply(session, sc.assess({"orphan-01": 55}, run).id)
+
+    assert [t.custodian_team_id for t in tickets(session, sc)] == ([guard.id] if flagged else [])
+
+
 def test_without_custodian_nor_default_team_no_ticket_is_opened(session: Session) -> None:
     sc = Scenario(session)
     sc.ci("orphan-01", None)

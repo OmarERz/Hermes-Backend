@@ -5,6 +5,8 @@ date filters at most 120 days wide, `virtualMatchString` for a CPE prefix. Witho
 requests per rolling 30 seconds; with a key, 50. ⚠️ Those figures, the date format and the 403 on exceeding the
 limit come from NVD's published guidance and could not be re-read from the official page in this session (its
 pages need JavaScript); confirm them before the first real run.
+`hasKev` (a flag) returns every CVE in CISA KEV whatever its publication date: checked against the live API on 27
+Nov 2026, where `hasKev=` and the bare flag gave the same 1,806 records (one page, about 20 MB).
 Version ranges are stored as NVD publishes them and compared locally (F1.4).
 """
 
@@ -177,6 +179,14 @@ class NvdClient:
             if not items or start >= body["totalResults"]:
                 return
 
+    def iter_kev(self) -> Iterator[dict[str, Any]]:
+        """Every CVE NVD lists as in CISA KEV, whatever its publication date (ESC-09, ESC-10)."""
+        yield from self.iter_items({"hasKev": ""})
+
+    def iter_cve(self, cve_id: str) -> Iterator[dict[str, Any]]:
+        """One CVE by its id (none when NVD does not hold it yet)."""
+        yield from self.iter_items({"cveId": cve_id})
+
     def iter_published(
         self, start: datetime, end: datetime, *, virtual_match: str | None = None
     ) -> Iterator[dict[str, Any]]:
@@ -219,7 +229,8 @@ def nvd_client(
 @dataclass
 class LoadResult:
     stored: int = 0
-    skipped: int = 0
+    skipped: int = 0  # entries without a valid CVE id
+    unchanged: int = 0  # records whose `lastModified` we already hold, not written again
 
 
 @dataclass(frozen=True)
