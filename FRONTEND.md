@@ -246,7 +246,8 @@ Todo error responde con:
   sigue trayendo ese mismo id en el software por compatibilidad, pero úsalo solo para los CIs. Cada CI pendiente
   trae su `itop_class` para enlazarlo en iTop. `outside_delivery_model` (equipos custodios fuera del modelo de
   entrega de iTop) **siempre llega vacía** y su total en 0: Hermes aún no lee el modelo de entrega de iTop; no la
-  muestres como «0 pendientes».
+  muestres como «0 pendientes». Un producto de `software_without_cpe` no tiene ningún mapeo, así que tampoco tiene
+  nombres del CNA guardados: el diálogo de mapeo abre sin nombres (F18.9).
 - **Historial de un hallazgo:** abre el detalle `GET /api/vulnerabilities/{group_id}`; cada activo trae su
   `finding_id`, que es el `{id}` de `GET /api/findings/{id}/history` (puntaje de ese CI en cada evaluación del
   grupo, del más antiguo al más reciente). En las recomendaciones `asset.finding_id` llega nulo: su CI puede ser
@@ -280,13 +281,15 @@ Todo error responde con:
   detalle ya no necesita una segunda lectura de `GET /api/inventory/assets`.
   Las rutas de inventario traen lo mismo (F18.4): cada CI de `GET /api/inventory/assets` trae `description`,
   `cpu` y `ram` (además de `itop_class`); cada instalación de `GET /api/inventory/assets/{ci_id}/software` trae
-  `category`, `status`, `description` y `licence`; cada producto de `GET /api/inventory/software` trae, sobre
-  sus instalaciones vivas, `categories` (las categorías distintas, en orden alfabético; vacía si ninguna está
-  sincronizada), `by_category` (instalaciones por categoría), `by_status` (instalaciones `active`, `inactive` y
-  `unknown`, siempre las tres claves), `licences` (las licencias vivas del producto, asignadas o no, por nombre,
-  cada una con `instances`: cuántas de sus instalaciones la tienen) y `licensed_instances` (instalaciones con
-  alguna licencia asignada). La lista acepta `?category=` (incluye el producto si **alguna** de sus instalaciones
-  la tiene). Las gráficas «por categoría», «por estado» y «por licencia» cuentan instalaciones: suma esos conteos.
+  `category`, `status`, `description` y `licence` (y, desde F18.9, `cna`: los nombres del CNA en CVE.org del mapeo
+  de su producto, los mismos de `cna` en `GET /api/inventory/software`; nulo sin mapeo o sin nombres); cada
+  producto de `GET /api/inventory/software` trae, sobre sus instalaciones vivas, `categories` (las categorías
+  distintas, en orden alfabético; vacía si ninguna está sincronizada), `by_category` (instalaciones por categoría),
+  `by_status` (instalaciones `active`, `inactive` y `unknown`, siempre las tres claves), `licences` (las licencias
+  vivas del producto, asignadas o no, por nombre, cada una con `instances`: cuántas de sus instalaciones la tienen)
+  y `licensed_instances` (instalaciones con alguna licencia asignada). La lista acepta `?category=` (incluye el
+  producto si **alguna** de sus instalaciones la tiene). Las gráficas «por categoría», «por estado» y «por
+  licencia» cuentan instalaciones: suma esos conteos.
 - **Asistente de primera configuración (F18.6):** cada paso de `GET /api/setup/status` (y la respuesta de
   `PUT /api/setup/steps/{n}`) trae `done_source`: `data` si los datos ya muestran el paso hecho (desmarcarlo no
   cambia nada: no ofrezcas «desmarcar»), `manual` si solo lo marcó un admin (`PUT` con `{"done": false}` lo

@@ -1134,6 +1134,11 @@ class InstalledSoftwareItem(_Model):
     licence: SoftwareLicenceInfo | None = Field(
         default=None, description="Licencia viva asignada en iTop; nula si no tiene."
     )
+    cna: CnaNames | None = Field(
+        default=None,
+        description="Nombres del CNA (CVE.org) del mapeo de su producto, los mismos de `cna` en "
+        "`GET /api/inventory/software` (F18.9); nulo si el producto no tiene mapeo o su mapeo no los tiene.",
+    )
 
 
 # --- ticket summary and log, judge detail (D-088, F18.1) ---------------------------------------------------------

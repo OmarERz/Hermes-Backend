@@ -1,0 +1,55 @@
+meta {
+  name: asset-software-cna
+  type: http
+  seq: 2
+}
+
+get {
+  url: {{baseUrl}}/api/inventory/assets/{{softwareCiId}}/software
+  body: none
+  auth: bearer
+}
+
+auth:bearer {
+  token: {{readerToken}}
+}
+
+script:pre-request {
+  const hermes = require("./lib/hermes");
+  const page = await hermes.api(bru, "GET", "/api/inventory/assets?limit=1", "readerToken");
+  const first = page.items[0] || null;
+  bru.setVar("softwareCiId", first ? encodeURIComponent(first.ci_id) : "");
+  if (!hermes.needData(bru, first, "a CI in the inventory")) return;
+  const catalogue = await hermes.api(bru, "GET", "/api/inventory/software?limit=200", "readerToken");
+  const names = {};
+  for (const item of catalogue.items) names[item.id] = item.cna;
+  bru.setVar("catalogueCna", JSON.stringify(names));
+}
+
+assert {
+  res.status: eq 200
+  res.body: isArray
+}
+
+tests {
+  test("each installation carries the CNA names of its product's mapping, as the catalogue does", function () {
+    const catalogue = JSON.parse(bru.getVar("catalogueCna"));
+    for (const item of res.body) {
+      expect(item).to.have.property("cna");
+      if (item.cna !== null) {
+        expect(Object.keys(item.cna).sort()).to.deep.equal(["product", "vendor"]);
+      }
+      if (item.software_id in catalogue) {
+        expect(item.cna).to.deep.equal(catalogue[item.software_id]);
+      }
+    }
+  });
+}
+
+docs {
+  Software of the first CI of the inventory (F18.9): each installation carries `cna`, the CVE.org vendor and product
+  of its product's mapping, the same as `cna` in GET /api/inventory/software (null without a mapping or names).
+  Skipped without an inventory.
+
+  operationId: list_asset_software
+}
