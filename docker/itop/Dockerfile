@@ -4,10 +4,16 @@
 #  - Apache runs directly as www-data on port 8080 (no privileged port, no init system, no setuid), logging to the
 #    container's output; its run, lock and log folders belong to www-data;
 #  - an empty env-production owned by www-data, so its named volume (the compiled data model) starts writable;
-#  - PHP removes expired sessions itself (Debian leaves that to a cron job that no longer runs here).
+#  - PHP removes expired sessions itself (Debian leaves that to a cron job that no longer runs here);
+#  - Ubuntu's security updates published since the pinned base was built (fixable Trivy findings in PHP, Apache,
+#    OpenSSL and others), in the same layer that installs the client, keeping the configuration files the base image
+#    changed (--force-confold). Upgrading openssh-server generates SSH host keys the base ships without; sshd never
+#    runs here, so they are removed (they would be private keys baked into the image).
 # The iTop cron runs in its own container from the same image (compose.itop.yaml, itop-cron).
 FROM vbkunin/itop:3.2.2-base@sha256:903f950e660c597a5684e88a2a59f2a9712a0574bf9f6e608b72172fec26db0d
 RUN apt-get update \
+ && DEBIAN_FRONTEND=noninteractive apt-get upgrade -y -o Dpkg::Options::=--force-confold \
+ && rm -f /etc/ssh/ssh_host_*_key /etc/ssh/ssh_host_*_key.pub \
  && apt-get install -y --no-install-recommends mariadb-client \
  && rm -rf /var/lib/apt/lists/* \
  && sed -i 's/^Listen 80$/Listen 8080/' /etc/apache2/ports.conf \
