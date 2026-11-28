@@ -1,0 +1,62 @@
+meta {
+  name: finding-source-and-certainty
+  type: http
+  seq: 1
+}
+
+get {
+  url: {{baseUrl}}/api/vulnerabilities/{{groupId}}
+  body: none
+  auth: bearer
+}
+
+auth:bearer {
+  token: {{readerToken}}
+}
+
+script:pre-request {
+  const hermes = require("./lib/hermes");
+  const group = await hermes.vulnerabilityGroup(bru);
+  if (!hermes.needData(bru, group, "a vulnerability group")) return;
+}
+
+assert {
+  res.status: eq 200
+  res.body.group_id: eq {{groupId}}
+  res.body.assets: isArray
+  res.body.match_sources: isArray
+}
+
+tests {
+  const CERTAINTY = { nvd_cpe: "1.0", kev: "1.0", cna_affected: "0.9" };
+  const ORDER = Object.keys(CERTAINTY);
+
+  test("each affected asset says how its finding was matched and how sure it is", function () {
+    for (const asset of res.body.assets) {
+      expect(asset).to.have.property("match_source");
+      expect(asset).to.have.property("certainty");
+      if (asset.finding_id === null) {
+        expect(asset.match_source).to.equal(null);
+        expect(asset.certainty).to.equal(null);
+      } else {
+        expect(ORDER).to.include(asset.match_source);
+        expect(asset.certainty).to.equal(CERTAINTY[asset.match_source]);
+      }
+    }
+  });
+
+  test("the group lists the distinct sources of the assets that speak for it, most certain first", function () {
+    const current = res.body.assets.filter((a) => a.finding_status !== "fixed");
+    const speaking = current.length ? current : res.body.assets;
+    const expected = ORDER.filter((source) => speaking.some((a) => a.match_source === source));
+    expect(res.body.match_sources).to.deep.equal(expected);
+  });
+}
+
+docs {
+  Vulnerability detail (F18.9): each asset carries `match_source` (`nvd_cpe`, `kev` or `cna_affected`) and its
+  `certainty` (`1.0`, `1.0`, `0.9`); the group carries `match_sources`, the distinct sources of the CIs that speak for
+  it, most certain first. Skipped on an installation without vulnerabilities.
+
+  operationId: get_vulnerability
+}

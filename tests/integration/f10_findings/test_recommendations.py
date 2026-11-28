@@ -64,6 +64,8 @@ def test_recommendation_shows_score_ci_snapshot_mitigation_and_ticket(get: Get, 
         "finding_status": "new",
         "score": 90,
         "finding_id": None,  # only the vulnerability detail carries it (F13.8)
+        "match_source": None,  # nor its source and certainty (F18.9)
+        "certainty": None,
     }
     assert rec["feedback_count"] == 1
 

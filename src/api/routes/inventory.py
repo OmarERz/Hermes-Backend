@@ -187,8 +187,8 @@ def inventory_software(
     "/api/inventory/assets/{ci_id}/software", dependencies=[guard("GET", "/api/inventory/assets/{ci_id}/software")]
 )
 def asset_software(ci_id: CiId, session: SessionDep) -> list[InstalledSoftwareItem]:
-    """The software installed on one live CI (AS-2), with its version, CPE and worst open level, and its iTop
-    category, status, description and live licence (ST-3); 404 if the CI is not in the live inventory."""
+    """The software installed on one live CI (AS-2), with its version, CPE, CNA names (F18.9) and worst open level,
+    and its iTop category, status, description and live licence (ST-3); 404 if the CI is not in the live inventory."""
     found = assets.asset_software(session, ci_id)
     if found is None:
         raise ApiError(404, "not_found", "El activo no existe.")
@@ -206,6 +206,7 @@ def asset_software(ci_id: CiId, session: SessionDep) -> list[InstalledSoftwareIt
             status=cast(Literal["active", "inactive"] | None, i.status),
             description=i.description,
             licence=None if i.licence is None else licence_info(i.licence),
+            cna=CnaNames(vendor=i.cna_vendor, product=i.cna_product) if i.cna_vendor and i.cna_product else None,
         )
         for i in found
     ]

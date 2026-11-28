@@ -202,6 +202,27 @@ def test_the_cna_names_are_set_kept_and_removed_through_the_mapping_route(client
     assert audit == [("Linux",), ("Linux",), (None,)]
 
 
+def test_the_asset_software_list_shows_the_cna_names_of_each_mapping(client: TestClient, engine: Engine) -> None:
+    """F18.9: each installation of GET /api/inventory/assets/{ci_id}/software carries the CNA names of its product's
+    mapping, as the software catalogue does; null without a mapping or without names."""
+    product = seed_inventory(engine)
+    as_role(client, Role.ANALYST)
+
+    def cna() -> object:
+        (item,) = client.get("/api/inventory/assets/CI-77/software").json()
+        return item["cna"]
+
+    assert cna() is None  # no mapping yet
+    kernel = "cpe:2.3:o:linux:linux_kernel:*:*:*:*:*:*:*:*"
+    named = {"cpe": kernel, "cna": {"vendor": "Linux", "product": "Linux"}}
+    assert client.put(f"/api/mappings/{product}", json=named).status_code == 200
+    assert cna() == {"vendor": "Linux", "product": "Linux"}
+    (catalogue,) = client.get("/api/inventory/software").json()["items"]
+    assert catalogue["cna"] == cna()
+    assert client.put(f"/api/mappings/{product}", json={"cpe": kernel, "cna": None}).status_code == 200
+    assert cna() is None  # a mapping without names
+
+
 @pytest.mark.parametrize(
     "cna",
     [
