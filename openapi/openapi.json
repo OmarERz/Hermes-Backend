@@ -6742,6 +6742,18 @@
             "title": "Cve",
             "type": "string"
           },
+          "cvss": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "CVSS con el que se puntuó el grupo (el de NVD o, si falta, el del CNA, D-104), como texto decimal. Nulo si el CVE no tiene CVSS publicado.",
+            "title": "Cvss"
+          },
           "description": {
             "description": "Descripción del CVE.",
             "title": "Description",
@@ -6797,6 +6809,25 @@
             "description": "Producto de software afectado.",
             "title": "Product",
             "type": "string"
+          },
+          "severity": {
+            "anyOf": [
+              {
+                "enum": [
+                  "critical",
+                  "high",
+                  "medium",
+                  "low",
+                  "unrated"
+                ],
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Severidad del grupo según la escala de su CVSS (crítica de 9.0 a 10, alta de 7.0 a 8.9, media de 4.0 a 6.9, baja de 0.1 a 3.9). `unrated`: sin CVSS publicado; la puntuación usó una severidad estimada (0.8 por precaución o el vector que infirió el Analista de CVE) y la justificación lo dice. Nula solo con un CVSS de 0.0.",
+            "title": "Severity"
           },
           "status": {
             "description": "Estado. Valores: `new`: Apareció en el último escaneo; `persistent`: Sigue presente desde un escaneo anterior; `reopened`: Estaba corregido y volvió a aparecer; `fixed`: Ya no aparece; `no_data`: No hay datos suficientes para decidir.",
@@ -6872,6 +6903,18 @@
             "title": "Cve",
             "type": "string"
           },
+          "cvss": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "CVSS con el que se puntuó el grupo (el de NVD o, si falta, el del CNA, D-104), como texto decimal. Nulo si el CVE no tiene CVSS publicado.",
+            "title": "Cvss"
+          },
           "exposed": {
             "description": "Si está expuesto a internet.",
             "title": "Exposed",
@@ -6922,6 +6965,25 @@
             "description": "Producto de software afectado.",
             "title": "Product",
             "type": "string"
+          },
+          "severity": {
+            "anyOf": [
+              {
+                "enum": [
+                  "critical",
+                  "high",
+                  "medium",
+                  "low",
+                  "unrated"
+                ],
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Severidad del grupo según la escala de su CVSS (crítica de 9.0 a 10, alta de 7.0 a 8.9, media de 4.0 a 6.9, baja de 0.1 a 3.9). `unrated`: sin CVSS publicado; la puntuación usó una severidad estimada (0.8 por precaución o el vector que infirió el Analista de CVE) y la justificación lo dice. Nula solo con un CVSS de 0.0.",
+            "title": "Severity"
           },
           "status": {
             "description": "Estado del hallazgo. Valores: `new`: Apareció en el último escaneo; `persistent`: Sigue presente desde un escaneo anterior; `reopened`: Estaba corregido y volvió a aparecer; `fixed`: Ya no aparece; `no_data`: No hay datos suficientes para decidir.",

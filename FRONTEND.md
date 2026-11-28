@@ -251,6 +251,12 @@ Todo error responde con:
   `finding_id`, que es el `{id}` de `GET /api/findings/{id}/history` (puntaje de ese CI en cada evaluación del
   grupo, del más antiguo al más reciente). En las recomendaciones `asset.finding_id` llega nulo: su CI puede ser
   el de una alerta, sin hallazgo de escaneo.
+- **Severidad del grupo:** cada grupo de `GET /api/vulnerabilities` (y de `GET /api/assets/{ci_id}`) y el detalle
+  traen `cvss` (texto decimal, el CVSS con que se puntuó: NVD o, si falta, el del CNA) y `severity` (`critical`,
+  `high`, `medium`, `low` por la escala del CVSS, o `unrated` sin CVSS publicado). Muestra `unrated` como «Sin
+  CVSS»: su puntuación usó una severidad estimada (0.8 por precaución o el vector que infirió el Analista de CVE) y
+  la justificación de la recomendación lo dice («Sin CVSS publicado: severidad estimada …»). Son campos nuevos y
+  opcionales del contrato; `severity` solo llega nula con un CVSS de 0.0.
 - **Niveles por nombre:** la comparación muestra el nivel CVSS (Crítica/Alta/Media/Baja) contra la urgencia
   final por su nombre, cada uno con su escala; no compares números entre escalas.
 - **Cascada del Δ:** `GET /api/assessments/{id}/breakdown` devuelve las barras (factores, juez, piso, límites,

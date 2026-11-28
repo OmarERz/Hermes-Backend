@@ -4,11 +4,16 @@ from __future__ import annotations
 
 import uuid
 from collections.abc import Callable
+from decimal import Decimal
 from typing import Any
 
 import pytest
 from f10data import Scenario
 from fastapi.testclient import TestClient
+from sqlalchemy import Engine, update
+from sqlalchemy.orm import Session
+
+from core.db import models as m
 
 pytestmark = pytest.mark.integration
 Get = Callable[..., Any]
@@ -75,9 +80,28 @@ def test_recommendation_without_judge_shows_the_most_restrictive_ci(get: Get, sc
     assert rec["ticket_url"] == "https://itop.example.test/pages/UI.php?operation=details&class=UserRequest&id=778"
     assert "impulsada por srv-sin-custodio" in rec["justification"]
     assert "Sin revisión del juez" in rec["justification"]
+    # Rehearsal 2, P2-D: G2 has no CVSS; docs/06 §S scores it with S = 0.8 and the `unrated` mark
+    assert "Sin CVSS publicado: severidad estimada 8.0 (valor conservador, `unrated`)" in rec["justification"]
     assert rec["mitigation_draft"] is None
     # CI-3 drives the score, but CI-1 is the most restrictive CI (FRO-13).
     assert (rec["asset"]["ci_id"], rec["asset"]["score"]) == ("CI-1", 70)
+
+
+def test_an_s_from_the_inferred_vector_is_called_estimated(
+    get: Get, scenario: Scenario, database: tuple[str, Engine]
+) -> None:
+    """docs/06 §S: without CVSS, an S other than the formula's default (0.8) came from the CVE analyst's inferred
+    vector (here 0.91, a 9.1 vector), and the text says so with that value (F15.12 review, P1)."""
+    a3 = scenario.assessments["A3"]
+    with Session(database[1]) as session, session.begin():
+        session.execute(update(m.Assessment).where(m.Assessment.id == a3).values(factor_s=Decimal("0.91")))
+    try:
+        text = get(f"/api/recommendations/{a3}")["justification"]
+        assert "Sin CVSS publicado: severidad estimada 9.1 con el vector que infirió el Analista de CVE" in text
+        assert "unrated" not in text
+    finally:
+        with Session(database[1]) as session, session.begin():
+            session.execute(update(m.Assessment).where(m.Assessment.id == a3).values(factor_s=Decimal("0.8")))
 
 
 @pytest.mark.parametrize("assessment", [str(uuid.UUID(int=3))])  # malformed: 422 since F12.3 (test_path_params)

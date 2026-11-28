@@ -7,11 +7,16 @@ from collections.abc import Callable
 from typing import Any
 
 import pytest
-from f10data import Scenario
+from f10data import T2, Scenario, Spec, add_assessment
 from fastapi.testclient import TestClient
+from sqlalchemy import delete
+from sqlalchemy.orm import Session
+
+from core.db import models as m
 
 pytestmark = pytest.mark.integration
 Get = Callable[..., Any]
+F = ("0.8", "1.0", "0.0")  # S, P, T of an assessment without CVSS
 
 
 def ids(scenario: Scenario, groups: list[dict[str, Any]]) -> list[str]:
@@ -40,9 +45,14 @@ def test_vulnerability_view_orders_groups_by_their_current_final(get: Get, scena
         "exposed": True,
         "status": "new",
         "last_seen": "-",
+        "cvss": "9.8",
+        "severity": "critical",
     }
     assert g1["last_seen"] == "2026-11-22T12:00:00Z"
     assert (g2["final"], g2["level"], g2["ci_count"], g2["in_kev"]) == (75, "high", 2, False)
+    # Rehearsal 2, P2-D: a group scored without CVSS says so (docs/06 §S, ESC-14)
+    assert (g2["cvss"], g2["severity"]) == (None, "unrated")
+    assert (g3["cvss"], g3["severity"]) == ("5.0", "medium")
     # Every finding of G3 is fixed: its last scores still show.
     assert (g3["final"], g3["level"], g3["status"], g3["ci_count"], g3["exposed"]) == (30, "low", "fixed", 0, False)
     assert g3["classification"] == "classified"
@@ -144,7 +154,9 @@ def test_pages_chain_with_signed_cursors(get: Get, client: TestClient, scenario:
 def test_group_detail_lists_each_scored_ci_with_its_snapshot(get: Get, scenario: Scenario) -> None:
     detail = get(f"/api/vulnerabilities/{scenario.groups['G1']}")
     assert detail["description"] == "Desbordamiento sintético para la demo"
-    assert detail["final"] == 90
+    assert (detail["final"], detail["cvss"], detail["severity"]) == (90, "9.8", "critical")
+    unrated = get(f"/api/vulnerabilities/{scenario.groups['G2']}")
+    assert (unrated["cvss"], unrated["severity"]) == (None, "unrated")
     ci1, ci2 = detail["assets"]
     assert ci1 == {
         "ci_id": "CI-1",
@@ -163,6 +175,22 @@ def test_group_detail_lists_each_scored_ci_with_its_snapshot(get: Get, scenario:
     assert (ci2["ci_id"], ci2["finding_status"], ci2["score"]) == ("CI-2", "fixed", 62)
     assert ci2["finding_id"] == str(scenario.findings[("G1", "CI-2")])
     assert (ci2["classification"], ci2["classification_at_evaluation"]) == ("classified", "public")
+
+
+def test_a_ci_row_shows_the_cvss_of_its_own_assessment(get: Get, scenario: Scenario, database: Any) -> None:
+    """F15.12 review (P2-D): the CI detail shows each finding with that CI's score; its CVSS and severity come from the
+    same assessment. A later assessment of G1 without CVSS that scores only CI-1 leaves CI-2 on A2 (CVSS 9.8)."""
+    with Session(database[1]) as session, session.begin():
+        later = add_assessment(session, scenario, Spec("G1", T2, {"CI-1": (80, 0, 80)}, cvss=None, factors=F))
+    try:
+        g1 = next(g for g in get("/api/vulnerabilities")["groups"] if g["cve"] == "CVE-2026-10001")
+        assert (g1["cvss"], g1["severity"]) == (None, "unrated")  # CI-1 speaks for the group, from the later one
+        row = next(f for f in get("/api/assets/CI-2")["findings"] if f["cve"] == "CVE-2026-10001")
+        assert (row["final"], row["cvss"], row["severity"]) == (62, "9.8", "critical")
+    finally:
+        with Session(database[1]) as session, session.begin():
+            session.execute(delete(m.AssetScore).where(m.AssetScore.assessment_id == later))
+            session.execute(delete(m.Assessment).where(m.Assessment.id == later))
 
 
 def test_the_finding_id_of_an_asset_opens_its_history(get: Get, scenario: Scenario) -> None:

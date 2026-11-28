@@ -44,6 +44,7 @@ from api.routes.models import (
     RecommendationFilters,
     ReviewStatus,
     ScoreHistoryPoint,
+    Severity,
     SoftwareCategory,
     SoftwareLicenceInfo,
     Ticket,
@@ -117,6 +118,8 @@ def _group_model(g: views.Group) -> VulnerabilityGroup:
         exposed=g.exposed,
         status=cast(FindingStatus, g.status),
         last_seen=iso(g.last_seen),
+        cvss=str(g.cvss) if g.cvss is not None else None,
+        severity=cast(Severity | None, g.severity),
     )
 
 

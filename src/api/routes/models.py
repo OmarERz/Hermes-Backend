@@ -11,6 +11,7 @@ from pydantic import BaseModel, BeforeValidator, ConfigDict, Field, model_valida
 from notifications_api.models import DateTimeString
 
 Level = Literal["critical", "high", "medium", "low"]
+Severity = Literal["critical", "high", "medium", "low", "unrated"]  # ESC-14, `schemas/finding.schema.json`
 Classification = Literal["public", "classified", "highly_classified", "unclassified"]
 Criticality = Literal["high", "medium", "low", "unknown"]  # of a CI in iTop
 FindingStatus = Literal["new", "persistent", "reopened", "fixed", "no_data"]
@@ -305,6 +306,18 @@ class VulnerabilityGroup(_Model):
     exposed: bool
     status: FindingStatus
     last_seen: str
+    cvss: str | None = Field(
+        default=None,
+        description="CVSS con el que se puntuó el grupo (el de NVD o, si falta, el del CNA, D-104), como texto "
+        "decimal. Nulo si el CVE no tiene CVSS publicado.",
+    )
+    severity: Severity | None = Field(
+        default=None,
+        description="Severidad del grupo según la escala de su CVSS (crítica de 9.0 a 10, alta de 7.0 a 8.9, media de "
+        "4.0 a 6.9, baja de 0.1 a 3.9). `unrated`: sin CVSS publicado; la puntuación usó una severidad estimada (0.8 "
+        "por precaución o el vector que infirió el Analista de CVE) y la justificación lo dice. Nula solo con un CVSS "
+        "de 0.0.",
+    )
 
 
 class VulnerabilityBand(_Model):
