@@ -5,7 +5,7 @@
 
 FROM ghcr.io/astral-sh/uv:0.13.9@sha256:d3b601f0c7b118bc1753febf7c41cc80981df678445e0254284eecf84db79a7d AS uv
 
-FROM python:3.12.16-slim-bookworm@sha256:935c3c5b12357a7e10caa9c1e6ca5692344d97cf229832ef584be2cec9fc03df AS build
+FROM python:3.12.16-slim-bookworm@sha256:44cf1793efa7c7a476bb0f2cff81443f4a072c90c1cb127e2924933daa3e8c64 AS build
 COPY --from=uv /uv /usr/local/bin/uv
 ENV UV_COMPILE_BYTECODE=1 UV_LINK_MODE=copy UV_PYTHON_DOWNLOADS=never UV_PROJECT_ENVIRONMENT=/opt/venv
 WORKDIR /src
@@ -21,10 +21,15 @@ RUN HF_HOME=/tmp/hf /opt/venv/bin/python app.py prepare "$EMBEDDINGS_MODEL_NAME"
  && rm -rf /tmp/hf \
  && chmod -R a+rX,go-w /opt/model
 
-FROM python:3.12.16-slim-bookworm@sha256:935c3c5b12357a7e10caa9c1e6ca5692344d97cf229832ef584be2cec9fc03df AS runtime
+FROM python:3.12.16-slim-bookworm@sha256:44cf1793efa7c7a476bb0f2cff81443f4a072c90c1cb127e2924933daa3e8c64 AS runtime
 ARG EMBEDDINGS_MODEL_NAME=intfloat/multilingual-e5-small
 ARG EMBEDDINGS_MODEL_REVISION=614241f622f53c4eeff9890bdc4f31cfecc418b3
-RUN groupadd --system --gid 10002 embeddings \
+# Debian security updates published after the pinned base was built (fixable Trivy findings such as libpam and
+# zstd); the base digest is the newest build of its tag, so they are applied here.
+RUN apt-get update \
+ && DEBIAN_FRONTEND=noninteractive apt-get upgrade -y -o Dpkg::Options::=--force-confold \
+ && rm -rf /var/lib/apt/lists/* \
+ && groupadd --system --gid 10002 embeddings \
  && useradd --system --uid 10002 --gid embeddings --no-create-home embeddings
 COPY --from=build --chown=root:root /opt/venv /opt/venv
 COPY --from=build --chown=root:root /opt/model /opt/model
