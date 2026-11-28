@@ -9,19 +9,22 @@ whose descriptions name a module instead of the product (CPython's `tarfile`); a
 CVEs published in the window (in the real window GitHub's and VulDB's have thousands) is only followed by name. A CNA
 is known from the stored records that name a mapped pair while one of its records is in this refresh's NVD pages
 (enriched by NIST or not); one with no such record in the last 90 days is only found by name until it publishes one.
-Known CNAs compete with the named candidates for the request budget, newest publication first; a CNA learned from
-this refresh's own records is followed with what is left of it. A CVE that NVD or CVE.org rejects loses its CNA
-ranges, so the scan stops matching it.
+Known CNAs compete with the named candidates for the request budget, newest publication first. A CNA learned from
+this refresh's own records is followed in the same refresh (F15.12, rehearsal 2 P2-A): after each pass, the CNAs that
+just became known get a pass of their own, at most `LEARN_PASSES` of them. A CVE that NVD or CVE.org rejects loses its
+CNA ranges, so the scan stops matching it.
 
 Each candidate is one file of cvelistV5 on GitHub (`CveOrgClient`); downloading the whole list (hundreds of MB a
 day) is not worth it for a few thousand records. The cache is the database: a candidate whose CNA ranges are already
 stored and whose NVD `lastModified` is not newer than what we held before this refresh is not asked again (NVD
 re-dates a record when it takes in a CNA update). That date only advances when the CNA record is stored: a record due
 again that this refresh did not store (cap, outage, not found) gets its previous date back, so the next refresh asks
-for it again. Requests are bounded by `MAX_REQUESTS` per refresh (every HTTP request counts, retries and redirects
-included; a record is only asked when its worst case still fits), newest first; the rest wait for the next refresh. No
-database transaction is open during a download: each batch is fetched, then stored in one short transaction. An outage
-of GitHub stops this step and keeps what was stored.
+for it again. Requests are bounded per refresh by a budget sized to the candidates (F15.12, P2-A: the fixed 5,000 of
+F15.9 left 135 of the first 5,124 for the next day): `REQUESTS_PER_CANDIDATE` for each candidate of every pass, at
+least `MIN_BUDGET` and never more than `MAX_REQUESTS`. Every HTTP request counts, retries and redirects included, and
+a record is only asked when its worst case still fits; newest first, the rest wait for the next refresh. No database
+transaction is open during a download: each batch is fetched, then stored in one short transaction. An outage of
+GitHub stops this step and keeps what was stored.
 """
 
 from __future__ import annotations
@@ -43,7 +46,10 @@ from core.vulndata.http import MAX_REDIRECTS, SourceRefusedError, SourceUnavaila
 from core.vulndata.records import CNA_AFFECTED, CVE_ID, CveRecord, parse_timestamp
 from core.vulndata.store import store_cve
 
-MAX_REQUESTS: Final = 5_000  # HTTP requests per refresh, retries included (the first after mapping the kernel: ~3,500)
+MAX_REQUESTS: Final = 12_000  # ceiling of HTTP requests per refresh, retries included (first after mapping: ~5,200)
+REQUESTS_PER_CANDIDATE: Final = 2  # budget per candidate: its request and room for one retry or redirect on average
+MIN_BUDGET: Final = 500  # a small refresh still has room for retries (a record's worst case is 12 requests)
+LEARN_PASSES: Final = 3  # passes for the CNAs learned in this refresh (one normally suffices: see `_load_candidates`)
 LEARN_MAX: Final = 500  # a CNA followed by its records publishes at most this many unenriched CVEs in the window
 BATCH: Final = 200  # records fetched, then stored in one transaction
 REJECTED: Final = "Rejected"
@@ -160,6 +166,9 @@ class CveOrgResult:
     git_only: int = 0  # product entries given only as git commits: not comparable (ESC-13), counted and logged
     capped: bool = False
     interrupted: bool = False
+    budget: int = 0  # HTTP requests this refresh could send: sized to its candidates, within `MAX_REQUESTS`
+    passes: int = 0  # the first pass plus one per round of CNAs learned in this refresh
+    waiting: int = 0  # candidates the budget left for the next refresh
 
 
 def refresh_cve_org(
@@ -190,11 +199,26 @@ def refresh_cve_org(
     finally:
         restore_due(factory, seen, stored, held, done=loader.stored_ids if loader is not None else ())
     result = loader.result
+    result.budget = loader.budget()
+    if result.capped:
+        result.waiting = result.candidates - result.fetched
+        log.warning(
+            "CVE.org: the request budget (%d of a ceiling of %d) ran out: %d candidates wait for the next refresh",
+            result.budget,
+            loader.ceiling,
+            result.waiting,
+        )
     log.info(
-        "CVE.org: %d candidates, %d requests, %d stored, %d unchanged, %d missing, %d rejected cleared, %d product "
-        "entries only as git commits (not comparable, ESC-13), CNAs followed: %s%s",
+        "CVE.org: %d candidates in %d passes, %d requests of a budget of %d (%d per candidate, at least %d, ceiling "
+        "%d), %d stored, %d unchanged, %d missing, %d rejected cleared, %d product entries only as git commits (not "
+        "comparable, ESC-13), CNAs followed: %s%s",
         result.candidates,
+        result.passes,
         result.requests,
+        result.budget,
+        REQUESTS_PER_CANDIDATE,
+        min(MIN_BUDGET, loader.ceiling),
+        loader.ceiling,
         result.stored,
         result.unchanged,
         result.missing,
@@ -220,18 +244,34 @@ def _load_candidates(
     hits: set[str],
     cached: Callable[[Sighting], bool],
 ) -> None:
+    """The first pass asks the named candidates and those of the CNAs already known (same budget, newest first); then
+    each round of CNAs learned from the records just stored gets its own pass, so their CVEs arrive in this refresh
+    (P2-A), at most `LEARN_PASSES` rounds. A CNA is learned from its own records (their NVD `sourceIdentifier`), so one
+    round normally suffices. Each pass grows the budget, so the candidates an earlier pass could not ask yet (retries
+    spent its share) go first in the next one; a record among them can teach another CNA, hence the bounded rounds."""
     window = Counter(s.source for s in seen if s.in_window)
 
     def followable(hit_ids: set[str]) -> set[str]:
         cnas = {sources[cve] for cve in hit_ids if cve in sources}
         return {cna for cna in cnas if window[cna] <= LEARN_MAX}
 
-    known = followable(hits)  # CNAs whose records we already hold: same budget, newest first, as the named ones
-    first = [s for s in seen if loader.watch.mentions(s.description) or s.source in known]
-    learned = followable(hits | loader.load(loader.fresh(first, cached))) - known
-    asked = {s.cve_id for s in first}
-    loader.load(loader.fresh([s for s in seen if s.source in learned and s.cve_id not in asked], cached))
-    loader.result.followed_sources = sorted(known | learned)
+    found = set(hits)
+    followed = followable(found)
+    batch = [s for s in seen if loader.watch.mentions(s.description) or s.source in followed]
+    asked: set[str] = set()
+    deferred: list[str] = []  # candidates of earlier passes the budget did not reach yet
+    while True:
+        asked |= {s.cve_id for s in batch}
+        queue = [*deferred, *loader.fresh(batch, cached)]
+        found |= loader.load(queue)
+        deferred = [cve for cve in queue if cve not in loader.requested]
+        loader.result.passes += 1
+        learned = followable(found) - followed
+        if not learned or loader.result.passes > LEARN_PASSES or loader.stopped():
+            break
+        followed |= learned
+        batch = [s for s in seen if s.source in learned and s.cve_id not in asked]
+    loader.result.followed_sources = sorted(followed)
 
 
 def restore_due(
@@ -313,15 +353,21 @@ class _Loader:
     factory: sessionmaker[Session]
     client: CveOrgClient
     watch: Watch
-    budget: int  # HTTP requests
+    ceiling: int  # HTTP requests per refresh, whatever the candidates
     result: CveOrgResult = field(default_factory=CveOrgResult)
     stored_ids: set[str] = field(default_factory=set)
     rejected_ids: set[str] = field(default_factory=set)
+    requested: set[str] = field(default_factory=set)  # ids sent to GitHub in this refresh, whatever the answer
+
+    def budget(self) -> int:
+        """The requests this refresh may send: `REQUESTS_PER_CANDIDATE` per candidate of every pass so far, at least
+        `MIN_BUDGET`, at most the ceiling."""
+        return min(self.ceiling, max(MIN_BUDGET, REQUESTS_PER_CANDIDATE * self.result.candidates))
 
     def fresh(self, items: Sequence[Sighting], cached: Callable[[Sighting], bool]) -> list[str]:
         wanted = [s.cve_id for s in items if not cached(s)]
         self.result.unchanged += len(items) - len(wanted)
-        self.result.candidates += len(wanted)
+        self.result.candidates += len(wanted)  # the budget grows with them
         return wanted
 
     def load(self, cve_ids: list[str]) -> set[str]:
@@ -330,7 +376,7 @@ class _Loader:
             return set()
         hits: set[str] = set()
         for start in range(0, len(cve_ids), BATCH):
-            records = self._fetch(cve_ids[start : start + BATCH])
+            records, capped = self._fetch(cve_ids[start : start + BATCH])
             if records:
                 with self.factory() as session, session.begin():
                     for record in records:
@@ -339,7 +385,7 @@ class _Loader:
                 self.result.git_only += sum(r.uncomparable for r in records)
                 self.stored_ids |= {r.cve_id for r in records}
                 hits |= {r.cve_id for r in records if self.watch.matches(r)}
-            if self.stopped() or self.result.capped:
+            if self.stopped() or capped:
                 break
         return hits
 
@@ -350,15 +396,17 @@ class _Loader:
     def _fits(self) -> bool:
         """The next record's worst case (every attempt and redirect) still fits in the request budget."""
         source = self.client.source
-        return self.result.requests + source.max_attempts * (MAX_REDIRECTS + 1) <= self.budget
+        return self.result.requests + source.max_attempts * (MAX_REDIRECTS + 1) <= self.budget()
 
-    def _fetch(self, cve_ids: list[str]) -> list[CveRecord]:
+    def _fetch(self, cve_ids: list[str]) -> tuple[list[CveRecord], bool]:
+        """The records of these ids that the budget allows, and whether the budget stopped them."""
         records: list[CveRecord] = []
         for cve_id in cve_ids:
             if not self._fits():
                 self.result.capped = True
-                break
+                return records, True
             before = self.client.source.sent
+            self.requested.add(cve_id)
             try:
                 document = self.client.fetch(cve_id)
             except (SourceUnavailableError, SourceRefusedError) as error:
@@ -377,4 +425,4 @@ class _Loader:
                     self.rejected_ids.add(cve_id)
             else:
                 records.append(record)
-        return records
+        return records, False

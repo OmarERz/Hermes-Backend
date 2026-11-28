@@ -212,6 +212,14 @@ Todo error responde con:
   se guarda el día en que su denominador es cero: `wrong_priority_judged` y `original_score_accepted` necesitan
   feedback sobre evaluaciones que ajustó el juez, y `precision` feedback `relevant` o `false_positive`; con
   `make demo`, que no crea feedback, no aparecen. No esperes una lista fija de claves.
+- **Fecha y alcance de cada métrica:** cada métrica trae `as_of`, el día UTC (`AAAA-MM-DD`) de su valor: el job
+  nocturno guarda cada noche el **día anterior**, así que normalmente es ayer y es una fecha anterior si una noche
+  no guardó esa métrica (nulo en `judge_ladder_level`, que es el nivel actual). Rotula cada cifra con su fecha
+  («al cierre de la noche del …»). `reclassified`, `hidden_criticals` y `noise_avoided` traen además
+  `description`, con esa misma fecha: cuentan los puntajes de CI de las evaluaciones de ese día, mientras que la pantalla
+  de comparación (`GET /api/comparison/summary`: `reclassified_percent`, `hidden_criticals`, `avoided_noise`) los
+  calcula **en vivo** sobre todos los hallazgos vigentes. Por eso pueden diferir (en el ensayo 2: 34 en la
+  comparación y 0 en el tablero); muestra la `description` junto a la cifra en lugar de igualarlas.
 - **«Aceptar puntaje original» (RE-9):** es un `POST /api/feedback` con `verdict: wrong_priority` y
   `proposed_score` igual a la `base` de la recomendación (`wrong_priority` siempre exige además `proposed_level`);
   la métrica `original_score_accepted` es la proporción de esos votos en el feedback del día sobre evaluaciones que
@@ -252,6 +260,13 @@ Todo error responde con:
   `finding_id`, que es el `{id}` de `GET /api/findings/{id}/history` (puntaje de ese CI en cada evaluación del
   grupo, del más antiguo al más reciente). En las recomendaciones `asset.finding_id` llega nulo: su CI puede ser
   el de una alerta, sin hallazgo de escaneo.
+- **Severidad del grupo:** cada grupo de `GET /api/vulnerabilities` (y de `GET /api/assets/{ci_id}`) y el detalle
+  traen `cvss` (texto decimal: el CVSS que usó la evaluación de esa puntuación, elegido según D-104) y `severity`
+  (`critical`, `high`, `medium`, `low` por la escala del CVSS, o `unrated` si esa evaluación se hizo sin CVSS
+  publicado). Muestra `unrated` como «Sin CVSS»: su puntuación usó una severidad estimada (0.8 por precaución o el
+  vector que infirió el Analista de CVE) y la justificación de la recomendación lo dice («Sin CVSS publicado:
+  severidad estimada …»). Es la foto de esa evaluación: un CI corregido conserva la de su última evaluación. Son
+  campos nuevos y opcionales del contrato; `severity` solo llega nula con un CVSS de 0.0.
 - **Fuente y certeza de un hallazgo (F18.9):** en `GET /api/vulnerabilities/{group_id}` cada activo trae
   `match_source`, cómo se detectó su hallazgo: `nvd_cpe` (un rango de NVD), `kev` (un CVE del catálogo KEV de CISA
   que coincidió por los rangos del CNA en CVE.org, sin rango de NVD) o `cna_affected` (solo los rangos del CNA en

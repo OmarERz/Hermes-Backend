@@ -12,20 +12,24 @@ from __future__ import annotations
 import copy
 import gzip
 import json
+import logging
 import uuid
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from typing import Any
 
 import httpx
 import pytest
-from sqlalchemy import Engine, text
+from sqlalchemy import Engine, select, text
 from sqlalchemy.orm import Session, sessionmaker
 
+from core.cpe.mapping import MappingInput, set_mapping
+from core.db import models as m
+from core.pipeline.cycles import Pipeline, ScanCycleOutput, Steps
 from core.pipeline.wiring import refresh_vulndata
 from core.scan.engine import ScanOptions, run_scan
 from core.vulndata import cna_discovery
-from core.vulndata.cvelist import RAW_URL
+from core.vulndata.cvelist import RAW_URL, CveOrgClient
 from core.vulndata.epss import EPSS_DAILY_URL
 from core.vulndata.http import JsonSource, SourceUnavailableError
 from core.vulndata.kev import KEV_URL
@@ -105,9 +109,13 @@ class Sources:
         return EMPTY_PAGE if "cveId" in params else self.window  # otherwise the recency window
 
     def refresh(self, factory: sessionmaker[Session], attempts: int = 1) -> Any:
+        return self.refresh_step(factory, attempts)()
+
+    def refresh_step(self, factory: sessionmaker[Session], attempts: int = 1) -> Any:
+        """The worker's refresh step (`Steps.refresh`) against these sources."""
         http = httpx.Client(transport=httpx.MockTransport(self.handler))
         source = JsonSource(http=http, max_attempts=attempts, sleep=lambda _s: None)
-        return refresh_vulndata(factory, NvdClient(JsonSource(http=http)), source)()
+        return refresh_vulndata(factory, NvdClient(JsonSource(http=http)), source)
 
 
 def run(engine: Engine, statement: str, params: dict[str, Any] | None = None) -> None:
@@ -264,6 +272,68 @@ def test_the_request_budget_bounds_a_refresh(
     sources = Sources(recorded("nvd_cna_window.json"))
     *_, cve_org = sources.refresh(world)
     assert len(sources.github) == 3 and cve_org.capped and cve_org.requests == 3
+    assert cve_org.budget == 6 and cve_org.waiting == cve_org.candidates - 3
+
+
+def kernel_sighting(n: int) -> dict[str, Any]:
+    """An unenriched kernel CVE of the window, newer than the recorded ones; cvelistV5 has no file for it (404)."""
+    return {
+        "cve": {
+            "id": f"CVE-2026-9{n:05d}",
+            "sourceIdentifier": "416baaa9-dc9f-4396-8d5f-8c081fb06d67",
+            "published": "2026-11-20T00:00:00.000",
+            "lastModified": "2026-11-21T00:00:00.000",
+            "vulnStatus": "Received",
+            "descriptions": [{"lang": "en", "value": "In the Linux kernel, the following vulnerability was resolved."}],
+        }
+    }
+
+
+def test_a_fresh_mapping_converges_in_one_refresh_beyond_the_old_cap(
+    engine: Engine, world: sessionmaker[Session], caplog: pytest.LogCaptureFixture
+) -> None:
+    """Rehearsal 2, P2-A: the first refresh after mapping had 5,124 candidates and stopped at the fixed cap of 5,000
+    requests, so a CNA learned from its records (here CPython's, whose CVE-2026-114583 names `tarfile`, not Python)
+    waited a day for its pass. The budget now follows the candidates (two requests each, ceiling 12,000) and each CNA
+    learned gets its pass in the same refresh: the recorded records all arrive, and the scan finds them all."""
+    window = recorded("nvd_cna_window.json")
+    observed = cna_discovery.Observed()
+    for item in [*(kernel_sighting(n) for n in range(5_124)), *window["vulnerabilities"]]:
+        observed.see(item)
+    sources = Sources(window)
+    http = httpx.Client(transport=httpx.MockTransport(sources.handler))
+    client = CveOrgClient(JsonSource(http=http, max_attempts=1, sleep=lambda _s: None))
+    with caplog.at_level(logging.INFO, logger=cna_discovery.__name__):
+        result = cna_discovery.refresh_cve_org(world, client, observed, {})
+    assert (result.capped, result.waiting, result.passes) == (False, 0, 2)
+    assert result.candidates == result.requests == 5_124 + 8  # 7 named + CPython's tarfile record in the 2nd pass
+    assert result.budget == 2 * result.candidates <= cna_discovery.MAX_REQUESTS
+    assert (result.stored, result.missing) == (8, 5_124)
+    assert "cna@python.org" in result.followed_sources and sources.github[-1] == "CVE-2026-114583"
+    assert f"budget of {result.budget} (2 per candidate, at least 500, ceiling 12000)" in caplog.text
+    run_scan(world, ScanOptions(), now=SCAN_AT)
+    assert {key for key, src in findings(engine).items() if src == "cna_affected"} == {
+        key for key, src in EXPECTED.items() if src == "cna_affected"
+    }
+
+
+def test_the_budget_never_passes_its_ceiling(
+    engine: Engine, world: sessionmaker[Session], monkeypatch: pytest.MonkeyPatch, caplog: pytest.LogCaptureFixture
+) -> None:
+    """The budget grows with the candidates but stops at `MAX_REQUESTS`; what it leaves is counted and logged."""
+    monkeypatch.setattr(cna_discovery, "MAX_REQUESTS", 600)
+    observed = cna_discovery.Observed()
+    for n in range(1_000):
+        observed.see(kernel_sighting(n))
+    sources = Sources(EMPTY_PAGE)
+    http = httpx.Client(transport=httpx.MockTransport(sources.handler))
+    client = CveOrgClient(JsonSource(http=http, max_attempts=1, sleep=lambda _s: None))
+    with caplog.at_level(logging.INFO, logger=cna_discovery.__name__):
+        result = cna_discovery.refresh_cve_org(world, client, observed, {})
+    assert result.budget == 600 and result.capped
+    assert result.requests == len(sources.github) == 597  # a record is asked while its worst case (4) still fits
+    assert result.waiting == 1_000 - 597
+    assert "ran out: 403 candidates wait for the next refresh" in caplog.text
 
 
 def test_retries_count_against_the_request_budget(
@@ -277,6 +347,23 @@ def test_retries_count_against_the_request_budget(
     *_, cve_org = sources.refresh(world, attempts=2)
     assert cve_org.requests == len(sources.github) <= 20
     assert cve_org.capped and cve_org.stored == len(sources.github) // 2
+
+
+def test_a_candidate_the_first_pass_could_not_ask_goes_first_in_the_next(
+    engine: Engine, world: sessionmaker[Session], monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """F15.12 feature review: retries spend the first pass's share (7 candidates, 14 requests, each record answers 503
+    once), so 3 of its candidates wait; the CPython round adds one candidate and 2 requests, and the oldest waiting
+    candidate of the first pass is asked before the new one instead of being dropped from the refresh."""
+    monkeypatch.setattr(cna_discovery, "MIN_BUDGET", 0)
+    sources = Sources(recorded("nvd_cna_window.json"))
+    sources.flaky = True
+    *_, cve_org = sources.refresh(world, attempts=2)
+    asked = list(dict.fromkeys(sources.github))
+    assert asked[:4] == ["CVE-2026-116303", "CVE-2026-100080", "CVE-2026-110952", "CVE-2026-115557"]
+    assert asked[4:] == ["CVE-2026-112945"]  # deferred by the first pass, asked in the CPython pass
+    # Vite's record teaches its CNA (GitHub's), a third round with nothing new: the budget is spent, 3 wait
+    assert (cve_org.passes, cve_org.budget, cve_org.capped, cve_org.waiting) == (3, 16, True, 3)
 
 
 def redated(window: dict[str, Any], cve_ids: set[str], when: str = "2026-11-28T10:00:00.000") -> dict[str, Any]:
@@ -429,3 +516,63 @@ def test_a_cve_nvd_rejects_loses_its_cna_ranges_even_if_a_later_step_fails(
     assert rows(
         engine, "SELECT count(*) FROM cve_affected_range WHERE cve_id = 'CVE-2026-100080' AND source = 'cna_affected'"
     ) == [(0,)]
+
+
+def test_the_readme_flow_brings_cve_org_findings_without_restarting_the_worker(
+    engine: Engine, world: sessionmaker[Session]
+) -> None:
+    """Rehearsal 2, P2-B: load the inventory, scan, `make itop-map-cpe` (it adds the CNA names), scan again. The second
+    scan gave 0 CVE.org findings until the worker restarted; now it refreshes first because a mapping changed after
+    the last refresh, and a third scan does not refresh again."""
+    cna = {product: names for _, product, _, _, names in INSTALLS if names}
+    run(engine, "UPDATE cpe_mapping SET cna_vendor = NULL, cna_product = NULL, mapped_at = :t", {"t": SCAN_AT})
+    sources = Sources(recorded("nvd_cna_window.json"))
+    clock = [SCAN_AT + timedelta(hours=1)]
+
+    def scan(run_id: uuid.UUID | None, reason: str) -> ScanCycleOutput:
+        return ScanCycleOutput(run_scan(world, ScanOptions(reason=reason, run_id=run_id), now=SCAN_AT).run_id)
+
+    steps = Steps(news=None, scan=scan, refresh=sources.refresh_step(world))
+    pipeline = Pipeline(world, steps, clock=lambda: clock[0])
+    pipeline.refresh_cycle()  # at worker start, before the CNA names exist: nothing to ask CVE.org
+    assert sources.github == []
+    pipeline.scan_cycle()
+    assert findings(engine) == {("eks-nodo-01", "CVE-2026-100070"): "nvd_cpe"}
+    clock[0] += timedelta(minutes=30)
+    with world() as session, session.begin():  # what `PUT /api/mappings/{software}` does for each product
+        for row in session.execute(
+            select(m.CpeMapping, m.SoftwareProduct.itop_name).join(
+                m.SoftwareProduct, m.SoftwareProduct.id == m.CpeMapping.software_product_id
+            )
+        ).all():
+            mapping, product = row
+            if product in cna:
+                names = MappingInput(mapping.nvd_vendor, mapping.nvd_product, *cna[product], mapping.nvd_part)
+                set_mapping(session, mapping.software_product_id, names, now=clock[0])
+    clock[0] += timedelta(minutes=30)
+    report = pipeline.scan_cycle()
+    assert "vulnerability data refreshed first: a CPE mapping changed since the last refresh" in report.notes
+    assert findings(engine) == EXPECTED
+    asked = len(sources.github)
+    pipeline.scan_cycle()
+    assert len(sources.github) == asked  # no second refresh for the same change
+
+
+def test_a_scan_after_an_interrupted_refresh_refreshes_again(engine: Engine, world: sessionmaker[Session]) -> None:
+    """GitHub fails during the refresh a mapping change triggered: the refresh is incomplete, so the next scan tries
+    again (the CVE.org cache skips what was stored) instead of waiting a day for the scheduled one."""
+    sources = Sources(recorded("nvd_cna_window.json"))
+    clock = [SCAN_AT]
+
+    def scan(run_id: uuid.UUID | None, reason: str) -> ScanCycleOutput:
+        return ScanCycleOutput(run_scan(world, ScanOptions(reason=reason, run_id=run_id), now=SCAN_AT).run_id)
+
+    pipeline = Pipeline(world, Steps(news=None, scan=scan, refresh=sources.refresh_step(world)), clock=lambda: clock[0])
+    sources.github_down = True
+    first = pipeline.scan_cycle()  # no refresh has completed in this process: it refreshes, GitHub is down
+    assert "CVE.org did not finish this refresh; the next scan refreshes again" in first.notes
+    assert findings(engine) == {("eks-nodo-01", "CVE-2026-100070"): "nvd_cpe"}
+    sources.github_down = False
+    clock[0] += timedelta(hours=1)
+    pipeline.scan_cycle()
+    assert findings(engine) == EXPECTED and pipeline.refreshed_at == clock[0]

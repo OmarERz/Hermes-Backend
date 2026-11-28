@@ -203,6 +203,24 @@ def test_a_nightly_recalculation_never_calls_the_judge_and_keeps_the_last_adjust
     assert nightly.changed is False  # nothing moved: no new assessment
 
 
+def test_a_cvss_that_scores_like_the_default_still_stores_an_assessment(session: Session) -> None:
+    """F15.12 review (P2-D): without CVSS, S is 0.8 (`unrated`); a CVSS of 8.0 gives the same S and the same scores,
+    but the new assessment is stored so the views stop calling the group unrated. Nothing else changing stores none."""
+    group = demo_group(session)
+    cve = session.get_one(m.Cve, CVE)
+    cve.cvss_score, cve.cvss_version, cve.cvss_vector, cve.cvss_source = None, None, None, None
+    session.flush()
+    unrated = evaluate_group(session, group, run(session), "new_finding", opts(session))
+    assert unrated.changed and unrated.result.factors.s == Decimal("0.8")
+    cve.cvss_score, cve.cvss_version, cve.cvss_source = Decimal("8.0"), "3.1", "nvd"
+    session.flush()
+    rated = evaluate_group(session, group, run(session), "nightly", opts(session))
+    assert rated.changed and rated.assessment_id is not None
+    assert rated.result.factors.s == unrated.result.factors.s
+    assert session.get_one(m.Assessment, rated.assessment_id).raw_cvss_score == Decimal("8.0")
+    assert evaluate_group(session, group, run(session), "nightly", opts(session)).changed is False
+
+
 def test_threat_context_ages_into_the_assessment_and_decays(session: Session) -> None:
     session.add(m.ProfileSector(sector_code="healthcare", is_primary=True))
     session.add(m.ProfileCountry(country_code="MX"))

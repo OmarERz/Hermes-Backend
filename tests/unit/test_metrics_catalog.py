@@ -16,6 +16,14 @@ def test_every_nightly_metric_is_on_the_board() -> None:
     assert set(CATALOG) == set(QUERIES)
 
 
+def test_the_metrics_the_comparison_shows_live_say_they_are_nightly() -> None:
+    """Rehearsal 2, P2-C: the board and the comparison screen count different things; the board says which."""
+    described = {code for code, info in CATALOG.items() if info.description}
+    assert described == {"reclassified", "hidden_criticals", "noise_avoided"}
+    for code in described:
+        assert "del día UTC {day}, al cierre de esa noche" in str(CATALOG[code].description)
+
+
 def test_the_accepted_original_score_sits_with_the_judge_feedback_metrics() -> None:
     """RE-9 (F18.2): a ratio with a Spanish label, right after «Prioridad incorrecta» on judge adjustments."""
     codes = list(CATALOG)

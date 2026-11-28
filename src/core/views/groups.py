@@ -15,11 +15,13 @@ from collections import Counter, defaultdict
 from collections.abc import Callable, Iterable, Sequence
 from dataclasses import dataclass, replace
 from datetime import date, datetime
+from decimal import Decimal
 from typing import Final
 
 from sqlalchemy import text
 from sqlalchemy.orm import Session
 
+from core.scoring.engine import cvss_level
 from core.views.common import (
     LEVELS,
     ScoredFinding,
@@ -89,6 +91,8 @@ class Group:
     status: str
     last_seen: datetime
     description: str | None
+    cvss: Decimal | None = None  # the CVSS its score used (rehearsal 2 P2-D); None without one
+    severity: str | None = None  # ESC-14: critical | high | medium | low | unrated (no CVSS); None for a CVSS of 0.0
     match_sources: tuple[str, ...] = ()  # of the current instances of its speaking CIs, most certain first (ESC-09)
 
 
@@ -175,6 +179,15 @@ def _top(rows: Sequence[ScoredFinding]) -> ScoredFinding:
     return max(sorted(rows, key=lambda r: (r.asset_name, str(r.asset_id))), key=lambda r: r.final)
 
 
+def severity(cvss: Decimal | None) -> str | None:
+    """ESC-14 (`schemas/finding.schema.json`): the CVSS level, or `unrated` without a CVSS; None for a CVSS of 0.0,
+    which has no level in the scale."""
+    if cvss is None:
+        return "unrated"
+    level = cvss_level(cvss)
+    return level if level in LEVELS else None
+
+
 def _group(rows: Sequence[ScoredFinding]) -> Group:
     voice = speaking(rows)
     top, first = _top(voice), rows[0]
@@ -194,6 +207,8 @@ def _group(rows: Sequence[ScoredFinding]) -> Group:
         status=most_pressing([r.status for r in rows]),
         last_seen=max(r.last_seen for r in rows),
         description=first.description,
+        cvss=top.cvss,
+        severity=severity(top.cvss),
         match_sources=match_sources(source for r in voice for source in r.match_sources),
     )
 
@@ -341,6 +356,8 @@ def asset_detail(session: Session, itop_ci_id: str, itop_base_url: str | None = 
                 level=row.level,
                 status=row.status,
                 last_seen=row.last_seen,
+                cvss=row.cvss,  # the CVSS of this CI's own assessment, the one its score comes from
+                severity=severity(row.cvss),
                 match_sources=match_sources(row.match_sources),
             )
         )

@@ -1377,7 +1377,7 @@
         "additionalProperties": false,
         "properties": {
           "avoided_noise": {
-            "description": "Hallazgos de CVSS alto que Hermes bajó de prioridad.",
+            "description": "Hallazgos de CVSS alto que Hermes bajó de prioridad: en vivo, los hallazgos vigentes con CVSS de 9.0 o más y final menor a 50. La métrica `noise_avoided` de `GET /api/metrics` es la nocturna: las evaluaciones del día UTC de su `as_of` (normalmente el anterior), al cierre de esa noche.",
             "title": "Avoided Noise",
             "type": "integer"
           },
@@ -3764,6 +3764,30 @@
       "Metric": {
         "additionalProperties": false,
         "properties": {
+          "as_of": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Día UTC (AAAA-MM-DD) del valor: el job nocturno guarda cada noche el día anterior, así que normalmente es ayer; es una fecha anterior si una noche no guardó la métrica. Nulo en el nivel de la escalera del juez, que es el actual.",
+            "title": "As Of"
+          },
+          "description": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Alcance y fecha de la métrica, en español, para rotularla. Hoy la traen las tres que la pantalla de comparación también muestra en vivo (`reclassified`, `hidden_criticals`, `noise_avoided`).",
+            "title": "Description"
+          },
           "key": {
             "description": "Clave estable de la métrica.",
             "title": "Key",
@@ -6786,6 +6810,18 @@
             "title": "Cve",
             "type": "string"
           },
+          "cvss": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "CVSS que usó la evaluación que da la puntuación de esta fila (la foto del dato al evaluar, elegido según D-104), como texto decimal. Nulo si esa evaluación se hizo sin CVSS publicado.",
+            "title": "Cvss"
+          },
           "description": {
             "description": "Descripción del CVE.",
             "title": "Description",
@@ -6854,6 +6890,25 @@
             "description": "Producto de software afectado.",
             "title": "Product",
             "type": "string"
+          },
+          "severity": {
+            "anyOf": [
+              {
+                "enum": [
+                  "critical",
+                  "high",
+                  "medium",
+                  "low",
+                  "unrated"
+                ],
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Severidad según la escala de `cvss` (crítica de 9.0 a 10, alta de 7.0 a 8.9, media de 4.0 a 6.9, baja de 0.1 a 3.9). `unrated`: la evaluación mostrada se hizo sin CVSS publicado y usó una severidad estimada (0.8 por precaución o el vector que infirió el Analista de CVE), como dice su justificación; un CI corregido conserva la de su última evaluación aunque el CVE tenga CVSS después. Nula solo con un CVSS de 0.0.",
+            "title": "Severity"
           },
           "status": {
             "description": "Estado. Valores: `new`: Apareció en el último escaneo; `persistent`: Sigue presente desde un escaneo anterior; `reopened`: Estaba corregido y volvió a aparecer; `fixed`: Ya no aparece; `no_data`: No hay datos suficientes para decidir.",
@@ -6929,6 +6984,18 @@
             "title": "Cve",
             "type": "string"
           },
+          "cvss": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "CVSS que usó la evaluación que da la puntuación de esta fila (la foto del dato al evaluar, elegido según D-104), como texto decimal. Nulo si esa evaluación se hizo sin CVSS publicado.",
+            "title": "Cvss"
+          },
           "exposed": {
             "description": "Si está expuesto a internet.",
             "title": "Exposed",
@@ -6992,6 +7059,25 @@
             "description": "Producto de software afectado.",
             "title": "Product",
             "type": "string"
+          },
+          "severity": {
+            "anyOf": [
+              {
+                "enum": [
+                  "critical",
+                  "high",
+                  "medium",
+                  "low",
+                  "unrated"
+                ],
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Severidad según la escala de `cvss` (crítica de 9.0 a 10, alta de 7.0 a 8.9, media de 4.0 a 6.9, baja de 0.1 a 3.9). `unrated`: la evaluación mostrada se hizo sin CVSS publicado y usó una severidad estimada (0.8 por precaución o el vector que infirió el Analista de CVE), como dice su justificación; un CI corregido conserva la de su última evaluación aunque el CVE tenga CVSS después. Nula solo con un CVSS de 0.0.",
+            "title": "Severity"
           },
           "status": {
             "description": "Estado del hallazgo. Valores: `new`: Apareció en el último escaneo; `persistent`: Sigue presente desde un escaneo anterior; `reopened`: Estaba corregido y volvió a aparecer; `fixed`: Ya no aparece; `no_data`: No hay datos suficientes para decidir.",

@@ -14,7 +14,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from datetime import datetime
-from decimal import Decimal
+from decimal import ROUND_HALF_UP, Decimal
 from typing import Final
 
 from core.mitigation.text import escape_markdown
@@ -29,6 +29,8 @@ CRITICALITY: Final = {
 CONFIDENTIALITY: Final = {"highly_classified": "Ultra clasificados", "classified": "clasificados", "public": "públicos"}
 SECONDS_PER_HOUR: Final = 3600
 HOURS_PER_DAY: Final = 24
+TEN: Final = Decimal(10)
+TENTH: Final = Decimal("0.1")
 
 
 @dataclass(frozen=True)
@@ -60,6 +62,10 @@ class JustificationInput:
     judge_reasons: tuple[JudgeReason, ...] = ()
     floor_applied: bool = False
     no_judge_review: bool = False
+    # Without a CVSS (docs/06 §S): the S the engine used and whether it came from the CVE analyst's inferred vector
+    # (estimated); otherwise it is the conservative default, marked `unrated`. Unused when `cvss_score` is set.
+    severity_s: Decimal | None = None
+    severity_estimated: bool = False
 
 
 def age_text(then: datetime, now: datetime) -> str:
@@ -88,6 +94,14 @@ def _asset_facts(data: JustificationInput) -> list[str]:
     return facts
 
 
+def _without_cvss(data: JustificationInput, s: Decimal) -> str:
+    """docs/06 §S, on the CVSS scale of the rest of the text: the inferred vector's score, or the default S (0.8)."""
+    shown = (s * TEN).quantize(TENTH, rounding=ROUND_HALF_UP)
+    if data.severity_estimated:
+        return f"Sin CVSS publicado: severidad estimada {shown} con el vector que infirió el Analista de CVE"
+    return f"Sin CVSS publicado: severidad estimada {shown} (valor conservador, `unrated`)"
+
+
 def build_justification(data: JustificationInput, now: datetime) -> str:
     """The justification text of one finding's score."""
     driver = escape_markdown(data.driving_ci, NAME_LIMIT)
@@ -95,6 +109,8 @@ def build_justification(data: JustificationInput, now: datetime) -> str:
     parts: list[str] = []
     if data.cvss_score is not None:
         parts.append(f"CVSS {data.cvss_score}")
+    elif data.severity_s is not None:
+        parts.append(_without_cvss(data, data.severity_s))
     if data.in_kev:
         parts.append("en KEV")
     for item in data.news:

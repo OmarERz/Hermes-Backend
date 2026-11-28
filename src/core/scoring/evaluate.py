@@ -294,9 +294,12 @@ def _fingerprint_of(session: Session, assessment: m.Assessment) -> str | None:
 
 
 def _snapshot(result: GroupResult, formula_id: uuid.UUID, review_id: uuid.UUID | None) -> tuple[object, ...]:
+    """What makes a new assessment worth storing. The raw CVSS counts on its own (F15.12, P2-D): a CVE scored with
+    the default S of 0.8 that gets a CVSS of 8.0 scores the same, but the views must stop calling it `unrated`."""
     return (
         formula_id,
         review_id,
+        result.inputs.cvss,
         result.factors.s.quantize(FOUR_PLACES),
         result.factors.p.quantize(FOUR_PLACES),
         result.t.quantize(FOUR_PLACES),
@@ -314,6 +317,7 @@ def _unchanged(session: Session, previous: m.Assessment, current: tuple[object, 
     before = (
         previous.formula_version_id,
         previous.llm_review_id,
+        previous.raw_cvss_score,
         previous.factor_s,
         previous.factor_p,
         previous.factor_t,

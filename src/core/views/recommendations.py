@@ -58,6 +58,13 @@ _PAGE: Final = text(
     )
     SELECT a.id AS assessment_id, a.assessed_at, a.finding_group_id, a.alert_id, a.llm_review_id,
            a.judge_adjustment, a.raw_cvss_score, a.raw_in_kev, g.cve_id AS cve, sp.itop_name AS product,
+           a.factor_s,
+           -- docs/06 §S: without a CVSS, S is the formula's default (unrated) or the inferred vector's score
+           -- (estimated); the assessment's own S and formula tell which one scored it. A vector scoring exactly the
+           -- default reads as the default: the S shown is the same.
+           (a.raw_cvss_score IS NULL AND a.factor_s <> (
+               SELECT fv.s_without_cvss FROM formula_version fv WHERE fv.id = a.formula_version_id))
+             AS severity_estimated,
            (a.llm_review_id IS NULL OR r.status = 'no_judge_review') AS no_judge_review,
            r.mitigation_status, r.status AS judge_status, r.summary AS judge_summary,
            s.asset_id, s.base, s.ci_adjustment, s.final, d.level, d.floor_applied,
@@ -287,6 +294,8 @@ def _recommendation(
             judge_reasons=tuple(parts.reasons.get(first.llm_review_id, ())),
             floor_applied=bool(driver.floor_applied),
             no_judge_review=bool(first.no_judge_review),
+            severity_s=first.factor_s,
+            severity_estimated=bool(first.severity_estimated),
         ),
         first.assessed_at,
     )

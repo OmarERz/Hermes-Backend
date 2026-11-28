@@ -1,9 +1,11 @@
 """Dashboard metrics for `GET /api/metrics` (FRO-21, docs/10 §1): the latest stored value of each metric.
 
-The shape matches the API model `MetricsDashboard` (`generated_at`, `metrics: [{key, label, value, unit}]`): values
-are already formatted text and labels are in Spanish (D-060). Metrics with dimensions are folded into one figure
-(the total cost, the most delayed source); the per-dimension detail stays in `daily_metric`. The current level of
-the judge ladder (L14) is always included.
+The shape matches the API model `MetricsDashboard` (`generated_at`, `metrics: [{key, label, value, unit, as_of,
+description}]`): values are already formatted text and labels are in Spanish (D-060). Metrics with dimensions are
+folded into one figure (the total cost, the most delayed source); the per-dimension detail stays in `daily_metric`.
+Each value carries the UTC day it was stored for (`as_of`: the nightly job stores the previous day), and the metrics
+the comparison screen also shows live say their scope (rehearsal 2 P2-C: «ruido evitado» 34 live, 0 here). The
+current level of the judge ladder (L14) is always included.
 """
 
 from __future__ import annotations
@@ -28,6 +30,14 @@ class MetricInfo:
     label: str
     kind: Kind
     fold: Fold = "only"  # only: the '' dimension; sum/max/min: across the dimensions of the latest day
+    description: str | None = None  # scope, for the front to label it (Spanish); `{day}` is the value's UTC day
+
+
+# The day is the value's own (`as_of`): normally yesterday, older when a night stored nothing for it.
+NIGHTLY_SCOPE: Final = "entre las evaluaciones del día UTC {day}, al cierre de esa noche"
+LIVE_ELSEWHERE: Final = (
+    "La pantalla de comparación la calcula en vivo sobre los hallazgos vigentes, así que puede dar otra cifra."
+)
 
 
 CATALOG: Final[dict[str, MetricInfo]] = {
@@ -53,9 +63,21 @@ CATALOG: Final[dict[str, MetricInfo]] = {
     "error_queue_oldest_hours": MetricInfo("Antigüedad de la cola de error", "hours"),
     "cpe_mapping_coverage": MetricInfo("Software con mapeo CPE", "ratio"),
     "source_hours_since_ok": MetricInfo("Fuente más atrasada", "hours", "max"),
-    "reclassified": MetricInfo("Hallazgos reclasificados", "ratio"),
-    "hidden_criticals": MetricInfo("Críticos ocultos", "count"),
-    "noise_avoided": MetricInfo("Ruido evitado", "count"),
+    "reclassified": MetricInfo(
+        "Hallazgos reclasificados",
+        "ratio",
+        description=f"Proporción de puntajes de CI cuyo nivel no es el de su CVSS, {NIGHTLY_SCOPE}. {LIVE_ELSEWHERE}",
+    ),
+    "hidden_criticals": MetricInfo(
+        "Críticos ocultos",
+        "count",
+        description=f"Puntajes de CI con CVSS menor a 7.0 y final de 75 o más, {NIGHTLY_SCOPE}. {LIVE_ELSEWHERE}",
+    ),
+    "noise_avoided": MetricInfo(
+        "Ruido evitado",
+        "count",
+        description=f"Puntajes de CI con CVSS de 9.0 o más y final menor a 50, {NIGHTLY_SCOPE}. {LIVE_ELSEWHERE}",
+    ),
     "inventory_pending": MetricInfo("CIs con pendientes de inventario", "ratio"),
     "notification_pending": MetricInfo("Eventos pendientes", "count"),
     "notification_failed": MetricInfo("Eventos en error", "count"),
@@ -86,7 +108,8 @@ class DashboardMetric:
     label: str
     value: str
     unit: str | None
-    as_of: date | None = None
+    as_of: date | None = None  # the UTC day the value was stored for; None for the live ladder level
+    description: str | None = None
 
 
 @dataclass(frozen=True)
@@ -134,7 +157,9 @@ def build_dashboard(session: Session, now: datetime) -> Dashboard:
         day, values = latest[code]
         value = _fold(values, info.fold)
         if value is not None:
-            metrics.append(DashboardMetric(code, info.label, format_value(value, info.kind), UNITS[info.kind], day))
+            shown = format_value(value, info.kind)
+            described = info.description.format(day=day.isoformat()) if info.description else None
+            metrics.append(DashboardMetric(code, info.label, shown, UNITS[info.kind], day, described))
     level, _ = current_level(session)
     metrics.append(
         DashboardMetric(

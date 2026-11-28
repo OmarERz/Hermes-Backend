@@ -38,12 +38,21 @@ def test_the_route_returns_the_stored_metrics(factory: sessionmaker[Session]) ->
     with TestClient(app) as client:
         body = client.get("/api/metrics").json()
 
-    assert {"key": "precision", "label": "Precisión", "value": "90.0", "unit": "%"} in body["metrics"]
+    assert {
+        "key": "precision",
+        "label": "Precisión",
+        "value": "90.0",
+        "unit": "%",
+        "as_of": "2026-11-21",
+        "description": None,
+    } in body["metrics"]
     assert body["metrics"][-1] == {
         "key": "judge_ladder_level",
         "label": "Nivel de la escalera del juez",
         "value": "0 · Normal",
         "unit": None,
+        "as_of": None,
+        "description": None,
     }
     assert body["generated_at"].endswith("Z")
 
@@ -70,4 +79,32 @@ def test_the_route_returns_the_accepted_original_score(factory: sessionmaker[Ses
         "label": "«Aceptar puntaje original» en ajustes del juez",
         "value": "50.0",
         "unit": "%",
+        "as_of": "2026-11-21",
+        "description": None,
     }
+
+
+def test_the_noise_avoided_metric_says_its_scope_and_date(factory: sessionmaker[Session]) -> None:
+    """Rehearsal 2, P2-C: the comparison screen said 34 (live, every current finding) and the board 0 (the nightly
+    value of the previous UTC day). The numbers stay; the board now says what its figure covers and for which day."""
+    with factory() as session, session.begin():
+        session.add(
+            m.DailyMetric(metric_date=date(2026, 11, 27), metric_code="noise_avoided", dimension="", value=Decimal(0))
+        )
+    app = create_app(SETTINGS)
+    app.state.session_factory = factory
+    app.dependency_overrides[get_current_user] = lambda: CurrentUser(
+        uid="u", email="reader@example.test", display_name=None, role=Role.READER
+    )
+
+    with TestClient(app) as client:
+        metrics = client.get("/api/metrics").json()["metrics"]
+
+    noise = next(x for x in metrics if x["key"] == "noise_avoided")
+    assert (noise["value"], noise["as_of"]) == ("0", "2026-11-27")
+    # the day in the text is the value's own: a night that stored nothing leaves an older one (feature review)
+    assert noise["description"] == (
+        "Puntajes de CI con CVSS de 9.0 o más y final menor a 50, entre las evaluaciones del día UTC 2026-11-27, al "
+        "cierre de esa noche. La pantalla de comparación la calcula en vivo sobre los hallazgos vigentes, así que "
+        "puede dar otra cifra."
+    )

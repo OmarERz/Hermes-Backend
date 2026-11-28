@@ -11,7 +11,7 @@ import logging
 import uuid
 from collections.abc import Callable, Iterable, Sequence
 from datetime import UTC, date, datetime, timedelta
-from typing import Any, Protocol
+from typing import Any, NamedTuple, Protocol
 
 from sqlalchemy import select
 from sqlalchemy.orm import Session, sessionmaker
@@ -162,9 +162,26 @@ KEV_RECENT_DAYS = 7  # CISA entries of the last week without an NVD record are l
 KEV_LAG_MAX = 20  # at most this many lookups by id per refresh (the public NVD limit is 5 requests per 30 s)
 
 
+class VulndataRefresh(NamedTuple):
+    """What one refresh loaded, in order."""
+
+    nvd: LoadResult
+    kev: object
+    epss: object
+    kev_records: LoadResult
+    cve_org: CveOrgResult
+
+    @property
+    def complete(self) -> bool:
+        """CVE.org asked every candidate: no outage of GitHub stopped it and the request budget did not run out. Only
+        a complete refresh covers the mappings it read (`core.pipeline.cycles`, P2-B): after an incomplete one the
+        next scan refreshes again, and the cache skips what was stored."""
+        return not (self.cve_org.interrupted or self.cve_org.capped)
+
+
 def refresh_vulndata(
     factory: sessionmaker[Session], nvd: NvdClient, source: JsonSource, cve_org: CveOrgClient | None = None
-) -> Callable[[], tuple[LoadResult, object, object, LoadResult, CveOrgResult]]:
+) -> Callable[[], VulndataRefresh]:
     """ESC-09: the recent NVD publications (recency window), the KEV catalogue, the NVD records of every KEV CVE
     whatever its age (ESC-10: the window does not apply to KEV), today's EPSS scores and, last, the CVE.org records of
     the CVEs NIST has not enriched that may concern a mapped product (F15.9, D-103; `core.vulndata.cna_discovery`).
@@ -174,7 +191,7 @@ def refresh_vulndata(
     """
     cve_org = cve_org or CveOrgClient(source)
 
-    def run() -> tuple[LoadResult, object, object, LoadResult, CveOrgResult]:
+    def run() -> VulndataRefresh:
         end = datetime.now(UTC)
         held = _held_versions(factory)  # before any write: what CVE.org's cache compares NVD's dates with
         observed = Observed()
@@ -193,7 +210,7 @@ def refresh_vulndata(
             raise
         # Last: an outage of GitHub keeps CVE.org out of this refresh only (the step stops and logs it).
         cna_result = refresh_cve_org(factory, cve_org, observed, held)
-        return nvd_result, kev_result, epss_result, kev_records, cna_result
+        return VulndataRefresh(nvd_result, kev_result, epss_result, kev_records, cna_result)
 
     return run
 

@@ -154,6 +154,22 @@ def test_minimal_and_special_cases() -> None:
     assert "igual a la base" not in both
 
 
+def test_without_cvss_the_justification_states_the_estimated_severity() -> None:
+    """Rehearsal 2, P2-D: 1,458 kernel findings from CVE.org (63 %) had no CVSS and their text did not say it."""
+    unrated = build_justification(full(cvss_score=None, severity_s=Decimal("0.8000"), in_kev=False, news=()), NOW)
+    assert unrated.startswith(
+        "**Base 74 → Final 86 · impulsada por api-prod.** Sin CVSS publicado: severidad estimada 8.0 (valor "
+        "conservador, `unrated`) · activo crítico expuesto"
+    )
+    estimated = full(cvss_score=None, severity_s=Decimal("0.6450"), severity_estimated=True)
+    assert "Sin CVSS publicado: severidad estimada 6.5 con el vector que infirió el Analista de CVE · en KEV" in (
+        build_justification(estimated, NOW)
+    )
+    # a published CVSS wins; without the engine's S (older callers) nothing is claimed
+    assert "Sin CVSS" not in build_justification(full(severity_s=Decimal("0.8")), NOW)
+    assert "Sin CVSS" not in build_justification(full(cvss_score=None), NOW)
+
+
 def test_external_names_cannot_break_the_layout() -> None:
     hostile = full(driving_ci="x**\n# inyección" + "y" * 200, news=(NewsEvidence("fuente\nfalsa", NOW),))
     text = build_justification(hostile, NOW)

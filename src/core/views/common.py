@@ -12,6 +12,7 @@ import uuid
 from collections.abc import Iterable, Sequence
 from dataclasses import dataclass
 from datetime import UTC, datetime
+from decimal import Decimal
 from typing import Final
 from urllib.parse import quote
 
@@ -53,7 +54,7 @@ WITH pair AS (
 ), latest AS (
   SELECT DISTINCT ON (a.finding_group_id, s.asset_id)
          a.finding_group_id AS group_id, s.asset_id, s.assessment_id, s.final, s.base, s.ci_adjustment,
-         a.judge_adjustment, s.snap_confidentiality
+         a.judge_adjustment, s.snap_confidentiality, a.raw_cvss_score
     FROM asset_score s
     JOIN assessment a ON a.id = s.assessment_id
     JOIN pair p ON p.group_id = a.finding_group_id AND p.asset_id = s.asset_id
@@ -61,6 +62,7 @@ WITH pair AS (
 )
 SELECT p.group_id, p.asset_id, p.finding_id, p.match_source, p.match_sources, p.status, p.last_seen,
        l.assessment_id, l.final, l.base, l.ci_adjustment, l.judge_adjustment, d.level, l.snap_confidentiality,
+       l.raw_cvss_score AS cvss,
        g.cve_id AS cve, sp.itop_name AS product, c.description,
        EXISTS (SELECT 1 FROM kev_entry k WHERE k.cve_id = g.cve_id) AS in_kev,
        ast.itop_ci_id AS ci_id, ast.itop_class, ast.name AS asset_name, ast.criticality,
@@ -99,6 +101,7 @@ class ScoredFinding:
     judge_adjustment: int
     level: str
     snap_confidentiality: str
+    cvss: Decimal | None  # the CVSS the assessment used (NVD, else the CNA's: D-104); None = unrated (docs/06 §S)
     cve: str
     product: str
     description: str | None
