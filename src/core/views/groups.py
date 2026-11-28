@@ -89,7 +89,7 @@ class Group:
     status: str
     last_seen: datetime
     description: str | None
-    match_sources: tuple[str, ...] = ()  # of the CIs that speak for it, most certain first (ESC-09)
+    match_sources: tuple[str, ...] = ()  # of the current instances of its speaking CIs, most certain first (ESC-09)
 
 
 @dataclass(frozen=True)
@@ -194,7 +194,7 @@ def _group(rows: Sequence[ScoredFinding]) -> Group:
         status=most_pressing([r.status for r in rows]),
         last_seen=max(r.last_seen for r in rows),
         description=first.description,
-        match_sources=match_sources(r.match_source for r in voice),
+        match_sources=match_sources(source for r in voice for source in r.match_sources),
     )
 
 
@@ -341,7 +341,7 @@ def asset_detail(session: Session, itop_ci_id: str, itop_base_url: str | None = 
                 level=row.level,
                 status=row.status,
                 last_seen=row.last_seen,
-                match_sources=(row.match_source,),
+                match_sources=match_sources(row.match_sources),
             )
         )
     findings.sort(key=lambda g: (-g.final, g.cve, str(g.group_id)))

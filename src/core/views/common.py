@@ -38,6 +38,8 @@ WITH pair AS (
              ARRAY['reopened','new','persistent','no_data','fixed']::text[], fc.status), f.id))[1] AS finding_id,
          (array_agg(f.match_source ORDER BY array_position(
              ARRAY['reopened','new','persistent','no_data','fixed']::text[], fc.status), f.id))[1] AS match_source,
+         COALESCE(array_agg(DISTINCT f.match_source) FILTER (WHERE fc.status <> 'fixed'),
+                  array_agg(DISTINCT f.match_source)) AS match_sources,
          (ARRAY['reopened','new','persistent','no_data','fixed']::text[])[min(array_position(
              ARRAY['reopened','new','persistent','no_data','fixed']::text[], fc.status))] AS status,
          max(fc.status_changed_at) AS last_seen
@@ -57,7 +59,7 @@ WITH pair AS (
     JOIN pair p ON p.group_id = a.finding_group_id AND p.asset_id = s.asset_id
    ORDER BY a.finding_group_id, s.asset_id, a.assessed_at DESC, a.id DESC
 )
-SELECT p.group_id, p.asset_id, p.finding_id, p.match_source, p.status, p.last_seen,
+SELECT p.group_id, p.asset_id, p.finding_id, p.match_source, p.match_sources, p.status, p.last_seen,
        l.assessment_id, l.final, l.base, l.ci_adjustment, l.judge_adjustment, d.level, l.snap_confidentiality,
        g.cve_id AS cve, sp.itop_name AS product, c.description,
        EXISTS (SELECT 1 FROM kev_entry k WHERE k.cve_id = g.cve_id) AS in_kev,
@@ -86,6 +88,8 @@ class ScoredFinding:
     asset_id: uuid.UUID
     finding_id: uuid.UUID
     match_source: str  # of `finding_id`, the CI's most pressing instance: nvd_cpe | kev | cna_affected
+    # of every current instance of the CI (every instance when all are fixed), so no current match is lost (ESC-15)
+    match_sources: list[str]
     status: str
     last_seen: datetime
     assessment_id: uuid.UUID
@@ -118,7 +122,10 @@ def scored_findings(
     session: Session, *, group_id: uuid.UUID | None = None, asset_id: uuid.UUID | None = None
 ) -> list[ScoredFinding]:
     rows = session.execute(_SCORED, {"group_id": group_id, "asset_id": asset_id}).mappings().all()
-    return [ScoredFinding(**{**row, "tickets": list(row["tickets"])}) for row in rows]
+    return [
+        ScoredFinding(**{**row, "tickets": list(row["tickets"]), "match_sources": list(row["match_sources"])})
+        for row in rows
+    ]
 
 
 def speaking(rows: Sequence[ScoredFinding]) -> list[ScoredFinding]:

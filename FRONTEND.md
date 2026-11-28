@@ -258,10 +258,12 @@ Todo error responde con:
   CVE.org); y `certainty`, la certeza de esa coincidencia como texto decimal: `1.0` para `nvd_cpe` y `kev`, `0.9`
   para `cna_affected`. Si el CI tiene varias instalaciones del producto, es la de la instalación con el estado más
   urgente (la misma de `finding_id` y `finding_status`). En una recomendación (`asset`) los dos llegan nulos. Cada
-  grupo (lista, bandas y detalle) trae `match_sources`: las fuentes distintas de los activos que hablan por él (los
-  vigentes, o todos si el grupo ya está corregido), de la más a la menos segura, para un resumen como «Fuentes: NVD,
-  CVE.org»; en `GET /api/assets/{ci_id}` cada hallazgo trae solo la fuente de ese CI. Un hallazgo `cna_affected`
-  entra a un ticket solo desde nivel medio (D-103).
+  grupo (lista, bandas y detalle) trae `match_sources`: las fuentes distintas de todas las instalaciones vigentes
+  de los activos que hablan por él (los vigentes, o todos si el grupo ya está corregido), de la más a la menos
+  segura, para un resumen como «Fuentes: NVD, CVE.org»; por eso puede nombrar una fuente que ningún activo muestra
+  en `match_source` (un CI con dos instalaciones vigentes detectadas distinto). En `GET /api/assets/{ci_id}` cada
+  hallazgo trae solo las fuentes de ese CI. Un hallazgo `cna_affected` entra a un ticket solo desde nivel medio
+  (D-103).
 - **Niveles por nombre:** la comparación muestra el nivel CVSS (Crítica/Alta/Media/Baja) contra la urgencia
   final por su nombre, cada uno con su escala; no compares números entre escalas.
 - **Cascada del Δ:** `GET /api/assessments/{id}/breakdown` devuelve las barras (factores, juez, piso, límites,

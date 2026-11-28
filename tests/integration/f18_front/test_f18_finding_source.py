@@ -1,9 +1,10 @@
 """F18.9: how each finding was matched (ESC-09) and its certainty, over the F18.1 scenario.
 
-Changed here: CI-1's G1 finding came from KEV through the CNA's ranges (`kev`), and CI-1 gets a second OpenSSL
-installation whose G2 finding came from CVE.org only (`cna_affected`) and reopened, so it is that CI's most pressing
-instance of G2 while its first instance (`nvd_cpe`, new) stays. Everything else stays `nvd_cpe`; CI-2's G1 finding is
-fixed, so it does not speak for G1.
+Changed here: CI-1's G1 finding came from KEV through the CNA's ranges (`kev`) and CI-3's G2 finding from CVE.org only
+(`cna_affected`). CI-1 gets a second OpenSSL installation with two findings: G2 from CVE.org, reopened, so it is that
+CI's most pressing instance of G2 while its first instance (`nvd_cpe`, new) stays current; and G1 from NVD, fixed, so it
+adds no source while CI-1's G1 finding is current. Everything else stays `nvd_cpe`; CI-2's G1 finding is fixed, so it
+does not speak for G1.
 """
 
 from __future__ import annotations
@@ -29,6 +30,7 @@ def sourced(database: tuple[str, Engine], front: Front) -> Front:
     sc = front.scenario
     with Session(database[1]) as session, session.begin():
         session.get_one(m.Finding, sc.findings[("G1", "CI-1")]).match_source = "kev"
+        session.get_one(m.Finding, sc.findings[("G2", "CI-3")]).match_source = "cna_affected"
         openssl = session.scalars(select(m.SoftwareProduct.id).where(m.SoftwareProduct.itop_name == "OpenSSL")).one()
         second = m.InstalledSoftware(
             itop_instance_id="SI-1B",
@@ -53,6 +55,16 @@ def sourced(database: tuple[str, Engine], front: Front) -> Front:
             )
         )
         sc.findings[("G2", "CI-1b")] = reopened.id
+        fixed = m.Finding(
+            finding_group_id=sc.groups["G1"], installed_software_id=second.id, match_source="nvd_cpe", created_at=T0
+        )
+        session.add(fixed)
+        session.flush()
+        session.add(
+            m.FindingStatusChange(
+                finding_id=fixed.id, run_id=sc.run_id, status="fixed", observed_version="1.1.1", changed_at=T0
+            )
+        )
     return front
 
 
@@ -75,14 +87,16 @@ def test_each_affected_asset_says_how_its_finding_was_matched(get: Get, sourced:
         "finding_id": str(sc.findings[("G2", "CI-1b")]),
         "finding_status": "reopened",
     }
-    assert (g2["CI-3"]["match_source"], g2["CI-3"]["certainty"]) == ("nvd_cpe", "1.0")
+    assert (g2["CI-3"]["match_source"], g2["CI-3"]["certainty"]) == ("cna_affected", "0.9")
 
 
 def test_a_group_lists_the_sources_of_the_cis_that_speak_for_it(get: Get, sourced: Front) -> None:
     groups = _by_cve(get("/api/vulnerabilities")["groups"])
     assert groups == {
-        "CVE-2026-10001": ["kev"],  # CI-2 (nvd_cpe) is fixed: only CI-1 speaks
-        "CVE-2026-10002": ["nvd_cpe", "cna_affected"],  # most certain first
+        # CI-2 (nvd_cpe) is fixed, and so is CI-1's second instance (nvd_cpe): only CI-1's kev finding speaks
+        "CVE-2026-10001": ["kev"],
+        # both CIs show cna_affected, but CI-1's first instance (nvd_cpe, new) is current too; most certain first
+        "CVE-2026-10002": ["nvd_cpe", "cna_affected"],
         "CVE-2026-10003": ["nvd_cpe"],  # every finding fixed: they all speak
     }
     bands = get("/api/vulnerabilities", view="criticality")["bands"]
@@ -91,6 +105,9 @@ def test_a_group_lists_the_sources_of_the_cis_that_speak_for_it(get: Get, source
     assert detail["match_sources"] == ["nvd_cpe", "cna_affected"]
 
 
-def test_the_asset_detail_gives_each_finding_the_source_of_that_ci(get: Get, sourced: Front) -> None:
-    findings = _by_cve(get("/api/assets/CI-1")["findings"])
-    assert findings == {"CVE-2026-10001": ["kev"], "CVE-2026-10002": ["cna_affected"]}  # the group says two sources
+def test_the_asset_detail_gives_each_finding_the_sources_of_that_ci(get: Get, sourced: Front) -> None:
+    assert _by_cve(get("/api/assets/CI-1")["findings"]) == {
+        "CVE-2026-10001": ["kev"],  # its fixed second instance adds nothing
+        "CVE-2026-10002": ["nvd_cpe", "cna_affected"],  # both current instances
+    }
+    assert _by_cve(get("/api/assets/CI-3")["findings"]) == {"CVE-2026-10002": ["cna_affected"]}  # the group says two
