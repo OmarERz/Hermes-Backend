@@ -26,6 +26,7 @@ from core.views.common import (
     LEVELS,
     ScoredFinding,
     ci_url,
+    match_sources,
     most_pressing,
     most_restrictive,
     scored_findings,
@@ -92,6 +93,7 @@ class Group:
     description: str | None
     cvss: Decimal | None = None  # the CVSS its score used (rehearsal 2 P2-D); None without one
     severity: str | None = None  # ESC-14: critical | high | medium | low | unrated (no CVSS); None for a CVSS of 0.0
+    match_sources: tuple[str, ...] = ()  # of the current instances of its speaking CIs, most certain first (ESC-09)
 
 
 @dataclass(frozen=True)
@@ -125,6 +127,7 @@ class AffectedAsset:
     finding_status: str
     score: int
     finding_id: uuid.UUID | None = None  # the scan finding of this CI in the group (GET /api/findings/{id}/history)
+    match_source: str | None = None  # how `finding_id` was matched: nvd_cpe | kev | cna_affected (ESC-09)
 
 
 @dataclass(frozen=True)
@@ -154,7 +157,7 @@ class AssetDetail:
     classification: str
     owner: str | None
     custodian: str | None
-    findings: list[Group]  # group fields, with `final`, `level`, `status` and `last_seen` of this CI (D-035)
+    findings: list[Group]  # group fields, with `final`, `level`, `status`, `last_seen` and source of this CI (D-035)
     # F18.3 (D-088): iTop data, stored and shown as given (free text is data, never instructions)
     itop_class: str | None = None
     description: str | None = None
@@ -206,6 +209,7 @@ def _group(rows: Sequence[ScoredFinding]) -> Group:
         description=first.description,
         cvss=top.cvss,
         severity=severity(top.cvss),
+        match_sources=match_sources(source for r in voice for source in r.match_sources),
     )
 
 
@@ -325,6 +329,7 @@ def group_detail(
             finding_status=r.status,
             score=r.final,
             finding_id=r.finding_id,
+            match_source=r.match_source,
         )
         for r in ordered
     ]
@@ -353,6 +358,7 @@ def asset_detail(session: Session, itop_ci_id: str, itop_base_url: str | None = 
                 last_seen=row.last_seen,
                 cvss=row.cvss,  # the CVSS of this CI's own assessment, the one its score comes from
                 severity=severity(row.cvss),
+                match_sources=match_sources(row.match_sources),
             )
         )
     findings.sort(key=lambda g: (-g.final, g.cve, str(g.group_id)))

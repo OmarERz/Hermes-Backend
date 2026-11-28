@@ -47,6 +47,7 @@ def test_vulnerability_view_orders_groups_by_their_current_final(get: Get, scena
         "last_seen": "-",
         "cvss": "9.8",
         "severity": "critical",
+        "match_sources": ["nvd_cpe"],
     }
     assert g1["last_seen"] == "2026-11-22T12:00:00Z"
     assert (g2["final"], g2["level"], g2["ci_count"], g2["in_kev"]) == (75, "high", 2, False)
@@ -171,6 +172,8 @@ def test_group_detail_lists_each_scored_ci_with_its_snapshot(get: Get, scenario:
         "finding_status": "new",
         "score": 90,
         "finding_id": str(scenario.findings[("G1", "CI-1")]),
+        "match_source": "nvd_cpe",
+        "certainty": "1.0",
     }
     assert (ci2["ci_id"], ci2["finding_status"], ci2["score"]) == ("CI-2", "fixed", 62)
     assert ci2["finding_id"] == str(scenario.findings[("G1", "CI-2")])

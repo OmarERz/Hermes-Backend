@@ -9,7 +9,7 @@ pressing of its instances. Findings the engine has not scored yet are not shown.
 from __future__ import annotations
 
 import uuid
-from collections.abc import Sequence
+from collections.abc import Iterable, Sequence
 from dataclasses import dataclass
 from datetime import UTC, datetime
 from decimal import Decimal
@@ -24,6 +24,9 @@ STATUS_ORDER: Final = ("reopened", "new", "persistent", "no_data", "fixed")
 # Most restrictive first (FRO-13). Unclassified sits above public: it is scored like classified (D-034).
 CLASSIFICATION_ORDER: Final = ("highly_classified", "classified", "unclassified", "public")
 LEVELS: Final = ("critical", "high", "medium", "low")
+# How a finding was matched (ESC-09) and its certainty, most certain first (the scan's preference, F15.9): an NVD range,
+# a CISA KEV entry matched by the CNA's ranges, or the CNA's ranges alone (CVE.org). Decimal text, as the API sends it.
+MATCH_CERTAINTY: Final = {"nvd_cpe": "1.0", "kev": "1.0", "cna_affected": "0.9"}
 _ITOP_CI_PAGE: Final = "/pages/UI.php?operation=details&class="
 
 # One row per scored finding, with what every view needs of its group, CI, owner and custodian.
@@ -34,6 +37,10 @@ WITH pair AS (
   SELECT f.finding_group_id AS group_id, i.asset_id,
          (array_agg(f.id ORDER BY array_position(
              ARRAY['reopened','new','persistent','no_data','fixed']::text[], fc.status), f.id))[1] AS finding_id,
+         (array_agg(f.match_source ORDER BY array_position(
+             ARRAY['reopened','new','persistent','no_data','fixed']::text[], fc.status), f.id))[1] AS match_source,
+         COALESCE(array_agg(DISTINCT f.match_source) FILTER (WHERE fc.status <> 'fixed'),
+                  array_agg(DISTINCT f.match_source)) AS match_sources,
          (ARRAY['reopened','new','persistent','no_data','fixed']::text[])[min(array_position(
              ARRAY['reopened','new','persistent','no_data','fixed']::text[], fc.status))] AS status,
          max(fc.status_changed_at) AS last_seen
@@ -53,7 +60,7 @@ WITH pair AS (
     JOIN pair p ON p.group_id = a.finding_group_id AND p.asset_id = s.asset_id
    ORDER BY a.finding_group_id, s.asset_id, a.assessed_at DESC, a.id DESC
 )
-SELECT p.group_id, p.asset_id, p.finding_id, p.status, p.last_seen,
+SELECT p.group_id, p.asset_id, p.finding_id, p.match_source, p.match_sources, p.status, p.last_seen,
        l.assessment_id, l.final, l.base, l.ci_adjustment, l.judge_adjustment, d.level, l.snap_confidentiality,
        l.raw_cvss_score AS cvss,
        g.cve_id AS cve, sp.itop_name AS product, c.description,
@@ -82,6 +89,9 @@ class ScoredFinding:
     group_id: uuid.UUID
     asset_id: uuid.UUID
     finding_id: uuid.UUID
+    match_source: str  # of `finding_id`, the CI's most pressing instance: nvd_cpe | kev | cna_affected
+    # of every current instance of the CI (every instance when all are fixed), so no current match is lost (ESC-15)
+    match_sources: list[str]
     status: str
     last_seen: datetime
     assessment_id: uuid.UUID
@@ -115,7 +125,10 @@ def scored_findings(
     session: Session, *, group_id: uuid.UUID | None = None, asset_id: uuid.UUID | None = None
 ) -> list[ScoredFinding]:
     rows = session.execute(_SCORED, {"group_id": group_id, "asset_id": asset_id}).mappings().all()
-    return [ScoredFinding(**{**row, "tickets": list(row["tickets"])}) for row in rows]
+    return [
+        ScoredFinding(**{**row, "tickets": list(row["tickets"]), "match_sources": list(row["match_sources"])})
+        for row in rows
+    ]
 
 
 def speaking(rows: Sequence[ScoredFinding]) -> list[ScoredFinding]:
@@ -141,6 +154,12 @@ def ci_url(itop_base_url: str | None, itop_class: str, itop_ci_id: str) -> str:
     if not itop_base_url:
         return ""
     return f"{itop_base_url.rstrip('/')}{_ITOP_CI_PAGE}{quote(itop_class, safe='')}&id={quote(itop_ci_id, safe='')}"
+
+
+def match_sources(sources: Iterable[str]) -> tuple[str, ...]:
+    """The distinct match sources among `sources`, most certain first."""
+    found = set(sources)
+    return tuple(source for source in MATCH_CERTAINTY if source in found)
 
 
 def most_pressing(statuses: Sequence[str]) -> str:

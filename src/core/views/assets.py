@@ -358,6 +358,8 @@ class InstalledItem:
     status: str | None = None  # active | inactive; only shown, an inactive installation is still scanned
     description: str | None = None
     licence: Licence | None = None
+    cna_vendor: str | None = None  # the CNA names of the product's mapping (F18.9)
+    cna_product: str | None = None
 
 
 def asset_software(session: Session, ci_id: str) -> list[InstalledItem] | None:
@@ -389,6 +391,8 @@ def asset_software(session: Session, ci_id: str) -> list[InstalledItem] | None:
                 status=row.status,
                 description=row.description,
                 licence=_licence(row),
+                cna_vendor=row.cna_vendor,
+                cna_product=row.cna_product,
             )
         )
     return sorted(out, key=lambda i: (i.name.casefold(), i.version, str(i.software_id)))

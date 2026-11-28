@@ -29,6 +29,7 @@ from api.routes.models import (
     AssetRisk,
     AssetSoftware,
     Breakdown,
+    Certainty,
     Classification,
     ComparisonRow,
     ComparisonSummary,
@@ -40,6 +41,7 @@ from api.routes.models import (
     JudgeDetail,
     JudgeReasonItem,
     Level,
+    MatchSource,
     Recommendation,
     RecommendationFilters,
     ReviewStatus,
@@ -65,7 +67,7 @@ from core.views import comparison, history, judge_detail, ticket_log
 from core.views import groups as views
 from core.views import recommendations as recs
 from core.views import tickets_alerts as ta
-from core.views.common import iso, parse_uuid
+from core.views.common import MATCH_CERTAINTY, iso, parse_uuid
 from notifications_api import FeedbackInput, FeedbackResult
 
 logger = logging.getLogger(__name__)
@@ -120,6 +122,7 @@ def _group_model(g: views.Group) -> VulnerabilityGroup:
         last_seen=iso(g.last_seen),
         cvss=str(g.cvss) if g.cvss is not None else None,
         severity=cast(Severity | None, g.severity),
+        match_sources=[cast(MatchSource, source) for source in g.match_sources],
     )
 
 
@@ -204,6 +207,8 @@ def vulnerability_detail(group_id: UuidId, session: SessionDep, itop_url: ItopUr
                 finding_status=cast(FindingStatus, a.finding_status),
                 score=a.score,
                 finding_id=str(a.finding_id) if a.finding_id else None,
+                match_source=cast(MatchSource | None, a.match_source),
+                certainty=None if a.match_source is None else cast(Certainty, MATCH_CERTAINTY[a.match_source]),
             )
             for a in assets
         ],
