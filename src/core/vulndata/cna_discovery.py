@@ -173,20 +173,22 @@ def refresh_cve_org(
     """Load the CVE.org records of the candidates (see the module notes); `held` is each CVE's `last_modified_at`
     as it was before this refresh wrote anything. Whatever happens, a record due again that was not stored gets its
     previous date back."""
-    with factory() as session:
-        watch = load_watch(session)
-        stored = set(
-            session.scalars(select(m.CveAffectedRange.cve_id).where(m.CveAffectedRange.source == CNA_AFFECTED))
-        )
-        hits = _mapped_hits(session, watch) if watch.pairs else set()
-    loader = _Loader(factory, client, watch, MAX_REQUESTS if limit is None else limit)
     seen = _unique(observed.sightings)
+    stored: set[str] | None = None
+    loader: _Loader | None = None
     try:
+        with factory() as session:
+            watch = load_watch(session)
+            stored = set(
+                session.scalars(select(m.CveAffectedRange.cve_id).where(m.CveAffectedRange.source == CNA_AFFECTED))
+            )
+            hits = _mapped_hits(session, watch) if watch.pairs else set()
+        loader = _Loader(factory, client, watch, MAX_REQUESTS if limit is None else limit)
         if watch.pairs:
             _load_candidates(loader, seen, observed.sources, hits, lambda s: _cached(s, stored, held))
         loader.result.cleared = clear_rejected(factory, (observed.rejected | loader.rejected_ids) & stored)
     finally:
-        restore_due(factory, seen, stored, held, done=loader.stored_ids)
+        restore_due(factory, seen, stored, held, done=loader.stored_ids if loader is not None else ())
     result = loader.result
     log.info(
         "CVE.org: %d candidates, %d requests, %d stored, %d unchanged, %d missing, %d rejected cleared, %d product "

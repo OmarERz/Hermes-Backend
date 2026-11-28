@@ -37,7 +37,8 @@ _RANGES = text(
     "FROM finding_group g JOIN cpe_mapping c ON c.software_product_id = g.software_product_id "
     "JOIN cve_affected_range r ON r.cve_id = g.cve_id "
     "AND ((r.source = 'nvd_cpe' AND r.vendor = c.nvd_vendor AND r.product = c.nvd_product) "
-    "OR (r.source = 'cna_affected' AND r.vendor = c.cna_vendor AND r.product = c.cna_product)) "
+    "OR (r.source = 'cna_affected' AND lower(r.vendor) = lower(c.cna_vendor) "
+    "AND lower(r.product) = lower(c.cna_product))) "
     "WHERE g.id = :group_id"
 )
 

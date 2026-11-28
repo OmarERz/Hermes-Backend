@@ -326,7 +326,8 @@ def build_finding_package(
             "product": product or "",
             "cpe": ":".join(group.vendor_products[0]) if group.vendor_products else None,
             # F15.9 (D-103, #206): the CNA's own names, so JUE-MIT-10 also checks the ranges it publishes under them.
-            # Not in the fingerprint: it only feeds the code's checks, and adding it would re-review every group.
+            # Not in the fingerprint, so mapping CNA names re-reviews no group; the judge's view shows it, but it only
+            # names a product the CPE already names (a stored review stays valid for it).
             "cna": {"vendor": group.cna[0], "product": group.cna[1]} if group.cna else None,
             "cis": _cis_block(session, group, scored),
         },

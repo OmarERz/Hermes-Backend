@@ -206,9 +206,13 @@ _LOWER_TAIL = re.compile(
     rf"{_CLOSER}\s*,?\s*(?:o|u|or|y|and)\s+(?:anterior|inferior|previa|menor|earlier|lower|older|below|prior)",
     re.IGNORECASE,
 )
+# a floor, also one that names the noun («3.0.23 o una versión posterior», «3.0.23 or a later version», F15.9)
 _FLOOR_TAIL = re.compile(
     rf"{_CLOSER}\s*,?\s*(?:(?:o|u|or|y|and)\s+(?:una\s+|a\s+|any\s+)?(?:(?:posterior|superior|mayor)(?:es)?"
-    r"|m[aá]s\s+recientes?|later|higher|newer|above|greater)\b|en\s+adelante|onwards?)",
+    r"|m[aá]s\s+recientes?|later|higher|newer|above|greater)\b|en\s+adelante|onwards?"
+    r"|(?:o|u|or)\s+(?:una\s+|a\s+|any\s+)?(?:versi[oó]n(?:es)?|versions?|releases?)\s+"
+    r"(?:(?:posterior|superior|mayor)(?:es)?|m[aá]s\s+recientes?)\b"
+    r"|(?:o|or)\s+(?:una\s+|a\s+|any\s+)?(?:later|higher|newer)\s+(?:versions?|releases?)\b)",
     re.IGNORECASE,
 )
 # a floor of affected versions: it is the subject of 'están afectadas' / 'are affected' right after it ('3.0.0 o
@@ -381,10 +385,16 @@ def _step(raw: Mapping[str, Any], package: ReviewPackage, ranges: Sequence[Affec
     return MitigationStep(
         order=int(raw["order"]),
         ci_id=ci_id or None,
-        action=f"{action} {warning}" if warning else action,
+        action=_with_warning(action, warning),
         element_id=element.element_id,
         quote=quote,
     )
+
+
+def _with_warning(action: str, warning: str | None) -> str:
+    if not warning:
+        return action
+    return f"{action} {warning}" if action.endswith((".", "!", "?", ";", ":")) else f"{action}. {warning}"
 
 
 MAX_WARNED_RANGES = 8
@@ -394,10 +404,13 @@ WARNING_LEAD = "Advertencia de Hermes: versiones posteriores también afectadas:
 def later_versions_warning(floors: Sequence[str], ranges: Sequence[AffectedRange]) -> str | None:
     """D-106: the affected ranges of the product that lie after a recommended floor («1.5 o posterior» with [2.0,)),
     in Spanish and taken from the data; None when there are none. Only ranges known to hold a later version count."""
-    later = {r for version in floors for r in ranges if _after(version, r)}
+    later: dict[tuple[str | None, bool, str | None, bool], AffectedRange] = {}
+    for affected in sorted((r for version in floors for r in ranges if _after(version, r)), key=_start_key):
+        # NVD and the CNA can publish the same interval under their own names: it is said once
+        later.setdefault((affected.start, affected.start_inclusive, affected.end, affected.end_inclusive), affected)
     if not later:
         return None
-    ordered = sorted(later, key=_start_key)
+    ordered = list(later.values())
     shown = "; ".join(_describe(r) for r in ordered[:MAX_WARNED_RANGES])
     more = len(ordered) - MAX_WARNED_RANGES
     return f"{WARNING_LEAD}{shown}{f'; y {more} más' if more > 0 else ''}."
@@ -427,18 +440,16 @@ def _bound(text: str) -> str:
 def _describe(affected: AffectedRange) -> str:
     """`[3.2.0,3.2.6)` → «de 3.2.0 a antes de 3.2.6»; `[2.0,)` → «desde 2.0»; `(6.1.*,6.6.162)` → «después de la línea
     6.1 y antes de 6.6.162»."""
-    start, end = affected.start, affected.end
-    if start is None:
-        head = ""
-    elif affected.start_inclusive:
+    start, end = str(affected.start), affected.end  # a later range always has a start (`_after`)
+    if affected.start_inclusive:
         head = f"desde {_bound(start)}" if end is None else f"de {_bound(start)}"
     else:
         head = f"después de {_bound(start)}"
     if end is None:
-        return head or "todas las versiones"
+        return head
+    if affected.start_inclusive and affected.end_inclusive:
+        return f"{head} a {_bound(end)}"  # «de 128 a 130»
     tail = f"hasta {_bound(end)}" if affected.end_inclusive else f"antes de {_bound(end)}"
-    if not head:
-        return tail
     joiner = " a " if affected.start_inclusive else " y "
     return f"{head}{joiner}{tail}"
 

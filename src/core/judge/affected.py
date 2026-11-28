@@ -86,14 +86,15 @@ def cna_key(cna: object) -> str | None:
 def product_ranges(package: ReviewPackage) -> tuple[AffectedRange, ...]:
     """The affected ranges of the group's product, as the package carries them; none without a group or a pair."""
     group, cve = package.content["group"], package.cve_data
-    keys = {product_key(group.get("cpe")), cna_key(group.get("cna"))} - {None} if group else set()
+    found_keys = {product_key(group.get("cpe")), cna_key(group.get("cna"))} if group else set()
+    keys = {key for key in found_keys if key is not None}
     if not keys or cve is None:
         return ()
     found = (_read(str(text), keys) for text in cve["affected_ranges"])
     return tuple(affected for affected in found if affected is not None)
 
 
-def _read(text: str, keys: set[str | None]) -> AffectedRange | None:
+def _read(text: str, keys: set[str]) -> AffectedRange | None:
     """The range a string gives for the product, or None when it is a range of another product or of none."""
     for split in _SPLIT.finditer(text):
         vendor, colon, product = text[: split.start()].partition(":")

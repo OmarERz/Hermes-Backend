@@ -173,3 +173,11 @@ def test_dictionary_search_follows_pages_until_the_total() -> None:
     client = CpeDictionaryClient(JsonSource(http=httpx.Client(transport=httpx.MockTransport(handler))))
     assert [(c.vendor, c.product) for c in client.search("nginx")] == [("f5", "nginx"), ("nginx", "nginx")]
     assert seen == ["0", "2"]
+
+
+def test_mapping_errors_name_the_part_of_the_request_at_fault() -> None:
+    with pytest.raises(MappingError) as cna:
+        validate(MappingInput(None, None, "a" * 201, "b"))
+    with pytest.raises(MappingError) as nvd:
+        validate(MappingInput("linux", "linux_kernel"))
+    assert (cna.value.field, nvd.value.field) == ("cna", "cpe")

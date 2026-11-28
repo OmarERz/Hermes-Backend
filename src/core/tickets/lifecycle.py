@@ -261,6 +261,7 @@ class _Pass:
     # --- links ---------------------------------------------------------------------------------------------
     def relink(self, findings: list[_Finding]) -> None:
         self.findings = {f.finding_id: f for f in findings}
+        moved: set[uuid.UUID] = set()
         by_id = {ticket.id: ticket for ticket in self.tickets.values()}
         links = {
             link.finding_id: link
@@ -280,6 +281,7 @@ class _Pass:
                 self.plan(ticket).decommissioned.append(finding)
                 del links[finding.finding_id]
             elif finding.current and finding.team_id is not None and finding.team_id != ticket.custodian_team_id:
+                moved.add(finding.finding_id)  # already in a ticket: it follows its CI whatever its level (D-006)
                 link.removed_at, link.removal_reason = self.now, "moved"
                 new_team = self.session.get_one(m.Team, finding.team_id)
                 self.plan(ticket).moved_out.append((finding, new_team.name))
@@ -288,7 +290,7 @@ class _Pass:
         for finding in findings:
             if not finding.current or finding.finding_id in links or finding.team_id is None:
                 continue
-            if not finding.ticket_eligible:
+            if not finding.ticket_eligible and finding.finding_id not in moved:
                 continue  # D-103: CVE.org only and below medium: no ticket yet (a linked one stays, D-006)
             target = self.tickets.get(finding.team_id)
             if target is None:

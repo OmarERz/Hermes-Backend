@@ -153,10 +153,8 @@ def put_mapping(software: UuidId, mapping: MappingInput, session: SessionDep, us
     try:
         saved = set_mapping(session, product_id, data, mapped_by=app_user)
     except MappingError as error:
-        field = "body.cna" if "CNA" in str(error) else "body.cpe"
-        raise ApiError(
-            422, "validation_error", str(error), [ErrorDetail(field=field, issue="invalid_mapping")]
-        ) from None
+        detail = ErrorDetail(field=f"body.{error.field}", issue="invalid_mapping")
+        raise ApiError(422, "validation_error", str(error), [detail]) from None
     except LookupError:
         raise ApiError(404, "not_found", "El software no existe.") from None
     session.add(

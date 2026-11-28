@@ -674,3 +674,48 @@ def test_a_linked_cve_org_finding_stays_when_its_score_falls(session: Session) -
         )
     ).all()
     assert linked == [sc.findings["rds-pagos"].id]
+
+
+def test_a_low_cve_org_finding_does_not_join_its_teams_existing_ticket(session: Session) -> None:
+    """D-103: below medium it neither opens nor joins a ticket, even one an NVD finding of the group already has."""
+    sc = Scenario(session)
+    team = sc.team("Plataforma")
+    sc.ci("node-nvd", team)
+    sc.ci("node-cna", team)
+    cve_org_only(sc, "node-cna")
+    run = sc.scan({"node-nvd": "new", "node-cna": "new"})
+    lifecycle(sc).apply(session, sc.assess({"node-nvd": 30, "node-cna": 30}, run).id)
+    (ticket,) = tickets(session, sc)
+    linked = session.scalars(select(m.TicketFinding.finding_id).where(m.TicketFinding.ticket_id == ticket.id)).all()
+    assert linked == [sc.findings["node-nvd"].id]
+
+
+def test_a_cve_org_finding_without_a_score_waits(session: Session) -> None:
+    sc = Scenario(session)
+    sc.ci("rds-pagos", sc.team("Datos"))
+    sc.ci("other", sc.team("Datos"))
+    cve_org_only(sc, "rds-pagos")
+    run = sc.scan({"rds-pagos": "new", "other": "new"})
+    report = lifecycle(sc).apply(session, sc.assess({"other": 60}, run).id)  # no asset score for rds-pagos
+    (ticket,) = tickets(session, sc)
+    assert report.created == 1
+    linked = session.scalars(select(m.TicketFinding.finding_id).where(m.TicketFinding.ticket_id == ticket.id)).all()
+    assert sc.findings["rds-pagos"].id not in linked
+
+
+def test_a_linked_low_cve_org_finding_follows_its_ci_to_another_team(session: Session) -> None:
+    """T5 review: once in a ticket it moves with its CI, whatever its level (D-006), instead of vanishing from iTop."""
+    sc = Scenario(session)
+    datos, plataforma = sc.team("Datos"), sc.team("Plataforma")
+    sc.ci("rds-pagos", datos)
+    cve_org_only(sc, "rds-pagos")
+    run = sc.scan({"rds-pagos": "new"})
+    lifecycle(sc).apply(session, sc.assess({"rds-pagos": 60}, run).id)
+    (first,) = tickets(session, sc)
+    created_in_itop(first, "902", 3)
+    sc.assets["rds-pagos"].custodian_team_id = plataforma.id
+    session.flush()
+    sc.later(days=1)
+    low = sc.scan({"rds-pagos": "persistent"})
+    lifecycle(sc).apply(session, sc.assess({"rds-pagos": 30}, low).id)
+    assert {t.custodian_team_id for t in tickets(session, sc)} == {datos.id, plataforma.id}

@@ -516,3 +516,57 @@ def test_a_later_range_with_an_unreadable_end_still_warns() -> None:
     pkg = cna_package("acme:tool", None, ["acme:tool [1.0,1.5)", "acme:tool [2.0,2.x-vendor)"], LATER)
     (action,) = accepted_actions("Actualizar a 1.5 o posterior.", "Fixed in 1.5.", pkg)
     assert action.endswith("versiones posteriores también afectadas: de 2.0 a antes de 2.x-vendor.")
+
+
+def test_the_same_interval_from_nvd_and_the_cna_is_said_once() -> None:
+    ranges = ["acme:tool [1.0,1.5)", "acme:tool [2.0,2.5)", "Acme Inc:Tool [2.0,2.5)"]
+    pkg = cna_package("acme:tool", {"vendor": "Acme Inc", "product": "Tool"}, ranges, LATER)
+    (action,) = accepted_actions("Actualizar a 1.5 o posterior.", "Fixed in 1.5.", pkg)
+    assert action.endswith("versiones posteriores también afectadas: de 2.0 a antes de 2.5.")
+
+
+@pytest.mark.parametrize(
+    "action",
+    [
+        "Actualizar a 1.5 o una versión posterior.",
+        "Actualizar a 1.5 o versiones más recientes.",
+        "Upgrade to 1.5 or a later version.",
+    ],
+)
+def test_a_floor_that_names_the_noun_also_gets_the_warning(action: str) -> None:
+    pkg = cna_package("acme:tool", None, ["acme:tool [1.0,1.5)", "acme:tool [2.0,)"], LATER)
+    (step,) = accepted_actions(action, "Fixed in 1.5.", pkg)
+    assert step.endswith("versiones posteriores también afectadas: desde 2.0.")
+
+
+def test_the_warning_shows_eight_ranges_and_counts_the_rest() -> None:
+    ranges = ["acme:tool [1.0,1.5)"] + [f"acme:tool [{n}.0,{n}.5)" for n in range(2, 12)]
+    pkg = cna_package("acme:tool", None, ranges, LATER)
+    (action,) = accepted_actions("Actualizar a 1.5 o posterior.", "Fixed in 1.5.", pkg)
+    listed = action.split("afectadas: ", 1)[1]
+    assert listed.count(";") == 8 and listed.endswith("de 9.0 a antes de 9.5; y 2 más.")
+
+
+def test_a_bare_number_floor_and_an_inclusive_end_are_read() -> None:
+    pkg = cna_package(
+        "google:chrome", None, ["google:chrome (,126)", "google:chrome [128,130]"], " Fixed in Chrome 126."
+    )
+    (action,) = accepted_actions("Instalar Chrome 126 o posterior", "Fixed in Chrome 126.", pkg)
+    assert action == (
+        "Instalar Chrome 126 o posterior. Advertencia de Hermes: versiones posteriores también afectadas: de 128 a 130."
+    )
+
+
+def test_a_verb_less_noun_floor_is_a_recommendation_too() -> None:
+    """T7 review: «ejecuten 3.0.23 o una versión posterior» is checked like «… o posterior» (JUE-MIT-10) and warned
+    about like it (D-106)."""
+    action = "Validar que los servidores ejecuten 3.0.23 o una versión posterior."
+    assert recommended(action) == ["3.0.23"]
+    inside = package("openssl:openssl", ["openssl:openssl [3.0.0,3.0.24)"], " Fixed in 3.0.23 and 3.0.24.")
+    assert check(action, "Fixed in 3.0.23 and 3.0.24.", inside) == OUTSIDE_RULE
+    later = package(
+        "openssl:openssl", ["openssl:openssl [3.0.0,3.0.23)", "openssl:openssl [3.2.0,)"], " Fixed in 3.0.23."
+    )
+    (step,) = accepted_actions(action, "Fixed in 3.0.23.", later)
+    assert step.endswith("versiones posteriores también afectadas: desde 3.2.0.")
+    assert recommended("Comprobar que los equipos ejecuten Chrome 126 o una versión más reciente.") == ["126"]

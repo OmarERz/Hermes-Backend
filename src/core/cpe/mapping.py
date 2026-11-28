@@ -26,7 +26,12 @@ FIRST_PRINTABLE: Final = 32
 
 
 class MappingError(ValueError):
-    """The mapping is invalid; the message is safe to show to the analyst (Spanish text for people)."""
+    """The mapping is invalid; the message is safe to show to the analyst (Spanish text for people). `field` names the
+    part of the request at fault (`cpe` or `cna`), so the API never reads it from the message."""
+
+    def __init__(self, message: str, field: str = "cpe") -> None:
+        super().__init__(message)
+        self.field = field
 
 
 @dataclass(frozen=True)
@@ -50,14 +55,16 @@ def _cna(value: str | None) -> str | None:
     if text is None:
         return None
     if len(text) > MAX_CNA_LENGTH or any(ord(ch) < FIRST_PRINTABLE for ch in text):
-        raise MappingError("El nombre del CNA es demasiado largo o tiene caracteres de control.")
+        raise MappingError("El nombre del CNA es demasiado largo o tiene caracteres de control.", "cna")
     return text
 
 
 def validate(data: MappingInput) -> MappingInput:
     nvd_vendor, nvd_product = _clean(data.nvd_vendor), _clean(data.nvd_product)
     cna_vendor, cna_product = _cna(data.cna_vendor), _cna(data.cna_product)
-    if (nvd_vendor is None) != (nvd_product is None) or (cna_vendor is None) != (cna_product is None):
+    if (cna_vendor is None) != (cna_product is None):
+        raise MappingError("Fabricante y producto van juntos, tanto en NVD como en el CNA.", "cna")
+    if (nvd_vendor is None) != (nvd_product is None):
         raise MappingError("Fabricante y producto van juntos, tanto en NVD como en el CNA.")
     if nvd_product is None and cna_product is None:
         raise MappingError("Se necesita al menos un par fabricante y producto (NVD o CNA).")
