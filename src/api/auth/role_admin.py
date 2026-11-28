@@ -81,16 +81,19 @@ class FirebaseRoleManager:
             logger.warning("identity provider unavailable: %s", type(exc).__name__)
             raise AuthUnavailableError from exc
         self._wait_for_next_second()
-        self._revoke(app, uid)
+        revoke_sessions(app, uid)
 
-    def _revoke(self, app: object, uid: str) -> None:
-        failure: Exception | None = None
-        for attempt in range(1, REVOKE_ATTEMPTS + 1):
-            try:
-                auth.revoke_refresh_tokens(uid, app=app)
-            except (firebase_exceptions.FirebaseError, GoogleAuthError, OSError) as exc:
-                logger.warning("session revocation failed (attempt %d): %s", attempt, type(exc).__name__)
-                failure = exc
-                continue
-            return
-        raise RevocationPendingError(uid) from failure
+
+def revoke_sessions(app: object, uid: str) -> None:
+    """Revoke the user's refresh tokens, retried up to ``REVOKE_ATTEMPTS`` times; ``RevocationPendingError`` if every
+    attempt failed (also used when an account is disabled, ``api.auth.accounts``)."""
+    failure: Exception | None = None
+    for attempt in range(1, REVOKE_ATTEMPTS + 1):
+        try:
+            auth.revoke_refresh_tokens(uid, app=app)
+        except (firebase_exceptions.FirebaseError, GoogleAuthError, OSError) as exc:
+            logger.warning("session revocation failed (attempt %d): %s", attempt, type(exc).__name__)
+            failure = exc
+            continue
+        return
+    raise RevocationPendingError(uid) from failure

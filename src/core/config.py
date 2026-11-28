@@ -117,6 +117,11 @@ class Settings(BaseSettings):
     # makes browsers require HTTPS on every subdomain of that host for a year (README §7). Off by default.
     hsts_include_subdomains: bool = False
 
+    # Password e-mails (D-105) each admin can have Firebase send per hour from this API process: a stolen admin session
+    # cannot use the project to spam addresses. The test stacks raise it (compose.ci.yaml), as Schemathesis creates
+    # many accounts before the Bruno step.
+    password_emails_per_hour: int = Field(default=20, ge=1, le=100_000)
+
     # Browser origins allowed to call the API cross-origin (the React front on another origin), comma-separated
     # exact origins such as "https://hermes-front.example.com". Empty (default) = same origin only, e.g. front and
     # API behind one reverse proxy. A wildcard is refused: the API carries bearer tokens.

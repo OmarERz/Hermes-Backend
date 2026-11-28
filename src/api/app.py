@@ -9,6 +9,7 @@ from fastapi import Depends, FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
 from api.auth import FirebaseTokenVerifier, Role, TokenVerifier, UserDirectory, require_role
+from api.auth.accounts import AccountManager, EmailQuota, FirebaseAccountManager
 from api.auth.admin_routes import build_admin_router
 from api.auth.dependencies import CurrentUser
 from api.auth.directory import SqlUserDirectory
@@ -104,6 +105,14 @@ def create_app(
         FirebaseUserLister(token_verifier) if isinstance(token_verifier, FirebaseTokenVerifier) else None
     )
     app.state.user_lister = user_lister
+    # Accounts created and switched off from the app (D-105): the same SDK app; with a fake verifier the routes answer
+    # 503 until a test sets its own manager on `app.state.account_manager`. The quota caps the password e-mails each
+    # admin can have Firebase send.
+    account_manager: AccountManager | None = (
+        FirebaseAccountManager(token_verifier) if isinstance(token_verifier, FirebaseTokenVerifier) else None
+    )
+    app.state.account_manager = account_manager
+    app.state.email_quota = EmailQuota(limit=settings.password_emails_per_hour)
     # The engine connects lazily: building the app never opens a database connection.
     session_factory = make_session_factory(settings)
     app.state.session_factory = session_factory

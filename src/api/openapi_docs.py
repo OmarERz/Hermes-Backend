@@ -63,7 +63,7 @@ TAGS: Final = (
         "Corridas y revisiones de los agentes de IA (analistas y juez): resúmenes, series diarias y bitácora. "
         "Solo metadatos; nunca prompts, llamadas crudas ni texto de noticias.",
     ),
-    ("admin", "Administración", "Gestión de roles de usuario."),
+    ("admin", "Administración", "Gestión de usuarios: altas, roles y estado de las cuentas."),
     ("itop", "iTop", "Webhook que iTop llama cuando cambia un ticket."),
 )
 
@@ -85,6 +85,36 @@ OPERATIONS: Final[dict[tuple[str, str], Op]] = {
     ),
     ("PUT", "/api/admin/users/{uid}/role"): Op(
         "assign_user_role", "admin", "Asignar rol", "Asigna un rol a un usuario y revoca sus sesiones. Solo `admin`."
+    ),
+    ("POST", "/api/admin/users"): Op(
+        "create_user",
+        "admin",
+        "Crear usuario",
+        "Crea una cuenta de Firebase **sin contraseña**, con el correo sin verificar y el rol indicado, y su copia en "
+        "Hermes (D-105). Firebase envía a la persona un correo con la plantilla de restablecimiento de contraseña y un "
+        "enlace para crearla; Hermes nunca ve ni guarda la contraseña ni el enlace. `password_email_sent` falso: la "
+        "cuenta quedó creada pero el correo no salió (reenvíalo con `POST /api/admin/users/{uid}/password-email`). "
+        "409 `email_exists` si el correo ya tiene cuenta; 422 `invalid_email` si Firebase no acepta el correo; 429 "
+        "`too_many_emails` si el admin ya pidió demasiados correos en la última hora. Auditado (`user.create`). Solo "
+        "`admin`.",
+    ),
+    ("POST", "/api/admin/users/{uid}/password-email"): Op(
+        "send_password_email",
+        "admin",
+        "Reenviar correo de contraseña",
+        "Vuelve a pedir a Firebase el correo para crear (o cambiar) la contraseña: el enlace dura una hora, o el "
+        "primer correo no salió. 404 si la cuenta no existe; 409 `user_disabled` si está desactivada y `no_email` si "
+        "no tiene correo; 429 `too_many_emails`; 503 `email_unavailable` si Firebase no lo envió. Auditado. Solo "
+        "`admin`.",
+    ),
+    ("PUT", "/api/admin/users/{uid}/status"): Op(
+        "set_user_status",
+        "admin",
+        "Desactivar o reactivar usuario",
+        "`disabled: true` desactiva la cuenta en Firebase y en Hermes y revoca sus sesiones; `false` la reactiva (sus "
+        "sesiones de antes siguen revocadas: inicia sesión de nuevo). Nadie cambia el estado de su propia cuenta (409 "
+        "`own_status`) ni desactiva al último administrador activo (409 `last_admin`). Auditado (`user.disable`, "
+        "`user.enable`). Solo `admin`.",
     ),
     ("GET", "/api/vulnerabilities"): Op(
         "list_vulnerabilities",
@@ -1000,13 +1030,14 @@ OVERRIDES: Final[dict[str, str]] = {
     "ErrorQueueItem.ticket_ref": "Referencia legible del ticket en iTop (por ejemplo `R-000123`), si la hay.",
     "ErrorQueueItem.assessment_id": "Evaluación relacionada, si la hay.",
     "ErrorQueueItem.retryable": "Si se puede reintentar desde la API (hoy, solo los eventos de notificación).",
-    "UserAccount.role": "Rol guardado en Hermes; mándalo como `expected_role` al cambiarlo. Nulo si nunca inició "
-    "sesión.",
+    "UserAccount.role": "Rol guardado en Hermes; mándalo como `expected_role` al cambiarlo. Nulo si Hermes no tiene "
+    "copia de la cuenta (nunca inició sesión ni se creó desde Hermes).",
     "UserAccount.claim_role": "Rol del claim de Firebase; nulo si no tiene uno válido.",
     "UserAccount.effective_role": "Rol que tendría ahora una petición suya: el menor entre el claim y el guardado; "
     "nulo si se rechazaría.",
     "UserAccount.active": "Si la cuenta está activa (en Hermes y en Firebase).",
-    "UserAccount.signed_in": "Si inició sesión alguna vez (tiene copia en Hermes).",
+    "UserAccount.signed_in": "Si inició sesión alguna vez en Hermes. Una cuenta creada desde Hermes tiene rol guardado "
+    "pero `signed_in` falso hasta que crea su contraseña y entra.",
     "UserAccount.last_login_at": "Último inicio de sesión (UTC), si lo hubo.",
     "SimulationResult.not_simulable": "Parámetros conocidos del cambio que la simulación no puede estimar (por "
     "ejemplo el modelo del juez); se ignoran en el resultado.",
@@ -1097,6 +1128,18 @@ OVERRIDES: Final[dict[str, str]] = {
     "FeedbackResult.feedback_id": "Id del feedback guardado.",
     "RoleAssignment.role": "Rol que se asigna.",
     "RoleAssigned.role": "Rol asignado.",
+    "UserCreation.email": "Correo de la persona: será su usuario y ahí le llega el enlace para crear su contraseña.",
+    "UserCreation.role": "Rol con el que se crea la cuenta.",
+    "UserCreated.uid": "Identificador de la cuenta nueva en Firebase.",
+    "UserCreated.email": "Correo de la cuenta, como lo guardó Firebase (en minúsculas).",
+    "UserCreated.role": "Rol de la cuenta nueva.",
+    "UserCreated.password_email_sent": "Si Firebase envió el correo para crear la contraseña; falso: la cuenta quedó "
+    "creada, reenvía el correo con `POST /api/admin/users/{uid}/password-email`.",
+    "PasswordEmailSent.uid": "Cuenta a la que se envió el correo.",
+    "PasswordEmailSent.email": "Correo al que Firebase envió el enlace.",
+    "StatusChange.disabled": "`true` desactiva la cuenta y revoca sus sesiones; `false` la reactiva.",
+    "StatusChanged.disabled": "Estado en el que quedó la cuenta (`true`: desactivada).",
+    "StatusChanged.sessions_revoked": "Si se revocaron sus sesiones (al desactivar, y antes de reactivar).",
     "WebhookAccepted.status": "Siempre `accepted`.",
     "InventoryAsset.risk": "Riesgo del CI: el mayor final de sus hallazgos abiertos; nulo sin hallazgos.",
     "InventoryAsset.level": "Nivel de su riesgo; nulo sin hallazgos.",
@@ -1340,6 +1383,8 @@ EXAMPLES: Final[dict[str, list[dict[str, Any]]]] = {
     "ConnectionTestRequest": [{"names": ["itop", "nvd"]}],
     "SetupStepUpdate": [{"done": True, "skipped": False}],
     "RoleAssignment": [{"role": "analyst"}],
+    "UserCreation": [{"email": "persona@example.com", "role": "analyst"}],
+    "StatusChange": [{"disabled": True}],
     "LlmReviewEntry": [
         {
             "id": "0192f3a8-4f50-7162-8d7e-8f9a0b1c2d3e",

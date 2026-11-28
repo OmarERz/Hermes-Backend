@@ -1,7 +1,8 @@
 """User list for the admin screen (D-088, F18.2): the ``app_user`` copy joined with the Firebase directory.
 
 Firebase is the master of accounts and roles (D-030); ``app_user`` keeps a copy of the role and owns ``active``. A
-Firebase account that never signed in has no copy yet (``signed_in`` false). The effective role follows the same rule
+Firebase account that never signed in has no copy yet, or one an admin (D-105) or the command line made before its first
+sign-in (``signed_in`` false either way). The effective role follows the same rule
 as every request (``api.auth.dependencies``): the lower of the claim and the copy, and none at all for an inactive
 user, a disabled account or a missing claim (such a token is refused). The list is read only: roles change through
 ``PUT /api/admin/users/{uid}/role``, which takes the stored role back as ``expected_role``.
@@ -153,7 +154,7 @@ def merge_users(stored: Iterable[StoredUser], directory: Iterable[DirectoryUser]
                 effective_role=effective_role(claim, copy, disabled),
                 # Active in Hermes and in Firebase (API-04): a disabled or deleted Firebase account is never active.
                 active=(copy is None or copy.active) and account is not None and not account.disabled,
-                signed_in=copy is not None,
+                signed_in=copy is not None and copy.last_login_at is not None,
                 last_login_at=copy.last_login_at if copy is not None else None,
             )
         )

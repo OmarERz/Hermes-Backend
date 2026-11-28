@@ -28,6 +28,9 @@ OWN_RULES: dict[tuple[str, str], Role | str | None] = {
     ("GET", "/api/health"): None,
     ("GET", "/api/me"): Role.READER,
     ("PUT", "/api/admin/users/{uid}/role"): Role.ADMIN,
+    ("POST", "/api/admin/users"): Role.ADMIN,
+    ("POST", "/api/admin/users/{uid}/password-email"): Role.ADMIN,
+    ("PUT", "/api/admin/users/{uid}/status"): Role.ADMIN,
     ("POST", "/api/itop/webhook"): "webhook",
 }
 SAMPLE_ID = "0196a6f0-0000-7000-8000-000000000001"
@@ -116,6 +119,23 @@ def test_role_assignment_is_admin_only(client: TestClient) -> None:
     for role in (Role.READER, Role.ANALYST):
         assert client.put(url, json={"role": "admin"}, headers=bearer(role.value)).status_code == 403
     assert client.put(url, json={}, headers=bearer(Role.ADMIN.value)).status_code == 422  # authorized, bad body
+
+
+@pytest.mark.parametrize(
+    ("method", "url", "body"),
+    [
+        ("POST", "/api/admin/users", {"email": "nueva@example.com", "role": "admin"}),
+        ("POST", "/api/admin/users/someone/password-email", None),
+        ("PUT", "/api/admin/users/someone/status", {"disabled": True}),
+    ],
+)
+def test_account_routes_are_admin_only(client: TestClient, method: str, url: str, body: object) -> None:
+    """D-105: creating, e-mailing and switching accounts; an admin is authorized (this app has no account manager,
+    so it reaches the documented 503 or the body check), everyone else is refused before anything happens."""
+    assert client.request(method, url, json=body).status_code == 401
+    for role in (Role.READER, Role.ANALYST):
+        assert client.request(method, url, json=body, headers=bearer(role.value)).status_code == 403
+    assert client.request(method, url, json=body, headers=bearer(Role.ADMIN.value)).status_code not in {401, 403}
 
 
 def test_the_webhook_accepts_only_its_own_token(client: TestClient) -> None:

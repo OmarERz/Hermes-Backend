@@ -429,6 +429,18 @@ CI y `make prepush`. Para iniciar sesión con el proyecto real (`hermes-pass-sec
 
    Los demás roles los asigna después un admin desde el front (`PUT /api/admin/users/{uid}/role`). Ya con un admin,
    `GET /api/connections/status` muestra si Firebase responde.
+6. **Más usuarios (D-105).** Ya no se crean en la consola: el admin entra a *Usuarios*, usa «Agregar usuario» con el
+   correo y el rol, y la API crea la cuenta en Firebase **sin contraseña** con ese rol. Firebase le envía a la persona
+   el correo de *restablecimiento de contraseña* con un enlace para crearla (Hermes nunca ve la contraseña ni el
+   enlace); el enlace dura una hora y «Reenviar correo» manda otro. «Desactivar» apaga la cuenta en Firebase y en
+   Hermes y cierra sus sesiones; «Reactivar» la enciende de nuevo. Para que salga el correo:
+   - la API llama a Identity Toolkit (`accounts:sendOobCode`) con la cuenta de servicio: la cuenta de servicio de
+     Firebase Admin SDK que descargaste ya tiene el permiso `firebaseauth.users.sendEmail` (el mismo que usa el SDK
+     para generar enlaces); otra cuenta de servicio necesita un rol que lo incluya (por ejemplo *Administrador de
+     Firebase Authentication*);
+   - el texto del correo es la plantilla *Authentication → Templates → Restablecimiento de contraseña* de la consola
+     (puedes ponerla en español) y el enlace abre la página de acción alojada por Firebase, que no requiere nada más;
+   - cada admin puede pedir hasta 20 correos por hora (`PASSWORD_EMAILS_PER_HOUR`); las pilas de prueba lo suben.
 
 Para volver al emulador, comenta esas líneas de `.env` y corre `make up` otra vez.
 

@@ -296,6 +296,7 @@ def _add_feedback(session: Session, sc: Scenario) -> None:
         role="analyst",
         active=True,
         created_at=T0,
+        last_login_at=T0,  # she signed in (the copy of a user who never did has no last login, F18.8)
     )
     luis = m.AppUser(firebase_uid="u-luis", email="luis@example.test", role="analyst", active=True, created_at=T0)
     session.add_all([ana, luis])

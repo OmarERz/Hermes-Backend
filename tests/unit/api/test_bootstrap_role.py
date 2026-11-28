@@ -203,7 +203,7 @@ def test_a_database_error_is_reported_without_its_parameters() -> None:
     [
         (FakeUsers(UnknownUserError("x")), None, "no Firebase account has that e-mail"),
         (FakeUsers(AuthUnavailableError()), None, "Firebase could not be reached"),
-        (None, FakeDirectory(RoleConflictError("last_admin")), "this is the last active admin"),
+        (None, FakeDirectory(RoleConflictError("last_admin")), "no other active admin has signed in yet"),
         (None, FakeDirectory(RoleConflictError("other")), "refused: other"),
         (None, FakeDirectory(UserConflictError("uid-ana")), "another Hermes user already has that e-mail"),
     ],

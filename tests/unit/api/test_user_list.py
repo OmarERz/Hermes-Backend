@@ -83,6 +83,18 @@ def test_merge_lists_both_sides_ordered_by_email() -> None:
     assert gone.active is False and bea.active is True
 
 
+def test_a_copy_made_before_the_first_sign_in_has_a_role_but_has_not_signed_in() -> None:
+    """An account an admin created (D-105) or the command line set up: Hermes stores its role, nobody signed in yet."""
+    invited = StoredUser("n", "n@example.test", None, Role.ANALYST, True, None)
+    (view,) = merge_users([invited], [account("n", Role.ANALYST)])
+    assert (view.role, view.effective_role, view.signed_in, view.last_login_at) == (
+        Role.ANALYST,
+        Role.ANALYST,
+        False,
+        None,
+    )
+
+
 def test_merge_marks_a_disabled_account_that_never_signed_in_as_inactive() -> None:
     (view,) = merge_users([], [account("x", Role.ADMIN, disabled=True)])
     assert view.active is False and view.effective_role is None
