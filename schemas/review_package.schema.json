@@ -85,6 +85,28 @@
             "null"
           ]
         },
+        "cna": {
+          "type": [
+            "object",
+            "null"
+          ],
+          "additionalProperties": false,
+          "required": [
+            "vendor",
+            "product"
+          ],
+          "properties": {
+            "vendor": {
+              "type": "string",
+              "minLength": 1
+            },
+            "product": {
+              "type": "string",
+              "minLength": 1
+            }
+          },
+          "description": "CNA vendor and product of the CPE mapping, as CVE.org writes them (F15.9, D-103); null or absent when the mapping has none. Affected ranges under these names belong to the group's product (JUE-MIT-10)."
+        },
         "cis": {
           "type": "array",
           "items": {

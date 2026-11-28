@@ -3,7 +3,8 @@
 All or nothing (JUE-MIT-05): one failing step discards the whole draft and records the broken rule; the
 data-based mitigation (docs/06 §5) is always shown anyway. Length and count limits the strict mode cannot
 express are checked here too (VAL-02). A version a step recommends must fall outside every affected range of the
-group's product (D-101, JUE-MIT-10).
+group's product (D-101, JUE-MIT-10). When it opens a floor («X o posterior») and later versions are affected too, the
+step passes with a warning the code adds from those ranges (D-106), so nobody upgrades into a vulnerable line.
 """
 
 from __future__ import annotations
@@ -18,6 +19,7 @@ from typing import Any
 
 from core.judge.affected import AffectedRange, product_ranges
 from core.judge.package import ElementKind, ReviewPackage, SourceLevel, normalize_text
+from core.scan.versions import bound_order, known_order, parse_version, wildcard_line
 
 logger = logging.getLogger(__name__)
 
@@ -267,6 +269,7 @@ class TraceableFact:
     kind: FactKind
     text: str
     recommended: bool = False
+    floor: bool = False  # a recommended version followed by «o posterior» / «or later» (D-106)
 
     def in_quote(self, quote: str) -> bool:
         if self.kind is FactKind.BRANCH:
@@ -374,9 +377,70 @@ def _step(raw: Mapping[str, Any], package: ReviewPackage, ranges: Sequence[Affec
     ci_id = str(raw["ci_id"]).strip()
     if ci_id and ci_id not in package.ci_ids:
         raise _DiscardError("JUE-MIT-04")
+    warning = later_versions_warning([fact.text for fact in facts if fact.floor], ranges)
     return MitigationStep(
-        order=int(raw["order"]), ci_id=ci_id or None, action=action, element_id=element.element_id, quote=quote
+        order=int(raw["order"]),
+        ci_id=ci_id or None,
+        action=f"{action} {warning}" if warning else action,
+        element_id=element.element_id,
+        quote=quote,
     )
+
+
+MAX_WARNED_RANGES = 8
+WARNING_LEAD = "Advertencia de Hermes: versiones posteriores también afectadas: "
+
+
+def later_versions_warning(floors: Sequence[str], ranges: Sequence[AffectedRange]) -> str | None:
+    """D-106: the affected ranges of the product that lie after a recommended floor («1.5 o posterior» with [2.0,)),
+    in Spanish and taken from the data; None when there are none. Only ranges known to hold a later version count."""
+    later = {r for version in floors for r in ranges if _after(version, r)}
+    if not later:
+        return None
+    ordered = sorted(later, key=_start_key)
+    shown = "; ".join(_describe(r) for r in ordered[:MAX_WARNED_RANGES])
+    more = len(ordered) - MAX_WARNED_RANGES
+    return f"{WARNING_LEAD}{shown}{f'; y {more} más' if more > 0 else ''}."
+
+
+def _after(version: str, affected: AffectedRange) -> bool:
+    """The range lies after `version` (which JUE-MIT-10 already placed outside it): the version comes before its start.
+    A range open at the start cannot lie after it; a start the comparator cannot place gives no warning."""
+    if not affected.readable or affected.start is None:
+        return False
+    order = bound_order(version, affected.start, known_order)
+    return order is not None and (order < 0 or (order == 0 and not affected.start_inclusive))
+
+
+def _start_key(affected: AffectedRange) -> tuple[bool, Any, str]:
+    start = affected.start
+    line = wildcard_line(start) if start is not None else None
+    parsed = parse_version(".".join(map(str, line)) if line is not None else start) if start is not None else None
+    return (parsed is None, parsed or (), affected.text)
+
+
+def _bound(text: str) -> str:
+    line = wildcard_line(text)
+    return f"la línea {'.'.join(map(str, line))}" if line is not None else text
+
+
+def _describe(affected: AffectedRange) -> str:
+    """`[3.2.0,3.2.6)` → «de 3.2.0 a antes de 3.2.6»; `[2.0,)` → «desde 2.0»; `(6.1.*,6.6.162)` → «después de la línea
+    6.1 y antes de 6.6.162»."""
+    start, end = affected.start, affected.end
+    if start is None:
+        head = ""
+    elif affected.start_inclusive:
+        head = f"desde {_bound(start)}" if end is None else f"de {_bound(start)}"
+    else:
+        head = f"después de {_bound(start)}"
+    if end is None:
+        return head or "todas las versiones"
+    tail = f"hasta {_bound(end)}" if affected.end_inclusive else f"antes de {_bound(end)}"
+    if not head:
+        return tail
+    joiner = " a " if affected.start_inclusive else " y "
+    return f"{head}{joiner}{tail}"
 
 
 def _outside(version: str, ranges: Sequence[AffectedRange], cve: str | None) -> bool:
@@ -428,9 +492,20 @@ def traceable_facts(action: str) -> list[TraceableFact]:
     spans = [match.span() for match in tokens] + [match.span(1) for match in numbers]
     bare = _bare_numbers(without_branches, masked, spans)
     targets = _recommended(without_branches, spans + bare)
-    facts += [_version_fact(match.group(1), match.span() in targets) for match in tokens]
-    facts += [TraceableFact(FactKind.VERSION, match.group(1), match.span(1) in targets) for match in numbers]
-    facts += [TraceableFact(FactKind.VERSION, without_branches[a:b], True) for a, b in bare if (a, b) in targets]
+
+    def floor(end: int) -> bool:
+        return _FLOOR_TAIL.match(without_branches, end) is not None
+
+    facts += [_version_fact(match.group(1), match.span() in targets, floor=floor(match.end())) for match in tokens]
+    facts += [
+        TraceableFact(
+            FactKind.VERSION, match.group(1), match.span(1) in targets, floor(match.end(1)) and match.span(1) in targets
+        )
+        for match in numbers
+    ]
+    facts += [
+        TraceableFact(FactKind.VERSION, without_branches[a:b], True, floor(b)) for a, b in bare if (a, b) in targets
+    ]
     facts += _facts(FactKind.PATH, (path.rstrip(_TRAILING) for path in _PATH.findall(without_hosts)))
     return facts
 
@@ -545,12 +620,12 @@ def _split_hosts(text: str) -> tuple[list[str], str]:
     return hosts, _HOST.sub(take, text)
 
 
-def _version_fact(token: str, recommended: bool) -> TraceableFact:
+def _version_fact(token: str, recommended: bool, *, floor: bool = False) -> TraceableFact:
     """A version token read whole: a bare wildcard is a branch ('3.0.X' -> '3.0.x'), anything else a version."""
     wildcard = _WILDCARD.fullmatch(token)
     if wildcard is not None:
         return TraceableFact(FactKind.BRANCH, f"{wildcard.group(1)}.x")
-    return TraceableFact(FactKind.VERSION, token, recommended)
+    return TraceableFact(FactKind.VERSION, token, recommended, recommended and floor)
 
 
 def _facts(kind: FactKind, texts: Iterable[str]) -> list[TraceableFact]:

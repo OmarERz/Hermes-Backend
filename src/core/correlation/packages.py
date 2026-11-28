@@ -325,6 +325,9 @@ def build_finding_package(
             "cve": group.cve_id,
             "product": product or "",
             "cpe": ":".join(group.vendor_products[0]) if group.vendor_products else None,
+            # F15.9 (D-103, #206): the CNA's own names, so JUE-MIT-10 also checks the ranges it publishes under them.
+            # Not in the fingerprint: it only feeds the code's checks, and adding it would re-review every group.
+            "cna": {"vendor": group.cna[0], "product": group.cna[1]} if group.cna else None,
             "cis": _cis_block(session, group, scored),
         },
         "cve_data": cve_data,

@@ -131,3 +131,40 @@ def test_one_bound_that_leaves_the_version_out_decides() -> None:
     assert exclusive_start.contains("2.0.0") is False
     assert exclusive_start.contains("2.0.1") is True
     assert AffectedRange("p:p (,)", None, False, None, False).contains("99") is True  # every version
+
+
+# --- F15.9 (D-103, #206): the CNA pair of the mapping counts too --------------------------------------------------
+def package_with_cna(cpe: str | None, cna: dict[str, str] | None, ranges: list[str]) -> ReviewPackage:
+    content: dict[str, Any] = finding_package()
+    content["group"]["cpe"] = cpe
+    content["group"]["cna"] = cna
+    content["cve_data"]["affected_ranges"] = ranges
+    return ReviewPackage.from_content(content)
+
+
+HTTPD_CNA = {"vendor": "Apache Software Foundation", "product": "Apache HTTP Server"}
+
+
+def test_cna_ranges_under_their_own_names_count_with_the_cna_pair() -> None:
+    ranges = ["apache:http_server [2.4.0,2.4.60)", "Apache Software Foundation:Apache HTTP Server [2.4.60,2.4.62)"]
+    with_cna = product_ranges(package_with_cna("apache:http_server", HTTPD_CNA, ranges))
+    assert [r.text for r in with_cna] == ranges
+    without = product_ranges(package_with_cna("apache:http_server", None, ranges))
+    assert [r.text for r in without] == ranges[:1]  # before F15.9 the CNA's own names were not checked
+
+
+def test_a_group_with_only_a_cna_pair_still_has_its_ranges() -> None:
+    ranges = ["Linux:Linux (6.1.*,6.6.162)", "linux:linux_kernel [6.2,6.6.162)"]
+    found = product_ranges(package_with_cna(None, {"vendor": "Linux", "product": "Linux"}, ranges))
+    assert [r.text for r in found] == ranges[:1]
+
+
+@pytest.mark.parametrize(
+    ("version", "inside"),
+    [("6.2.0", True), ("6.1.200", False), ("6.6.162", False), ("6.6.161", True), ("latest", None)],
+)
+def test_wildcard_bounds_of_cna_ranges_are_whole_lines(version: str, inside: bool | None) -> None:
+    (affected,) = product_ranges(
+        package_with_cna(None, {"vendor": "Linux", "product": "Linux"}, ["Linux:Linux (6.1.*,6.6.162)"])
+    )
+    assert affected.contains(version) is inside

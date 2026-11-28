@@ -201,3 +201,21 @@ def test_a_package_is_stored_once_per_fingerprint(session: Session) -> None:
     dismissal = store_package(session, build_dismissal_package(session, other.id, StubScorer()), NOW)
     assert (dismissal.kind, dismissal.story_id) == ("dismissal", other.id)
     assert session.scalar(select(func.count()).select_from(m.ReviewPackage)) == 3
+
+
+def test_the_group_carries_the_cna_pair_outside_the_fingerprint(session: Session) -> None:
+    """F15.9 (D-103, #206): the CNA's own names reach the judge's package, so JUE-MIT-10 checks the ranges the CNA
+    publishes under them; adding them does not change the fingerprint (no group is re-reviewed for it)."""
+    story = add_story(session, cves={CVE: "active"})
+    (group,) = load_active_groups(session)
+    before = build_finding_package(session, group, [exact(session, story)], StubScorer())
+    assert before["group"]["cna"] is None
+    mapping = session.scalars(select(m.CpeMapping)).one()
+    mapping.cna_vendor, mapping.cna_product = "OpenSSL", "OpenSSL"
+    session.flush()
+    (named,) = load_active_groups(session)
+    after = build_finding_package(session, named, [exact(session, story)], StubScorer())
+    assert errors(after) == []
+    assert after["group"]["cna"] == {"vendor": "OpenSSL", "product": "OpenSSL"}
+    assert after["group"]["cpe"] == before["group"]["cpe"]
+    assert after["fingerprint"] == before["fingerprint"]

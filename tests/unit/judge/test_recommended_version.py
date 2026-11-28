@@ -436,3 +436,83 @@ def test_reading_recommendations_stays_linear() -> None:
     finally:
         signal.alarm(0)
         signal.signal(signal.SIGALRM, previous)
+
+
+# --- F15.9: the CNA pair (#206) and «o posterior» with later affected versions (D-106, #210) ----------------------
+def cna_package(cpe: str | None, cna: dict[str, str] | None, ranges: list[str], description: str = "") -> ReviewPackage:
+    content: dict[str, Any] = finding_package()
+    content["group"]["cpe"] = cpe
+    content["group"]["cna"] = cna
+    content["cve_data"]["affected_ranges"] = ranges
+    content["cve_data"]["description"] += description
+    return ReviewPackage.from_content(content)
+
+
+def accepted_actions(action: str, quote: str, pkg: ReviewPackage) -> list[str]:
+    step = {"order": 1, "ci_id": "", "action": action, "element_id": "cve-1", "quote": quote}
+    result = validate_mitigation([step], pkg)
+    assert result.status is MitigationStatus.ACCEPTED, result.rule
+    return [s.action for s in result.steps]
+
+
+HTTPD_CNA = {"vendor": "Apache Software Foundation", "product": "Apache HTTP Server"}
+HTTPD = ["apache:http_server [2.4.0,2.4.60)", "Apache Software Foundation:Apache HTTP Server [2.4.60,2.4.62)"]
+
+
+def test_a_version_inside_a_cna_range_named_otherwise_is_rejected() -> None:
+    """#206: the CNA publishes the range as «Apache Software Foundation:Apache HTTP Server»; the group's CPE is
+    `apache:http_server`. With the CNA pair in the package, 2.4.61 is known to be inside it."""
+    fixed = " Fixed in 2.4.61 for some builds and in 2.4.62 for all."
+    pkg = cna_package("apache:http_server", HTTPD_CNA, HTTPD, fixed)
+    assert check("Actualizar Apache HTTP Server a 2.4.61.", "Fixed in 2.4.61 for some builds", pkg) == OUTSIDE_RULE
+    assert check("Actualizar Apache HTTP Server a 2.4.62.", "in 2.4.62 for all", pkg) == ACCEPTED
+    without = cna_package("apache:http_server", None, HTTPD, fixed)  # what F15.5 could check (#206)
+    assert check("Actualizar Apache HTTP Server a 2.4.61.", "Fixed in 2.4.61 for some builds", without) == ACCEPTED
+
+
+LATER = " Fixed in 1.5. Versions 2.0 and later remain vulnerable."
+
+
+def test_a_floor_with_later_affected_versions_passes_with_a_warning_from_the_ranges() -> None:
+    """D-106: «1.5 o posterior» is outside [1.0,1.5) but [2.0,) is affected too: the step stays, with a warning."""
+    pkg = cna_package("acme:tool", None, ["acme:tool [1.0,1.5)", "acme:tool [2.0,)"], LATER)
+    (action,) = accepted_actions("Actualizar a 1.5 o posterior.", "Fixed in 1.5.", pkg)
+    assert action == (
+        "Actualizar a 1.5 o posterior. Advertencia de Hermes: versiones posteriores también afectadas: desde 2.0."
+    )
+
+
+def test_the_warning_lists_each_later_range_of_the_product_from_its_data() -> None:
+    pkg = package("openssl:openssl", OPENSSL, " Upgrade to 3.0.18, 3.2.6, 3.3.5, 3.4.3 or 3.5.4.")
+    (action,) = accepted_actions("Actualizar OpenSSL a 3.0.18 o posterior.", "Upgrade to 3.0.18, 3.2.6", pkg)
+    assert action.endswith(
+        "Advertencia de Hermes: versiones posteriores también afectadas: de 3.2.0 a antes de 3.2.6; "
+        "de 3.3.0 a antes de 3.3.5; de 3.4.0 a antes de 3.4.3; de 3.5.0 a antes de 3.5.4."
+    )
+
+
+def test_a_floor_with_no_later_affected_range_gets_no_warning() -> None:
+    pkg = package("acme:tool", ["acme:tool [1.0,1.5)"], LATER)
+    (action,) = accepted_actions("Actualizar a 1.5 o posterior.", "Fixed in 1.5.", pkg)
+    assert action == "Actualizar a 1.5 o posterior."
+
+
+def test_a_target_without_a_floor_gets_no_warning() -> None:
+    """D-106 covers «o posterior»; a plain target («a 1.5») names one version, and JUE-MIT-10 checked it."""
+    pkg = package("acme:tool", ["acme:tool [1.0,1.5)", "acme:tool [2.0,)"], LATER)
+    (action,) = accepted_actions("Actualizar a 1.5.", "Fixed in 1.5.", pkg)
+    assert action == "Actualizar a 1.5."
+
+
+def test_the_warning_follows_wildcard_lines_of_the_kernel_cna() -> None:
+    ranges = ["Linux:Linux (5.15.*,6.1.192)", "Linux:Linux (6.1.*,6.6.162)"]
+    pkg = cna_package("linux:linux_kernel", {"vendor": "Linux", "product": "Linux"}, ranges, " Fixed in 6.1.192.")
+    (action,) = accepted_actions("Actualizar el kernel a 6.1.192 o posterior.", "Fixed in 6.1.192.", pkg)
+    assert action.endswith("versiones posteriores también afectadas: después de la línea 6.1 y antes de 6.6.162.")
+
+
+def test_a_later_range_with_an_unreadable_end_still_warns() -> None:
+    """The warning follows the range's start: a later range whose end cannot be compared still counts."""
+    pkg = cna_package("acme:tool", None, ["acme:tool [1.0,1.5)", "acme:tool [2.0,2.x-vendor)"], LATER)
+    (action,) = accepted_actions("Actualizar a 1.5 o posterior.", "Fixed in 1.5.", pkg)
+    assert action.endswith("versiones posteriores también afectadas: de 2.0 a antes de 2.x-vendor.")

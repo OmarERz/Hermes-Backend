@@ -275,6 +275,7 @@ def _group_view(group: Mapping[str, Any] | None, flagged: frozenset[str]) -> dic
         "cve": group["cve"],
         "product": group["product"],
         "cpe": group["cpe"],
+        "cna": group.get("cna"),  # F15.9 (D-103): optional in the contract; packages stored before carry none
         "cis": [
             {
                 "element_id": ci["element_id"],
