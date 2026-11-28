@@ -6,8 +6,11 @@ decides what to write in iTop and which events to emit. Every iTop write goes th
 through `notification_event`, in the caller's transaction (ARQ-01, NOT-02). The pass is idempotent per assessment:
 every write's key is (action, ticket, assessment).
 
-Rules (docs/08 §1): a ticket for any score; CI added → updated list + comment; persists → comment on scans; rises →
-urgency up + `level_up` unless a person changed the urgency (then a private suggestion, D-007); falls → only after
+Rules (docs/08 §1): a ticket for any score (D-098), except that a finding only CVE.org gives (`cna_affected`,
+certainty 0.9) enters a ticket from level medium up (D-103): below it, it neither opens nor joins one and waits for a
+later assessment at medium or for NVD to confirm it (the scan then stores `nvd_cpe`); CI added → updated list +
+comment; persists → comment on scans; rises → urgency up + `level_up` unless a person changed the urgency (then a
+private suggestion, D-007); falls → only after
 the hysteresis (D-006); some CIs fixed → comment + `partially_fixed`; all fixed → comment + `fixed` (a person
 closes it); back after resolved/closed → reopen (or a new request if iTop cannot reopen) + `reopened`. A false
 positive (suppression) never opens a ticket nor emits events for it (ARQ-06).
@@ -61,14 +64,19 @@ _FINDINGS: Final = text(
            a.decommissioned_at IS NOT NULL AS decommissioned,
            EXISTS (SELECT 1 FROM suppression s WHERE s.finding_id = fc.finding_id AND s.lifted_at IS NULL
                      AND s.suppressed_version = fc.observed_version)
-             AS suppressed
+             AS suppressed,
+           f.match_source, sc.final
       FROM finding_current fc
+      JOIN finding f ON f.id = fc.finding_id
       JOIN installed_software i ON i.id = fc.installed_software_id
       JOIN asset a ON a.id = i.asset_id
+      LEFT JOIN asset_score sc ON sc.assessment_id = :assessment_id AND sc.asset_id = a.id
      WHERE fc.finding_group_id = :group_id
      ORDER BY a.name, fc.finding_id
     """
 )
+CVE_ORG_ONLY: Final = "cna_affected"  # the CNA's ranges alone matched (certainty 0.9)
+MEDIUM: Final = 3  # urgency of level medium (`rules.LEVELS`): the least a CVE.org-only finding needs (D-103)
 # ARQ-06: a false positive lasts until the finding's version changes; then the suppression is lifted.
 _LIFT_STALE_SUPPRESSIONS: Final = text(
     """UPDATE suppression s SET lifted_at = :now, lift_reason = 'version_changed'
@@ -94,6 +102,7 @@ class _Finding:
     team_id: uuid.UUID | None
     decommissioned: bool
     suppressed: bool
+    ticket_eligible: bool = True  # False: CVE.org only and below medium in this assessment (D-103)
 
     @property
     def current(self) -> bool:
@@ -146,16 +155,16 @@ class TicketLifecycle:
         now = self.clock()
         session.execute(_LIFT_STALE_SUPPRESSIONS, {"now": now, "group_id": group_id})
         state = _Pass(self, session, assessment, params, now)
-        state.relink(self._findings(session, group_id, params))
+        state.relink(self._findings(session, group_id, assessment.id, params))
         for ticket in state.tickets.values():
             state.decide(ticket)
         return LifecycleReport(created=state.created, events=state.events, writes=state.writes)
 
     # --- inputs --------------------------------------------------------------------------------------------
     @staticmethod
-    def _findings(session: Session, group_id: uuid.UUID, params: _Params) -> list[_Finding]:
+    def _findings(session: Session, group_id: uuid.UUID, assessment_id: uuid.UUID, params: _Params) -> list[_Finding]:
         findings = []
-        for row in session.execute(_FINDINGS, {"group_id": group_id}).all():
+        for row in session.execute(_FINDINGS, {"group_id": group_id, "assessment_id": assessment_id}).all():
             team_id = row.custodian_team_id or (params.default_team.id if params.default_team else None)
             if team_id is None:
                 # TODO(P-020): no custodian and no default team configured: the finding waits for one.
@@ -169,6 +178,7 @@ class TicketLifecycle:
                     team_id,
                     bool(row.decommissioned),
                     bool(row.suppressed),
+                    _ticket_eligible(row.match_source, row.final, params.bands),
                 )
             )
         return findings
@@ -195,6 +205,14 @@ class TicketLifecycle:
             default_team=_default_team(session, setting("default_team", None)),
             scan=run.kind == "scan",
         )
+
+
+def _ticket_eligible(match_source: str, final: int | None, bands: UrgencyBands) -> bool:
+    """D-103: a CVE.org-only finding enters a ticket when its CI's final score in this assessment is medium or higher
+    (urgency band 3 or more urgent); without a score it waits. NVD and KEV matches always may (D-098)."""
+    if match_source != CVE_ORG_ONLY:
+        return True
+    return final is not None and bands.urgency(final) <= MEDIUM
 
 
 def _default_team(session: Session, name: object) -> m.Team | None:
@@ -270,6 +288,8 @@ class _Pass:
         for finding in findings:
             if not finding.current or finding.finding_id in links or finding.team_id is None:
                 continue
+            if not finding.ticket_eligible:
+                continue  # D-103: CVE.org only and below medium: no ticket yet (a linked one stays, D-006)
             target = self.tickets.get(finding.team_id)
             if target is None:
                 if finding.suppressed:
