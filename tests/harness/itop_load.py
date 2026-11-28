@@ -3,7 +3,9 @@
     make itop-load INVENTORY=<file>                    dry run: what would be created, updated or left alone
     make itop-load INVENTORY=<file> APPLY=1            create what is missing
     make itop-load INVENTORY=<file> APPLY=1 UPDATE=1   also bring existing objects to the file's values
-    make itop-map-cpe INVENTORY=<file>                 set each product's CPE through the Hermes API (after a sync)
+    make itop-map-cpe INVENTORY=<file>                 set each product's CPE and CNA names through the Hermes API
+                                                       (after a sync); a mapped product whose CPE or CNA names
+                                                       differ from the file is mapped again
 
 It lives in the test harness on purpose: it writes CMDB objects straight to iTop, which ARQ-01 (and its Semgrep rule)
 allows only in the outbox and in tests/. It is not part of the backend packages and never runs in the images.
@@ -19,6 +21,8 @@ File format (YAML; PyYAML is a development dependency: the loader runs on the op
       ITOP_ORG_ID: "@Organization:Demo-Lab"
     cpe:                                    # optional: product (Software name) -> CPE name for --map-cpe;
       PostgreSQL: "cpe:2.3:a:postgresql:postgresql:*:*:*:*:*:*:*:*"    # null = no CPE on purpose
+    cna:                                    # optional: product -> CNA names as CVE.org writes them (F15.9); the
+      PostgreSQL: { vendor: "n/a", product: "PostgreSQL" }          # product needs a CPE in `cpe` too
     objects:
       - class: Server                       # any iTop class
         name: web-frontend-01               # value of the identity key's first field
@@ -55,6 +59,7 @@ from typing import Any, Final, Literal
 
 import httpx
 
+from core.cpe.fields import split_cpe_fields, unescape_cpe
 from core.itop import oql
 from core.itop.oql import FIRST_PRINTABLE
 
@@ -65,11 +70,13 @@ DEFAULT_KEYS: Final[dict[str, tuple[str, ...]]] = {"Software": ("name", "version
 HTTP_ERROR: Final = 400
 LOCAL_HOSTS: Final = frozenset({"localhost"})  # plus loopback IPs: the loader runs on this machine, not in a container
 ITEM_KEYS: Final = frozenset({"class", "name", "key", "ref", "fields"})
-FILE_KEYS: Final = frozenset({"objects", "env", "cpe"})
+FILE_KEYS: Final = frozenset({"objects", "env", "cpe", "cna"})
+MAX_CNA_NAME: Final = 200  # the API's limit for a CNA name
+PAGE_LIMIT: Final = 200
 _REF: Final = re.compile(r"^@(\w+):(.+)$", re.S)
 _ENV_NAME: Final = re.compile(r"^[A-Z][A-Z0-9_]*$")
 # cpe:2.3:part:vendor:product followed by the other eight components (the API needs a full CPE name).
-_CPE_NAME: Final = re.compile(r"^cpe:2\.3:[ao](?::(?:[^:\\\s]|\\.)+){2}(?::(?:[^:\\\s]|\\.)*){8}$")
+_CPE_NAME: Final = re.compile(r"^cpe:2\.3:[aoh](?::(?:[^:\\\s]|\\.)+){2}(?::(?:[^:\\\s]|\\.)*){8}$")
 _ACTION_LABELS: Final = {
     "create": "+ create   ",
     "update": "~ update   ",
@@ -178,8 +185,24 @@ class HermesApi:
         body = self._send("GET", "/api/pending/inventory")
         return {str(item["name"]): str(item["ci_id"]) for item in body.get("software_without_cpe") or []}
 
-    def set_cpe(self, product_id: str, cpe: str) -> None:
-        self._send("PUT", f"/api/mappings/{product_id}", {"cpe": cpe})
+    def catalogue(self) -> dict[str, dict[str, Any]]:
+        """Every product Hermes knows: name -> its item of GET /api/inventory/software (id, cpe, cna), all pages."""
+        found: dict[str, dict[str, Any]] = {}
+        cursor: str | None = None
+        while True:
+            query = f"?limit={PAGE_LIMIT}" + (f"&cursor={cursor}" if cursor else "")
+            body = self._send("GET", f"/api/inventory/software{query}")
+            for item in body.get("items") or []:
+                found[str(item["name"])] = item
+            cursor = body.get("next_cursor")
+            if not cursor:
+                return found
+
+    def set_mapping(self, product_id: str, cpe: str, cna: tuple[str, str] | None = None) -> None:
+        body: dict[str, Any] = {"cpe": cpe}
+        if cna is not None:
+            body["cna"] = {"vendor": cna[0], "product": cna[1]}
+        self._send("PUT", f"/api/mappings/{product_id}", body)
 
 
 @dataclass(frozen=True)
@@ -201,6 +224,7 @@ class Inventory:
     specs: list[Spec]
     env: dict[str, str] = field(default_factory=dict)
     cpe: dict[str, str | None] = field(default_factory=dict)
+    cna: dict[str, tuple[str, str]] = field(default_factory=dict)
 
 
 @dataclass
@@ -298,7 +322,34 @@ def parse_inventory(path: Path) -> Inventory:
     for product, name in cpe.items():
         if name is not None and not (isinstance(name, str) and _CPE_NAME.match(name)):
             raise ValueError(f"`cpe` of {product!r}: not a full CPE 2.3 name (cpe:2.3:a:vendor:product:*:...)")
-    return Inventory(specs, dict(env), {str(k): v for k, v in cpe.items()})
+    return Inventory(specs, dict(env), {str(k): v for k, v in cpe.items()}, _cna_names(data.get("cna"), cpe))
+
+
+def _cna_names(raw: Any, cpe: dict[Any, Any]) -> dict[str, tuple[str, str]]:
+    """`cna:` product -> {vendor, product} as CVE.org writes them; each product also needs a CPE (the API asks one)."""
+    if raw is None:
+        return {}
+    if not isinstance(raw, dict):
+        raise TypeError("`cna` maps product names to {vendor, product}")
+    names: dict[str, tuple[str, str]] = {}
+    for product, value in raw.items():
+        if not (isinstance(value, dict) and set(value) == {"vendor", "product"}):
+            raise ValueError(f"`cna` of {product!r}: give exactly `vendor` and `product`")
+        pair = tuple(value[key] for key in ("vendor", "product"))
+        if not all(isinstance(v, str) and v.strip() and len(v) <= MAX_CNA_NAME and v.isprintable() for v in pair):
+            raise ValueError(f"`cna` of {product!r}: names are 1 to {MAX_CNA_NAME} printable characters")
+        if not cpe.get(product):
+            raise ValueError(f"`cna` of {product!r}: the product needs a CPE in `cpe` (the mapping is made with one)")
+        names[str(product)] = (str(pair[0]).strip(), str(pair[1]).strip())
+    return names
+
+
+def _cpe_key(name: str | None) -> tuple[str, ...] | None:
+    """Part, vendor and product of a CPE name, lower case, to compare the file with what Hermes stores."""
+    if not name:
+        return None
+    fields = [unescape_cpe(f) for f in split_cpe_fields(name)]
+    return tuple(f.lower() for f in fields[2:5]) if len(fields) > 4 else None
 
 
 def refs_in(value: Any) -> list[str]:
@@ -441,24 +492,42 @@ def _report_env(loader: Loader, env: Mapping[str, str]) -> None:
 
 
 def map_cpe(inventory: Inventory, api: HermesApi) -> int:
-    """PUT /api/mappings/{product} for every product of the file still waiting for a CPE in Hermes."""
+    """PUT /api/mappings/{product} for every product of the file still waiting for a CPE in Hermes, and again for a
+    mapped one whose CPE (part included) or CNA names differ from the file (F15.9: the kernel's part `o` and the CNA
+    names of an inventory mapped before)."""
     pending = api.pending_products()
-    mapped = 0
+    known = api.catalogue()
+    mapped = remapped = 0
     for product, cpe in sorted(inventory.cpe.items()):
+        cna = inventory.cna.get(product)
+        label = f"{cpe}" + (f" + CNA {cna[0]}:{cna[1]}" if cna else "")
+        current = known.get(product)
         if cpe is None:
             sys.stdout.write(f"- no CPE    {product} (on purpose: it stays in the pending screen)\n")
         elif product in pending:
-            api.set_cpe(pending[product], cpe)
+            api.set_mapping(pending[product], cpe, cna)
             mapped += 1
-            sys.stdout.write(f"+ mapped    {product} -> {cpe}\n")
+            sys.stdout.write(f"+ mapped    {product} -> {label}\n")
+        elif current is None:
+            sys.stdout.write(f"? skipped   {product}: not in Hermes yet (an inventory sync brings it)\n")
+        elif _cpe_key(current.get("cpe")) != _cpe_key(cpe) or (cna and _stored_cna(current) != cna):
+            api.set_mapping(str(current["id"]), cpe, cna)
+            remapped += 1
+            sys.stdout.write(f"~ remapped  {product} -> {label}\n")
         else:
-            sys.stdout.write(f"? skipped   {product}: not waiting for a CPE (already mapped, or not synced yet)\n")
+            sys.stdout.write(f"= unchanged {product}\n")
     for product in sorted(set(pending) - set(inventory.cpe)):
         sys.stdout.write(f"! pending   {product}: no CPE for it in the file\n")
     sys.stdout.write(
-        f"summary: {mapped} mapped; a product appears in Hermes after an inventory sync (a scan does one)\n"
+        f"summary: {mapped} mapped, {remapped} remapped; a product appears in Hermes after an inventory sync "
+        "(a scan does one)\n"
     )
     return 0
+
+
+def _stored_cna(item: dict[str, Any]) -> tuple[str, str] | None:
+    cna = item.get("cna")
+    return (str(cna["vendor"]), str(cna["product"])) if isinstance(cna, dict) else None
 
 
 def _from_environment(url_name: str, token_name: str, default_url: str = "") -> tuple[str, str]:

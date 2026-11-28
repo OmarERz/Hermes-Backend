@@ -106,6 +106,7 @@ def _ensure_product(session: Session, name: str, vendor: str, now: datetime) -> 
         session.add(
             m.CpeMapping(
                 software_product_id=product.id,
+                nvd_part="a",
                 nvd_vendor=vendor,
                 nvd_product=name.lower(),
                 origin="manual",

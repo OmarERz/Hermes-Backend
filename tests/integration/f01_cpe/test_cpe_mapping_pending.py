@@ -119,13 +119,15 @@ def test_pending_list_rejects_bad_arguments(engine: Engine, kwargs: dict[str, An
 def test_mapping_removes_the_pending_item_and_can_be_replaced_or_removed(engine: Engine) -> None:
     ids = seed_inventory(engine)
     with Session(engine) as session, session.begin():
-        row = set_mapping(session, ids["nginx"], MappingInput("F5", "NGINX", "F5 Networks", "NGINX"), now=T0)
-        assert (row.nvd_vendor, row.origin, row.mapped_at) == ("f5", "manual", T0)
+        row = set_mapping(session, ids["nginx"], MappingInput("F5", "NGINX", "F5 Networks", "NGINX", "a"), now=T0)
+        assert (row.nvd_part, row.nvd_vendor, row.origin, row.mapped_at) == ("a", "f5", "manual", T0)
     assert ("software_unmapped", "nginx") not in issues(engine)
     with Session(engine) as session, session.begin():
         set_mapping(session, ids["nginx"], MappingInput(None, None, "F5", "nginx"), now=T0)
     with engine.connect() as conn:
-        assert conn.execute(text("SELECT nvd_product, cna_product FROM cpe_mapping")).all() == [(None, "nginx")]
+        assert conn.execute(text("SELECT nvd_part, nvd_product, cna_product FROM cpe_mapping")).all() == [
+            (None, None, "nginx")
+        ]
     with Session(engine) as session, session.begin():
         assert remove_mapping(session, ids["nginx"]) is True
         assert remove_mapping(session, ids["nginx"]) is False
@@ -136,9 +138,9 @@ def test_two_analysts_saving_the_first_mapping_do_not_collide(engine: Engine) ->
     ids = seed_inventory(engine)
     first, second = Session(engine), Session(engine)
     try:
-        set_mapping(first, ids["nginx"], MappingInput("f5", "nginx"), now=T0)
+        set_mapping(first, ids["nginx"], MappingInput("f5", "nginx", nvd_part="a"), now=T0)
         first.commit()
-        set_mapping(second, ids["nginx"], MappingInput("nginx", "nginx"), now=T0)  # sees the row: updates it
+        set_mapping(second, ids["nginx"], MappingInput("nginx", "nginx", nvd_part="a"), now=T0)  # sees the row
         second.commit()
     finally:
         first.close()
@@ -152,8 +154,30 @@ def test_mapping_errors(engine: Engine) -> None:
     with Session(engine) as session:
         with pytest.raises(MappingError):
             set_mapping(session, ids["nginx"], MappingInput("f5", None))
+        with pytest.raises(MappingError):  # D-107: an NVD pair needs its CPE part
+            set_mapping(session, ids["nginx"], MappingInput("f5", "nginx"))
         with pytest.raises(LookupError):
-            set_mapping(session, uuid.uuid4(), MappingInput("f5", "nginx"))
+            set_mapping(session, uuid.uuid4(), MappingInput("f5", "nginx", nvd_part="a"))
+
+
+def test_the_cpe_part_is_stored_and_replaced(engine: Engine) -> None:
+    """D-107 (F20 dry run, P2-1): the kernel is stored as an operating system and the part follows each replacement;
+    a CNA-only mapping keeps none."""
+    ids = seed_inventory(engine)
+
+    def stored() -> list[tuple[str | None, str | None]]:
+        with engine.connect() as conn:
+            return [tuple(r) for r in conn.execute(text("SELECT nvd_part, nvd_product FROM cpe_mapping"))]
+
+    with Session(engine) as session, session.begin():
+        set_mapping(session, ids["nginx"], MappingInput("linux", "linux_kernel", nvd_part="o"), now=T0)
+    assert stored() == [("o", "linux_kernel")]
+    with Session(engine) as session, session.begin():
+        set_mapping(session, ids["nginx"], MappingInput("cisco", "asa_5505", nvd_part="H"), now=T0)
+    assert stored() == [("h", "asa_5505")]
+    with Session(engine) as session, session.begin():
+        set_mapping(session, ids["nginx"], MappingInput(None, None, "Linux", "Linux"), now=T0)
+    assert stored() == [(None, None)]
 
 
 def test_local_candidates_come_from_loaded_ranges(engine: Engine) -> None:

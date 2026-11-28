@@ -173,8 +173,8 @@ def test_verified_relationship_unique_normalized(build: Builder, conn: Conn) -> 
 
 
 def test_cpe_mapping_needs_a_pair(build: Builder, conn: Conn) -> None:
-    raises(errors.CheckViolation, conn, build.insert, "cpe_mapping", nvd_vendor=None, nvd_product=None)
-    build.insert("cpe_mapping", nvd_vendor=None, nvd_product=None, cna_vendor="v", cna_product="p")
+    raises(errors.CheckViolation, conn, build.insert, "cpe_mapping", nvd_part=None, nvd_vendor=None, nvd_product=None)
+    build.insert("cpe_mapping", nvd_part=None, nvd_vendor=None, nvd_product=None, cna_vendor="v", cna_product="p")
 
 
 def test_cpe_mapping_pairs_complete(build: Builder, conn: Conn) -> None:
@@ -184,6 +184,7 @@ def test_cpe_mapping_pairs_complete(build: Builder, conn: Conn) -> None:
         conn,
         build.insert,
         "cpe_mapping",
+        nvd_part=None,
         nvd_vendor=None,
         nvd_product="openssl",
         cna_vendor="v",

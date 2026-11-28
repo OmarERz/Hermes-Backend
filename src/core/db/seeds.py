@@ -319,7 +319,12 @@ def _inventory(session: Session, *, edge: bool) -> None:
     session.flush()
     session.add(
         m.CpeMapping(
-            software_product_id=product.id, nvd_vendor="openssl", nvd_product="openssl", origin="manual", mapped_at=NOW
+            software_product_id=product.id,
+            nvd_part="a",
+            nvd_vendor="openssl",
+            nvd_product="openssl",
+            origin="manual",
+            mapped_at=NOW,
         )
     )
     installs = [

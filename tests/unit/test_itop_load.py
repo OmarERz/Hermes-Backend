@@ -333,10 +333,11 @@ def test_a_url_that_is_not_http_is_refused() -> None:
 
 
 class FakeApi:
-    """Stands in for GET /api/pending/inventory and PUT /api/mappings/{id}; records what it receives."""
+    """Stands in for GET /api/pending/inventory, GET /api/inventory/software (two pages) and PUT /api/mappings/{id};
+    records what it receives."""
 
-    def __init__(self, pending: dict[str, str], status: int = 200) -> None:
-        self.pending, self.status = pending, status
+    def __init__(self, pending: dict[str, str], status: int = 200, mapped: list[dict[str, Any]] | None = None) -> None:
+        self.pending, self.status, self.mapped = pending, status, mapped or []
         self.puts: list[tuple[str, dict[str, Any]]] = []
         self.auth: list[str] = []
         self.transport = httpx.MockTransport(self.handle)
@@ -348,6 +349,12 @@ class FakeApi:
         if request.method == "GET" and request.url.path == "/api/pending/inventory":
             items = [{"ci_id": pid, "name": name, "detail": "Software sin CPE"} for name, pid in self.pending.items()]
             return httpx.Response(200, json={"software_without_cpe": items})
+        if request.method == "GET" and request.url.path == "/api/inventory/software":
+            unmapped = [{"id": pid, "name": name, "cpe": None, "cna": None} for name, pid in self.pending.items()]
+            items = unmapped + self.mapped
+            if request.url.params.get("cursor") == "page-2":
+                return httpx.Response(200, json={"items": items[1:], "next_cursor": None})
+            return httpx.Response(200, json={"items": items[:1], "next_cursor": "page-2" if len(items) > 1 else None})
         if request.method == "PUT" and request.url.path.startswith("/api/mappings/"):
             body = json.loads(request.content)
             self.puts.append((request.url.path.rsplit("/", 1)[1], body))
@@ -378,9 +385,69 @@ def test_map_cpe_sets_the_pending_products_of_the_file(tmp_path: Path, capsys: p
     out = capsys.readouterr().out
     assert "+ mapped    PostgreSQL" in out
     assert "- no CPE    Redshift" in out
-    assert "? skipped   Envoy: not waiting for a CPE" in out
+    assert "? skipped   Envoy: not in Hermes yet" in out
     assert "! pending   Kafka: no CPE for it in the file" in out
-    assert "summary: 1 mapped" in out
+    assert "summary: 1 mapped, 0 remapped" in out
+
+
+KERNEL_O = "cpe:2.3:o:linux:linux_kernel:*:*:*:*:*:*:*:*"
+CNA_FILE = f"""
+cpe:
+  Linux Kernel: "{KERNEL_O}"
+  PostgreSQL: "{CPE_PG}"
+  Envoy: "cpe:2.3:a:envoyproxy:envoy:*:*:*:*:*:*:*:*"
+cna:
+  Linux Kernel: {{ vendor: Linux, product: Linux }}
+  PostgreSQL: {{ vendor: "n/a", product: PostgreSQL }}
+objects:
+  - {{ class: Organization, name: Org }}
+"""
+
+
+def test_map_cpe_sends_cna_names_and_remaps_what_changed(tmp_path: Path, capsys: pytest.CaptureFixture[str]) -> None:
+    """F15.9 (D-107): the kernel mapped before with part `a` and without CNA names is mapped again; a product stored
+    as in the file is left alone; a pending one gets its CNA names with its CPE."""
+    mapped = [
+        {"id": "k-1", "name": "Linux Kernel", "cpe": "cpe:2.3:a:linux:linux_kernel:*:*:*:*:*:*:*:*", "cna": None},
+        {"id": "e-1", "name": "Envoy", "cpe": "cpe:2.3:a:envoyproxy:envoy:*:*:*:*:*:*:*:*", "cna": None},
+    ]
+    fake = FakeApi({"PostgreSQL": "p-1"}, mapped=mapped)
+    assert itop_load.run([str(write(tmp_path, CNA_FILE)), "--map-cpe"], api=fake.api()) == 0
+    assert fake.puts == [
+        ("k-1", {"cpe": KERNEL_O, "cna": {"vendor": "Linux", "product": "Linux"}}),
+        ("p-1", {"cpe": CPE_PG, "cna": {"vendor": "n/a", "product": "PostgreSQL"}}),
+    ]
+    out = capsys.readouterr().out
+    assert "~ remapped  Linux Kernel" in out and "= unchanged Envoy" in out
+    assert "summary: 1 mapped, 1 remapped" in out
+
+
+def test_a_product_already_mapped_as_in_the_file_is_not_sent_again(tmp_path: Path) -> None:
+    mapped = [
+        {"id": "k-1", "name": "Linux Kernel", "cpe": KERNEL_O, "cna": {"vendor": "Linux", "product": "Linux"}},
+        {"id": "p-1", "name": "PostgreSQL", "cpe": CPE_PG, "cna": {"vendor": "n/a", "product": "PostgreSQL"}},
+    ]
+    fake = FakeApi({}, mapped=mapped)
+    assert itop_load.run([str(write(tmp_path, CNA_FILE)), "--map-cpe"], api=fake.api()) == 0
+    assert fake.puts == []
+
+
+@pytest.mark.parametrize(
+    "cna",
+    [
+        "cna: [a]",
+        "cna: { Envoy: envoyproxy }",
+        "cna: { Envoy: { vendor: envoyproxy } }",
+        "cna: { Envoy: { vendor: '  ', product: envoy } }",
+        "cna: { Envoy: { vendor: envoyproxy, product: envoy, extra: 1 } }",
+        "cna: { Redshift: { vendor: Amazon, product: Redshift } }",  # no CPE for it
+    ],
+)
+def test_invalid_cna_sections_are_rejected(tmp_path: Path, cna: str, capsys: pytest.CaptureFixture[str]) -> None:
+    head = "cpe:\n  Envoy: 'cpe:2.3:a:envoyproxy:envoy:*:*:*:*:*:*:*:*'\n  Redshift: null\n"
+    text = f"{head}{cna}\nobjects:\n  - {{ class: Server, name: a }}\n"
+    assert itop_load.run([str(write(tmp_path, text)), "--map-cpe"], api=FakeApi({}).api()) == 2
+    assert "invalid file" in capsys.readouterr().err
 
 
 @pytest.mark.parametrize(("status", "expected"), [(401, "refused the token"), (422, "answered 422")])
@@ -516,6 +583,19 @@ def test_the_approved_inventory_loads_and_a_second_run_changes_nothing(capsys: p
     assert "internet_exposed" not in cis["superset-bi"]
 
 
+def test_cpe_names_of_every_part_are_accepted(tmp_path: Path) -> None:
+    """D-107: application, operating system and hardware CPE names all reach the API with their part."""
+    text = (
+        "cpe:\n"
+        "  nginx: 'cpe:2.3:a:f5:nginx:*:*:*:*:*:*:*:*'\n"
+        "  kernel: 'cpe:2.3:o:linux:linux_kernel:*:*:*:*:*:*:*:*'\n"
+        "  firewall: 'cpe:2.3:h:cisco:asa_5505:*:*:*:*:*:*:*:*'\n"
+        "objects:\n  - { class: Server, name: a }\n"
+    )
+    inventory = itop_load.parse_inventory(write(tmp_path, text))
+    assert [name.split(":")[2] for name in inventory.cpe.values() if name] == ["a", "o", "h"]
+
+
 def test_the_approved_inventory_maps_the_kernel_cpe_of_one_node_only() -> None:
     inventory = itop_load.parse_inventory(INVENTORY)
     assert inventory.cpe["Linux Kernel"] == "cpe:2.3:o:linux:linux_kernel:*:*:*:*:*:*:*:*"
@@ -530,3 +610,14 @@ def test_the_approved_inventory_maps_the_kernel_cpe_of_one_node_only() -> None:
     ]
     products = {spec.key["name"] for spec in inventory.specs if spec.class_name == "Software"}
     assert products == set(inventory.cpe)  # every product has a CPE decision, nothing extra
+
+
+def test_the_approved_inventory_names_the_cna_of_each_product_the_cve_org_path_covers() -> None:
+    """F15.9: the CNA names the F20 dry run found in CVE.org; Go and PostGIS stay without them (see the file)."""
+    inventory = itop_load.parse_inventory(INVENTORY)
+    assert inventory.cna["Linux Kernel"] == ("Linux", "Linux")
+    assert inventory.cna["PostgreSQL"] == ("n/a", "PostgreSQL")
+    assert inventory.cna["Python"] == ("Python Software Foundation", "CPython")
+    assert inventory.cna["Apache Kafka"] == ("Apache Software Foundation", "Apache Kafka")
+    assert {"Go", "PostGIS", "Kernel de Amazon Linux 2023"}.isdisjoint(inventory.cna)
+    assert set(inventory.cna) == {product for product, cpe in inventory.cpe.items() if cpe} - {"Go", "PostGIS"}

@@ -123,8 +123,8 @@ def world(engine: Engine) -> sessionmaker[Session]:
             )
             run(
                 engine,
-                "INSERT INTO cpe_mapping (software_product_id, nvd_vendor, nvd_product, origin, mapped_at) "
-                "VALUES (:p, :v, :n, 'manual', now())",
+                "INSERT INTO cpe_mapping (software_product_id, nvd_part, nvd_vendor, nvd_product, origin, mapped_at) "
+                "VALUES (:p, 'a', :v, :n, 'manual', now())",
                 {"p": products[product], "v": vendor, "n": nvd_product},
             )
         run(
@@ -149,7 +149,7 @@ def findings(engine: Engine) -> dict[tuple[str, str], str]:
 def test_old_kev_cves_of_mapped_products_are_found_after_the_refresh(engine: Engine, world: sessionmaker[Session]):
     sources = Sources(recorded("nvd_kev_page.json"), recorded("kev_any_age.json"))
 
-    _nvd, _kev, _epss, kev_records = sources.refresh(world)
+    _nvd, _kev, _epss, kev_records, _cve_org = sources.refresh(world)
     result = run_scan(world, ScanOptions(), now=SCAN_AT)
 
     assert set(findings(engine)) == EXPECTED  # nothing for Redis (no comparable range) nor CVE-2016-5195 (fixed)
@@ -182,7 +182,7 @@ def test_a_second_refresh_does_not_rewrite_unchanged_kev_records(engine: Engine,
     changed = next(v for v in page["vulnerabilities"] if v["cve"]["id"] == "CVE-2025-31125")
     changed["cve"]["lastModified"] = "2026-11-27T10:00:00.000"
 
-    *_, again = sources.refresh(world)
+    *_, again, _cve_org = sources.refresh(world)
 
     after = dict(rows(engine, fetched))
     assert after["CVE-2024-1086"] == dict(before)["CVE-2024-1086"]  # same lastModified: not written again
@@ -233,7 +233,7 @@ def test_a_cve_cisa_just_added_and_nvd_does_not_flag_yet_is_looked_up_by_id(
     }
     sources = Sources(recorded("nvd_kev_page.json"), catalogue, {"CVE-2026-120705": record})
 
-    *_, kev_records = sources.refresh(world)
+    *_, kev_records, _cve_org = sources.refresh(world)
 
     asked = [q["cveId"] for q in sources.nvd_queries if "cveId" in q]
     assert asked[:2] == ["CVE-2026-120705", "CVE-2026-120706"]  # the recent ones first

@@ -32,7 +32,7 @@ def test_model_counts_match_data_model_v1() -> None:
     tables = Base.metadata.tables
     assert len(tables) == 76
     assert sum(len(t.foreign_keys) for t in tables.values()) == 120
-    assert sum(len(t.columns) for t in tables.values()) == 535
+    assert sum(len(t.columns) for t in tables.values()) == 536  # 535 + cpe_mapping.nvd_part (0005, D-107)
 
 
 def test_create_all_on_postgres_18(scratch_engine: Engine) -> None:

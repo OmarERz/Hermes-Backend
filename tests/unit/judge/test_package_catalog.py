@@ -437,3 +437,16 @@ def test_settings_defaults_and_limits() -> None:
         JudgeSettings(double_review_threshold=9)
     with pytest.raises(CatalogError, match="positive"):
         JudgeSettings(max_calls=0)
+
+
+def test_the_cna_pair_is_optional_and_reaches_the_judges_view() -> None:
+    """F15.9 (D-103): `group.cna` is an optional contract field; packages stored before it still load."""
+    stored_before = ReviewPackage.from_content(finding_package())
+    assert json.loads(stored_before.compact_view().splitlines()[1])["group"]["cna"] is None
+    content = finding_package()
+    content["group"]["cna"] = {"vendor": "Example Foundation", "product": "Example HTTP Server"}
+    view = json.loads(ReviewPackage.from_content(content).compact_view().splitlines()[1])
+    assert view["group"]["cna"] == {"vendor": "Example Foundation", "product": "Example HTTP Server"}
+    content["group"]["cna"] = {"vendor": "Example Foundation"}
+    with pytest.raises(PackageError):
+        ReviewPackage.from_content(content)

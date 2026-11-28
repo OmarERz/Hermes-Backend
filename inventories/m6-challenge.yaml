@@ -44,6 +44,29 @@ cpe:
   React Native: "cpe:2.3:a:facebook:react-native:*:*:*:*:*:*:*:*"
   Vite: "cpe:2.3:a:vitejs:vite:*:*:*:*:*:*:*:*"
 
+cna:
+  # F15.9 (D-103, ESC-05): vendor and product as each CNA writes them in CVE.org `affected[]` (read from the records
+  # of 27 Nov 2026). The CVE.org path only compares products that have them, so products whose CNA uses the NVD names
+  # repeat them. Go has none on purpose: the Go CNA files each package as a product under two vendors ("Go standard
+  # library", "Go toolchain"), which one pair cannot express. PostGIS has none: no CNA record for it was seen.
+  Linux Kernel: { vendor: Linux, product: Linux }
+  PostgreSQL: { vendor: "n/a", product: PostgreSQL }
+  Python: { vendor: Python Software Foundation, product: CPython }
+  Apache Kafka: { vendor: Apache Software Foundation, product: Apache Kafka }
+  Apache Spark: { vendor: Apache Software Foundation, product: Apache Spark }
+  Apache Superset: { vendor: Apache Software Foundation, product: Apache Superset }
+  MongoDB: { vendor: MongoDB, product: MongoDB Server }
+  Flask: { vendor: pallets, product: flask }
+  Next.js: { vendor: vercel, product: next.js }
+  Vite: { vendor: vitejs, product: vite }
+  Kubernetes: { vendor: kubernetes, product: kubernetes }
+  Envoy: { vendor: envoyproxy, product: envoy }
+  Redis: { vendor: redis, product: redis }
+  Gin: { vendor: gin-gonic, product: gin }
+  React: { vendor: facebook, product: react }
+  React Native: { vendor: facebook, product: react-native }
+  FastAPI: { vendor: tiangolo, product: fastapi }
+
 objects:
   # --- People: two per layer (the lead owns the CIs) and the security team ------------------------------------------
   - class: Person

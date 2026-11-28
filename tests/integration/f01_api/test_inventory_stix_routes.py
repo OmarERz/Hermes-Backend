@@ -111,7 +111,7 @@ def test_mapping_a_product_removes_it_from_the_pending_list(client: TestClient, 
     as_role(client, Role.ANALYST)
     cpe = "cpe:2.3:a:F5:nginx:1.24.0:*:*:*:*:*:*:*"
     response = client.put(f"/api/mappings/{product}", json={"cpe": cpe})
-    assert response.status_code == 200 and response.json() == {"software": str(product), "cpe": cpe}
+    assert response.status_code == 200 and response.json() == {"software": str(product), "cpe": cpe, "cna": None}
     assert client.get("/api/pending/inventory").json()["software_without_cpe"] == []
     stored = rows(engine, "SELECT nvd_vendor, nvd_product, origin, mapped_by IS NOT NULL FROM cpe_mapping")
     assert stored == [("f5", "nginx", "manual", True)]
@@ -132,8 +132,8 @@ def test_editing_the_cpe_keeps_the_cna_names(client: TestClient, engine: Engine)
     product = seed_inventory(engine)
     run(
         engine,
-        "INSERT INTO cpe_mapping (software_product_id, nvd_vendor, nvd_product, cna_vendor, cna_product, "
-        "origin, mapped_at) VALUES (:p, 'f5', 'nginx', 'F5 Networks', 'NGINX Plus', 'manual', now())",
+        "INSERT INTO cpe_mapping (software_product_id, nvd_part, nvd_vendor, nvd_product, cna_vendor, cna_product, "
+        "origin, mapped_at) VALUES (:p, 'a', 'f5', 'nginx', 'F5 Networks', 'NGINX Plus', 'manual', now())",
         {"p": product},
     )
     as_role(client, Role.ANALYST)
@@ -143,6 +143,85 @@ def test_editing_the_cpe_keeps_the_cna_names(client: TestClient, engine: Engine)
     assert rows(engine, "SELECT nvd_vendor, cna_vendor, cna_product FROM cpe_mapping") == [
         ("nginx", "F5 Networks", "NGINX Plus")
     ]
+
+
+def test_the_mapping_route_stores_the_part_of_the_cpe(client: TestClient, engine: Engine) -> None:
+    """D-107 (F20 dry run, P2-1): the kernel is mapped as an operating system (`o`), hardware (`h`) is accepted,
+    replacing the mapping replaces the part, and the audit keeps both parts."""
+    product = seed_inventory(engine)
+    as_role(client, Role.ANALYST)
+    kernel = "cpe:2.3:o:linux:linux_kernel:*:*:*:*:*:*:*:*"
+    response = client.put(f"/api/mappings/{product}", json={"cpe": kernel})
+    assert response.status_code == 200 and response.json()["cpe"] == kernel
+    assert rows(engine, "SELECT nvd_part, nvd_vendor, nvd_product FROM cpe_mapping") == [("o", "linux", "linux_kernel")]
+    hardware = "cpe:2.3:h:cisco:asa_5505:-:*:*:*:*:*:*:*"
+    assert client.put(f"/api/mappings/{product}", json={"cpe": hardware}).status_code == 200
+    assert rows(engine, "SELECT nvd_part, nvd_vendor FROM cpe_mapping") == [("h", "cisco")]
+    audit = rows(engine, "SELECT before ->> 'nvd_part', after ->> 'nvd_part' FROM audit_log ORDER BY created_at")
+    assert audit == [(None, "o"), ("o", "h")]
+
+
+def test_the_inventory_and_the_candidates_show_the_stored_part(client: TestClient, engine: Engine) -> None:
+    """D-107 (F20 dry run, P2-1): the kernel shows as `cpe:2.3:o:…` in the inventory, and a local candidate takes the
+    part its mapping stores (NVD ranges do not keep it)."""
+    product = seed_inventory(engine)
+    as_role(client, Role.ANALYST)
+    kernel = "cpe:2.3:o:linux:linux_kernel:*:*:*:*:*:*:*:*"
+    assert client.put(f"/api/mappings/{product}", json={"cpe": kernel}).status_code == 200
+    assert [item["cpe"] for item in client.get("/api/inventory/software").json()["items"]] == [kernel]
+    run(engine, "INSERT INTO cve (id) VALUES ('CVE-2026-0002')")
+    run(
+        engine,
+        "INSERT INTO cve_affected_range (cve_id, source, vendor, product) "
+        "VALUES ('CVE-2026-0002', 'nvd_cpe', 'linux', 'linux_kernel')",
+    )
+    found = client.get("/api/cpe/candidates", params={"q": "linux kernel"}).json()
+    assert [c["cpe"] for c in found] == [kernel]
+
+
+def test_the_cna_names_are_set_kept_and_removed_through_the_mapping_route(client: TestClient, engine: Engine) -> None:
+    """F15.9 (ESC-05, D-103): the mapping carries the CNA's names for the CVE.org path; omitted they stay, null removes
+    them, and the inventory shows them."""
+    product = seed_inventory(engine)
+    as_role(client, Role.ANALYST)
+    kernel = "cpe:2.3:o:linux:linux_kernel:*:*:*:*:*:*:*:*"
+    named = client.put(
+        f"/api/mappings/{product}", json={"cpe": kernel, "cna": {"vendor": " Linux ", "product": "Linux"}}
+    )
+    assert named.status_code == 200
+    assert named.json() == {"software": str(product), "cpe": kernel, "cna": {"vendor": "Linux", "product": "Linux"}}
+    assert rows(engine, "SELECT nvd_part, cna_vendor, cna_product FROM cpe_mapping") == [("o", "Linux", "Linux")]
+    (item,) = client.get("/api/inventory/software").json()["items"]
+    assert item["cna"] == {"vendor": "Linux", "product": "Linux"}
+    kept = client.put(f"/api/mappings/{product}", json={"cpe": kernel})
+    assert kept.json()["cna"] == {"vendor": "Linux", "product": "Linux"}
+    cleared = client.put(f"/api/mappings/{product}", json={"cpe": kernel, "cna": None})
+    assert cleared.status_code == 200 and cleared.json()["cna"] is None
+    assert rows(engine, "SELECT cna_vendor, cna_product FROM cpe_mapping") == [(None, None)]
+    audit = rows(engine, "SELECT after ->> 'cna_vendor' FROM audit_log ORDER BY created_at")
+    assert audit == [("Linux",), ("Linux",), (None,)]
+
+
+@pytest.mark.parametrize(
+    "cna",
+    [
+        {"vendor": "Linux"},
+        {"vendor": "  ", "product": "Linux"},
+        {"vendor": "Linux", "product": ""},
+        {"vendor": "Li\x00nux", "product": "Linux"},
+        {"vendor": "Linux", "product": "L\u0085"},
+        {"vendor": "v" * 201, "product": "Linux"},
+        {"vendor": "Linux", "product": "Linux", "extra": 1},
+        "Linux:Linux",
+    ],
+    ids=["no product", "blank vendor", "empty product", "control", "c1 control", "too long", "extra key", "text"],
+)
+def test_invalid_cna_names_are_refused_by_the_schema(client: TestClient, engine: Engine, cna: object) -> None:
+    product = seed_inventory(engine)
+    as_role(client, Role.ANALYST)
+    response = client.put(f"/api/mappings/{product}", json={"cpe": "cpe:2.3:a:f5:nginx:*:*:*:*:*:*:*:*", "cna": cna})
+    assert response.status_code == 422
+    assert rows(engine, "SELECT count(*) FROM cpe_mapping") == [(0,)]
 
 
 def test_the_nvd_dictionary_is_only_queried_when_a_key_is_configured() -> None:

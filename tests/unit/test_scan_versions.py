@@ -4,7 +4,15 @@ from __future__ import annotations
 
 import pytest
 
-from core.scan.versions import compare_versions, in_range, known_order, parse_version, release_of
+from core.scan.versions import (
+    bound_order,
+    compare_versions,
+    in_range,
+    known_order,
+    line_edge_order,
+    parse_version,
+    release_of,
+)
 
 
 @pytest.mark.parametrize(
@@ -99,3 +107,55 @@ def test_release_of_reads_numbers_before_an_unknown_letter_suffix(raw: str, rele
 )
 def test_known_order_decides_only_what_the_scale_decides(left: str, right: str, expected: int | None) -> None:
     assert known_order(left, right) == expected
+
+
+# --- F15.9: CVE JSON 5 wildcard bounds ('6.1.*' names the whole 6.1 line) -----------------------------------------
+@pytest.mark.parametrize(
+    ("version", "bound", "expected"),
+    [
+        ("6.1.0", "6.1.*", 0),
+        ("6.1.192", "6.1.*", 0),
+        ("6.1", "6.1.*", 0),
+        ("6.2", "6.1.*", 1),
+        ("6.2-rc1", "6.1.*", 1),
+        ("6.0.99", "6.1.*", -1),
+        ("5.10.274", "5.10.*", 0),
+        ("6", "6.0.*", 0),  # trailing zeros: 6 is 6.0
+        ("7.0.1", "6.*", 1),
+        ("2.4.58", "2.4.x", 0),
+        ("6.1.0", "6.1.0", 0),  # a plain bound is the comparator's own order
+        ("6.1.0", "6.1.1", -1),
+        ("latest", "6.1.*", None),
+        ("6.1.0", "*", None),  # a lone '*' is no bound: the parser turns it into an open side
+    ],
+)
+def test_bound_order_reads_wildcard_lines(version: str, bound: str, expected: int | None) -> None:
+    assert bound_order(version, bound) == expected
+
+
+def test_wildcard_bounds_in_ranges() -> None:
+    """The kernel CNA writes fixed lines as `6.1.192 <= v <= 6.1.*` and the affected gap after one as `(6.1.*, ...)`."""
+    assert in_range("6.1.200", "6.1.192", True, "6.1.*", True) is True
+    assert in_range("6.2.0", "6.1.192", True, "6.1.*", True) is False
+    assert in_range("6.1.0", "6.1.*", False, "6.6.162", False) is False  # inside the 6.1 line, not after it
+    assert in_range("6.2.0", "6.1.*", False, "6.6.162", False) is True
+    assert in_range("6.6.162", "6.1.*", False, "6.6.162", False) is False
+    assert in_range("6.1.0", "5.15.*", False, "6.1.192", False) is True
+    assert in_range("6.1.0", "6.1.*", True, None, None) is True
+    assert in_range("6.1.0", "x.*", True, None, None) is None  # an unreadable bound is never guessed
+
+
+@pytest.mark.parametrize(
+    ("left", "left_after", "right", "right_after", "expected"),
+    [
+        ((6, 1), True, (6, 6), False, -1),  # after all 6.1.x comes before the start of 6.6
+        ((3,), True, (3, 0), False, 1),  # after all 3.x is after the start of 3.0
+        ((3,), False, (3, 0), True, -1),
+        ((1, 9007199254740992), False, (1, 9007199254740993), False, -1),
+        ((2, 4), True, (2, 4), True, 0),
+    ],
+)
+def test_line_edges_are_ordered_with_integers(
+    left: tuple[int, ...], left_after: bool, right: tuple[int, ...], right_after: bool, expected: int
+) -> None:
+    assert line_edge_order(left, left_after, right, right_after) == expected

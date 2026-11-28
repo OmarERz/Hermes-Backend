@@ -4,7 +4,9 @@ How a candidate (installed software, CVE) is found:
   - the product has a CPE mapping (ESC-05); unmapped products produce nothing and stay pending (ESC-07);
   - an NVD range (`nvd_cpe`, certainty 1.0) or a CNA range (`cna_affected`, 0.9) of the mapped vendor and product
     contains the installed version, compared locally (ESC-13); a version that cannot be compared is counted as a
-    comparison error and never guessed (ESC-12);
+    comparison error and never guessed (ESC-12). One finding per CI and CVE: NVD wins over the CNA, and an existing
+    finding takes the best source of each scan, so a CVE.org finding that NVD later confirms becomes `nvd_cpe`
+    (F15.9, D-103: it then opens a ticket at any level);
   - a CVE in CISA KEV counts whatever its age; the others must be published within the recency window
     (ESC-10, TODO(P-003)) unless a finding for them already exists, so an old finding is never "fixed" by the
     window alone;
@@ -59,6 +61,7 @@ class ScanResult:
     unmapped_products: int = 0
     compare_errors: int = 0
     candidates: int = 0
+    source_changes: int = 0  # existing findings whose best match source changed (a CVE.org finding NVD confirmed)
 
 
 @dataclass
@@ -241,7 +244,17 @@ def _evaluate(state: _State, scope: set[uuid.UUID] | None) -> None:
     found = _candidates(state, scanned, known)
     state.result.candidates = sum(len(c) for c in found.matches.values())
     _apply_lifecycle(state, existing, found, scope=scope)
+    _update_sources(state, existing, found)
     _create_new(state, found.matches, known, scanned)
+
+
+def _update_sources(state: _State, existing: dict[uuid.UUID, tuple[m.Finding, m.FindingGroup]], found: _Found) -> None:
+    """A finding found again keeps the best source of this scan (`_prefer`): certainty and the ticket rule follow it."""
+    for finding, group in existing.values():
+        source = found.matches.get(finding.installed_software_id, {}).get(group.cve_id)
+        if source is not None and source != finding.match_source:
+            finding.match_source = source
+            state.result.source_changes += 1
 
 
 def _existing_findings(session: Session) -> dict[uuid.UUID, tuple[m.Finding, m.FindingGroup]]:

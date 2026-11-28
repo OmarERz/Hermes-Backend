@@ -37,6 +37,8 @@ from core.scoring.evaluate import (
     recalculate_open_groups,
 )
 from core.scoring.formula_repo import load_active_formula, load_formula
+from core.vulndata.cna_discovery import CveOrgResult, Observed, clear_rejected, refresh_cve_org, restore_due
+from core.vulndata.cvelist import CveOrgClient
 from core.vulndata.epss import EpssResult, fetch_daily, load_epss
 from core.vulndata.http import JsonSource
 from core.vulndata.kev import KevResult, fetch_catalogue, load_kev
@@ -161,34 +163,57 @@ KEV_LAG_MAX = 20  # at most this many lookups by id per refresh (the public NVD 
 
 
 def refresh_vulndata(
-    factory: sessionmaker[Session], nvd: NvdClient, source: JsonSource
-) -> Callable[[], tuple[LoadResult, object, object, LoadResult]]:
-    """ESC-09: the recent NVD publications (recency window), the KEV catalogue, today's EPSS scores and the NVD
-    records of every KEV CVE, whatever its age (ESC-10: the window does not apply to KEV).
+    factory: sessionmaker[Session], nvd: NvdClient, source: JsonSource, cve_org: CveOrgClient | None = None
+) -> Callable[[], tuple[LoadResult, object, object, LoadResult, CveOrgResult]]:
+    """ESC-09: the recent NVD publications (recency window), the KEV catalogue, the NVD records of every KEV CVE
+    whatever its age (ESC-10: the window does not apply to KEV), today's EPSS scores and, last, the CVE.org records of
+    the CVEs NIST has not enriched that may concern a mapped product (F15.9, D-103; `core.vulndata.cna_discovery`).
 
     No network call runs inside a database transaction: each download finishes first, then a short transaction
     stores it (NVD in batches of `NVD_BATCH`), so no write of the API ever waits on a download.
     """
+    cve_org = cve_org or CveOrgClient(source)
 
-    def run() -> tuple[LoadResult, object, object, LoadResult]:
+    def run() -> tuple[LoadResult, object, object, LoadResult, CveOrgResult]:
         end = datetime.now(UTC)
-        nvd_result = _load_nvd(factory, nvd.iter_published(end - timedelta(days=RECENCY_DAYS), end))
-        kev_result = _in_batches(factory, load_kev, fetch_catalogue(source), KevResult())
-        # Before EPSS: an EPSS outage must not keep the ranges of old KEV CVEs out of the next scan.
-        kev_records = _load_kev_records(factory, nvd, end.date())
-        epss_result = _load_epss(factory, fetch_daily(source))
-        return nvd_result, kev_result, epss_result, kev_records
+        held = _held_versions(factory)  # before any write: what CVE.org's cache compares NVD's dates with
+        observed = Observed()
+        try:
+            window = nvd.iter_published(end - timedelta(days=RECENCY_DAYS), end)
+            nvd_result = _load_nvd(factory, window, observe=observed)
+            kev_result = _in_batches(factory, load_kev, fetch_catalogue(source), KevResult())
+            # Before EPSS: an EPSS outage must not keep the ranges of old KEV CVEs out of the next scan.
+            kev_records = _load_kev_records(factory, nvd, end.date(), observe=observed)
+            epss_result = _load_epss(factory, fetch_daily(source))
+        except BaseException:
+            # NVD may have re-dated or rejected records already and CVE.org did not run: their CNA records are asked
+            # next time, and a CVE NVD rejected keeps no CNA range meanwhile.
+            restore_due(factory, observed.sightings, None, held)
+            clear_rejected(factory, observed.rejected)
+            raise
+        # Last: an outage of GitHub keeps CVE.org out of this refresh only (the step stops and logs it).
+        cna_result = refresh_cve_org(factory, cve_org, observed, held)
+        return nvd_result, kev_result, epss_result, kev_records, cna_result
 
     return run
 
 
 def _load_nvd(
-    factory: sessionmaker[Session], items: Iterable[dict[str, Any]], *, skip: Callable[[CveRecord], bool] | None = None
+    factory: sessionmaker[Session],
+    items: Iterable[dict[str, Any]],
+    *,
+    skip: Callable[[CveRecord], bool] | None = None,
+    observe: Observed | None = None,
+    in_window: bool = True,
 ) -> LoadResult:
-    """Parse and store NVD entries in batches; `skip` leaves out records that need no write."""
+    """Parse and store NVD entries in batches; `skip` leaves out records that need no write; `observe` collects the
+    records without NVD configuration (the CVE.org candidates, F15.9), marked as from the recency window or not, the
+    CNA of every record and the rejected ones."""
     result = LoadResult()
     batch: list[CveRecord] = []
     for item in items:
+        if observe is not None:
+            observe.see(item, in_window=in_window)
         record = parse_cve(item)
         if record is None:
             result.skipped += 1
@@ -204,7 +229,9 @@ def _load_nvd(
     return result
 
 
-def _load_kev_records(factory: sessionmaker[Session], nvd: NvdClient, today: date) -> LoadResult:
+def _load_kev_records(
+    factory: sessionmaker[Session], nvd: NvdClient, today: date, *, observe: Observed | None = None
+) -> LoadResult:
     """The NVD record of every KEV CVE, so the scan can compare its ranges whatever its age (F20 dry run, P0-1).
 
     One query (`hasKev`, 2,000 records a page; about 1,800 in Nov 2026) brings them all, so the number of requests
@@ -219,9 +246,9 @@ def _load_kev_records(factory: sessionmaker[Session], nvd: NvdClient, today: dat
     def unchanged(record: CveRecord) -> bool:
         return record.last_modified_at is not None and held.get(record.cve_id) == record.last_modified_at
 
-    result = _load_nvd(factory, nvd.iter_kev(), skip=unchanged)
+    result = _load_nvd(factory, nvd.iter_kev(), skip=unchanged, observe=observe, in_window=False)
     for cve_id in _kev_pending(factory, today):
-        found = _load_nvd(factory, nvd.iter_cve(cve_id))
+        found = _load_nvd(factory, nvd.iter_cve(cve_id), observe=observe, in_window=False)
         result.stored, result.skipped = result.stored + found.stored, result.skipped + found.skipped
     return result
 

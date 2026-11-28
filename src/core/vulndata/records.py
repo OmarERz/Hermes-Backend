@@ -55,6 +55,7 @@ class CveRecord:
     references: list[ReferenceRecord] = field(default_factory=list)
     ranges: list[RangeRecord] = field(default_factory=list)
     workarounds: list[WorkaroundRecord] = field(default_factory=list)
+    uncomparable: int = 0  # CNA product entries given only as git commits: never compared, never guessed (ESC-13)
 
 
 def parse_timestamp(raw: object) -> datetime | None:

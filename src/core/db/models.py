@@ -351,6 +351,7 @@ class CpeMapping(Base):
     software_product_id: Mapped[uuid.UUID] = mapped_column(
         UUID(as_uuid=True), ForeignKey("software_product.id"), primary_key=True
     )
+    nvd_part: Mapped[str | None] = mapped_column(Text, nullable=True)  # a | o | h (F15.9, D-107)
     nvd_vendor: Mapped[str | None] = mapped_column(Text, nullable=True)
     nvd_product: Mapped[str | None] = mapped_column(Text, nullable=True)
     cna_vendor: Mapped[str | None] = mapped_column(Text, nullable=True)

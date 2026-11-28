@@ -20,7 +20,7 @@ from sqlalchemy.orm import Session
 
 from core.db import models as m
 from core.mitigation.text import clean_text, safe_url
-from core.scan.versions import compare_versions, parse_version
+from core.scan.versions import bound_order, known_order, line_edge_order, parse_version, release_of, wildcard_line
 
 MAX_IOCS: Final = 20
 MAX_WORKAROUNDS: Final = 10
@@ -37,7 +37,8 @@ _RANGES = text(
     "FROM finding_group g JOIN cpe_mapping c ON c.software_product_id = g.software_product_id "
     "JOIN cve_affected_range r ON r.cve_id = g.cve_id "
     "AND ((r.source = 'nvd_cpe' AND r.vendor = c.nvd_vendor AND r.product = c.nvd_product) "
-    "OR (r.source = 'cna_affected' AND r.vendor = c.cna_vendor AND r.product = c.cna_product)) "
+    "OR (r.source = 'cna_affected' AND lower(r.vendor) = lower(c.cna_vendor) "
+    "AND lower(r.product) = lower(c.cna_product))) "
     "WHERE g.id = :group_id"
 )
 
@@ -78,8 +79,9 @@ def version_key(version: str) -> tuple[tuple[int, int, str], ...]:
 
 
 def _bound_order(version: str, bound: str) -> int:
-    """-1, 0 or 1 for one range bound: the scan's comparator when it reads both, else the simple order."""
-    order = compare_versions(version, bound)
+    """-1, 0 or 1 for one range bound: the scan's comparator when it reads both (a CNA wildcard bound such as `6.1.*`
+    is its whole line, F15.9), else the simple order."""
+    order = bound_order(version, bound, known_order)  # release numbers decide when only letters differ (`1.1.1w`)
     if order is not None:
         return order
     left, right = version_key(version), version_key(bound)
@@ -107,12 +109,75 @@ def _order(version: str) -> tuple[int, object]:
     return (0, parsed) if parsed is not None else (1, version_key(version))
 
 
+Range = tuple[str | None, bool | None, str | None, bool | None]
+
+
+def _correction(version: str, ranges: Sequence[Range]) -> str:
+    """«o superior» only when no affected range lies after the fixed version; otherwise the advice stops before the
+    first one, as the data say (F15.9 review: «6.1.192 o superior» must not cover the affected 6.6 line)."""
+    later = [r for r in ranges if r[0] is not None and _starts_after(version, r)]
+    if not later:
+        return f"Actualizar a {version} o superior."
+    first = later[0]
+    for rng in later[1:]:
+        if _starts_before(rng, first):
+            first = rng
+    start, inclusive = first[0], first[1]
+    line = wildcard_line(str(start))
+    if line is not None:
+        name = ".".join(map(str, line))
+        if inclusive:
+            return f"Actualizar a {version} o posterior, sin llegar a la línea {name}."
+        return f"Actualizar a {version} o posterior dentro de la línea {name}."
+    if inclusive:
+        return f"Actualizar a {version} o posterior, sin llegar a {start}."
+    return f"Actualizar a {version} o posterior, hasta {start}."
+
+
+def _starts_after(version: str, rng: Range) -> bool:
+    start, inclusive = rng[0], rng[1]
+    if start is None:
+        return False
+    order = _bound_order(version, start)
+    return order < 0 or (order == 0 and not inclusive)
+
+
+def _starts_before(a: Range, b: Range) -> bool:
+    """Whether range `a` becomes affected before range `b`: a plain start is its version; a wildcard start is the
+    beginning of its line when inclusive and the end of it when exclusive (`(6.1.*, …)` starts after every 6.1.x)."""
+    start_a, start_b = str(a[0]), str(b[0])
+    line_a, line_b = wildcard_line(start_a), wildcard_line(start_b)
+    if line_a is None and line_b is None:
+        order = _bound_order(start_a, start_b)
+        return order < 0 or (order == 0 and bool(a[1]) and not b[1])
+    if line_a is not None and line_b is not None:
+        return line_edge_order(line_a, not a[1], line_b, not b[1]) < 0
+    if line_a is None:
+        position = _line_position(start_a, line_b or ())  # the plain start against b's line
+        return position is not None and (position < 0 if b[1] else position <= 0)
+    return not _starts_before(b, a)
+
+
+def _line_position(version: str, line: tuple[int, ...]) -> int | None:
+    """-1, 0 or 1: the version before, inside or after a wildcard line; a letter release (`1.1.1w`) the comparator
+    cannot read is placed by its release numbers, which come first on its scale whatever the letters mean."""
+    position = bound_order(version, ".".join(map(str, line)) + ".*")
+    if position is not None:
+        return position
+    release = release_of(version)
+    if release is None:
+        return None
+    head = (release + (0,) * len(line))[: len(line)]
+    return (head > line) - (head < line)
+
+
 def compose(data: MitigationData) -> Mitigation:
-    """A fixed version is only advised when no affected range contains it ("1.5 or higher" must not mean 2.1)."""
+    """A fixed version is only advised when no affected range contains it ("1.5 or higher" must not mean 2.1), and
+    «or higher» only reaches up to the next affected range."""
     candidates = {clean_text(v, 60) for v in data.fixed_versions if clean_text(v, 60)}
     versions = sorted((v for v in candidates if not any(_inside(v, r) for r in data.affected_ranges)), key=_order)
     if versions:
-        correction = tuple(f"Actualizar a {v} o superior." for v in versions)
+        correction = tuple(_correction(v, data.affected_ranges) for v in versions)
     else:
         correction = (
             "Los datos no publican una versión corregida: aplicar las medidas temporales y consultar al fabricante.",

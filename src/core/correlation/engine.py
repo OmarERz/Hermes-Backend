@@ -55,6 +55,7 @@ class GroupCtx:
     product_names: frozenset[str]  # iTop name and CPE product names, to compare attack vectors
     vendor_products: tuple[tuple[str, str], ...]  # (vendor, product) pairs of the CPE mapping (NVD and CNA)
     cis: tuple[Ci, ...]
+    cna: tuple[str, str] | None = None  # the CNA pair alone, for the judge's package (F15.9, D-103)
 
 
 @dataclass(frozen=True)
@@ -122,7 +123,8 @@ def load_active_groups(session: Session, only: set[uuid.UUID] | None = None) -> 
             ),
             {"g": gid},
         )
-        groups.append(GroupCtx(gid, cve_id, names, pairs, tuple(Ci(*row) for row in cis)))
+        cna = (cna_v, cna_p) if cna_v and cna_p else None
+        groups.append(GroupCtx(gid, cve_id, names, pairs, tuple(Ci(*row) for row in cis), cna))
     return groups
 
 

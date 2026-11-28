@@ -53,7 +53,7 @@ _INSTALLS: Final = text(
     """
     SELECT i.asset_id, i.software_product_id AS product_id, p.itop_name AS product, i.version,
            i.itop_class AS category, i.status, l.id AS licence_id,
-           c.nvd_vendor, c.nvd_product, c.cna_vendor, c.cna_product
+           c.nvd_part, c.nvd_vendor, c.nvd_product, c.cna_vendor, c.cna_product
       FROM installed_software i
       JOIN asset a ON a.id = i.asset_id AND a.decommissioned_at IS NULL
       JOIN software_product p ON p.id = i.software_product_id
@@ -68,7 +68,7 @@ _ASSET_INSTALLS: Final = text(
     SELECT i.asset_id, i.software_product_id AS product_id, p.itop_name AS product, i.version,
            i.itop_class AS category, i.status, i.description,
            l.name AS licence_name, l.usage_limit, l.start_date, l.end_date, l.perpetual,
-           c.nvd_vendor, c.nvd_product, c.cna_vendor, c.cna_product
+           c.nvd_part, c.nvd_vendor, c.nvd_product, c.cna_vendor, c.cna_product
       FROM installed_software i
       JOIN software_product p ON p.id = i.software_product_id
       LEFT JOIN software_licence l ON l.id = i.software_licence_id AND l.removed_at IS NULL
@@ -98,7 +98,7 @@ def _worst(levels: Iterable[str]) -> str | None:
 
 def _cpe(row: Any) -> str | None:
     if row.nvd_vendor and row.nvd_product:
-        return cpe_uri(row.nvd_vendor, row.nvd_product)
+        return cpe_uri(row.nvd_vendor, row.nvd_product, row.nvd_part)  # the stored part (D-107): `o` for the kernel
     if row.cna_vendor and row.cna_product:
         return cpe_uri(row.cna_vendor, row.cna_product)
     return None
@@ -267,6 +267,8 @@ class SoftwareItem:
     by_status: dict[str, int] = field(default_factory=dict)  # live installations per status, keys `STATUSES`
     licences: list[ProductLicence] = field(default_factory=list)  # the product's live licences, by name
     licensed_instances: int = 0  # live installations with a live licence assigned (any licence, as iTop links it)
+    cna_vendor: str | None = None  # the CNA names of the mapping (F15.9)
+    cna_product: str | None = None
 
 
 @dataclass(frozen=True)
@@ -323,6 +325,8 @@ def _software(findings: _Findings, installs: Sequence[Any], licences: Sequence[A
                     for r in tied.get(product_id, [])
                 ],
                 licensed_instances=sum(assigned.values()),
+                cna_vendor=first.cna_vendor,
+                cna_product=first.cna_product,
             )
         )
     return out

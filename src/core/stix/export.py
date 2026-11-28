@@ -122,14 +122,16 @@ class _Assets:
     rank: int = 0  # position in ORDER of the most sensitive CI
     personal: bool = False
     asset_ids: list[uuid.UUID] = field(default_factory=list)
-    products: dict[tuple[str, str | None], tuple[str | None, str | None]] = field(default_factory=dict)
+    # (product, version) -> (NVD vendor, NVD product, CPE part) of its mapping
+    products: dict[tuple[str, str | None], tuple[str | None, str | None, str | None]] = field(default_factory=dict)
     excluded: int = 0
 
 
 def _assets(session: Session, group_id: uuid.UUID, options: ExportOptions) -> _Assets:
     rows = session.execute(
         text(
-            "SELECT a.id, a.confidentiality, a.personal_data, p.itop_name, i.version, m.nvd_vendor, m.nvd_product "
+            "SELECT a.id, a.confidentiality, a.personal_data, p.itop_name, i.version, m.nvd_vendor, m.nvd_product, "
+            "m.nvd_part "
             "FROM finding f JOIN finding_current c ON c.finding_id = f.id "
             "JOIN installed_software i ON i.id = f.installed_software_id "
             "JOIN asset a ON a.id = i.asset_id JOIN software_product p ON p.id = i.software_product_id "
@@ -141,7 +143,7 @@ def _assets(session: Session, group_id: uuid.UUID, options: ExportOptions) -> _A
     )
     result = _Assets()
     seen: set[uuid.UUID] = set()
-    for asset_id, confidentiality, personal, product, version, vendor, nvd_product in rows:
+    for asset_id, confidentiality, personal, product, version, vendor, nvd_product, part in rows:
         rank = ORDER.index(confidentiality) if confidentiality in ORDER else UNKNOWN_RANK
         if options.exclude_ultra_classified and rank == HIGHLY_CLASSIFIED:
             result.excluded += 1
@@ -151,7 +153,7 @@ def _assets(session: Session, group_id: uuid.UUID, options: ExportOptions) -> _A
             result.asset_ids.append(asset_id)
             result.rank = max(result.rank, rank)
             result.personal = result.personal or bool(personal)
-        result.products[(product, version)] = (vendor, nvd_product)
+        result.products[(product, version)] = (vendor, nvd_product, part)
     result.count = len(seen)
     return result
 
@@ -354,10 +356,10 @@ def _build_group(group: _GroupData, out: dict[str, Any], marking: str) -> None:
             marking,
         )
     )
-    for (name, version), (vendor, product) in sorted(
+    for (name, version), (vendor, product, part) in sorted(
         group.assets.products.items(), key=lambda kv: (kv[0][0], kv[0][1] or "")
     ):
-        record = builders.SoftwareRecord(name, vendor, version, vendor, product)
+        record = builders.SoftwareRecord(name, vendor, version, vendor, product, part)
         item = add(builders.software(record, marking))
         add(builders.relationship("has", item.id, vuln.id, group.created, marking))
     families: dict[str, Any] = {}

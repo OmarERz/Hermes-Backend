@@ -578,3 +578,144 @@ def test_fixes_found_without_a_new_assessment_are_still_reported(session: Sessio
     assert events(session, ticket)[-1].event_type == "fixed"
     report = lifecycle(sc).apply(session, assessment.id)
     assert (report.writes, report.events) == (0, 0)  # reported once
+
+
+# --- D-103 (F15.9): a finding that only CVE.org gives opens a ticket from level medium up -------------------------
+def cve_org_only(sc: Scenario, *names: str) -> None:
+    for name in names:
+        sc.findings[name].match_source = "cna_affected"
+    sc.session.flush()
+
+
+def test_a_low_cve_org_only_finding_opens_no_ticket(session: Session) -> None:
+    """The kernel's ~2,100 CVE.org findings are mostly low: D-103 keeps them out of iTop (D-098 still holds for NVD)."""
+    sc = Scenario(session)
+    sc.ci("eks-nodo-01", sc.team("Plataforma"))
+    cve_org_only(sc, "eks-nodo-01")
+    run = sc.scan({"eks-nodo-01": "new"})
+
+    report = lifecycle(sc).apply(session, sc.assess({"eks-nodo-01": 45}, run).id)
+
+    assert (report.created, report.events, report.writes) == (0, 0, 0)
+    assert tickets(session, sc) == []
+
+
+@pytest.mark.parametrize("final", [50, 74, 90])
+def test_a_cve_org_only_finding_from_medium_up_opens_its_ticket(session: Session, final: int) -> None:
+    sc = Scenario(session)
+    sc.ci("rds-pagos", sc.team("Datos"))
+    cve_org_only(sc, "rds-pagos")
+    run = sc.scan({"rds-pagos": "new"})
+
+    report = lifecycle(sc).apply(session, sc.assess({"rds-pagos": final}, run).id)
+
+    assert report.created == 1
+    assert [e.event_type for e in events(session)] == ["new_ticket"]
+
+
+def test_a_low_nvd_or_kev_finding_still_opens_its_ticket(session: Session) -> None:
+    """D-098 is unchanged for NVD and KEV matches: every level opens a ticket."""
+    sc = Scenario(session)
+    team = sc.team("Plataforma")
+    sc.ci("node-a", team)
+    sc.ci("node-b", sc.team("Datos"))
+    sc.findings["node-b"].match_source = "kev"
+    session.flush()
+    run = sc.scan({"node-a": "new", "node-b": "new"})
+
+    report = lifecycle(sc).apply(session, sc.assess({"node-a": 20, "node-b": 20}, run).id)
+
+    assert report.created == 2
+
+
+def test_a_low_cve_org_finding_joins_tickets_once_it_reaches_medium_or_nvd_confirms_it(session: Session) -> None:
+    """A finding left out waits: a later assessment at medium, or NVD confirming it (the scan then stores `nvd_cpe`),
+    opens its ticket (D-103, then D-098)."""
+    sc = Scenario(session)
+    sc.ci("eks-nodo-01", sc.team("Plataforma"))
+    sc.ci("eks-nodo-09", sc.team("Datos"))
+    cve_org_only(sc, "eks-nodo-01", "eks-nodo-09")
+    run = sc.scan({"eks-nodo-01": "new", "eks-nodo-09": "new"})
+    lifecycle(sc).apply(session, sc.assess({"eks-nodo-01": 40, "eks-nodo-09": 40}, run).id)
+    assert tickets(session, sc) == []
+
+    sc.later(days=1)
+    rise = sc.scan({"eks-nodo-01": "persistent", "eks-nodo-09": "persistent"})
+    report = lifecycle(sc).apply(session, sc.assess({"eks-nodo-01": 62, "eks-nodo-09": 40}, rise).id)
+    assert report.created == 1
+    assert [t.custodian_team_id for t in tickets(session, sc)] == [sc.assets["eks-nodo-01"].custodian_team_id]
+
+    sc.later(days=1)
+    sc.findings["eks-nodo-09"].match_source = "nvd_cpe"  # what the scan writes when NVD configures the CVE
+    session.flush()
+    confirmed = sc.scan({"eks-nodo-01": "persistent", "eks-nodo-09": "persistent"})
+    report = lifecycle(sc).apply(session, sc.assess({"eks-nodo-01": 62, "eks-nodo-09": 40}, confirmed).id)
+    assert report.created == 1
+    assert len(tickets(session, sc)) == 2
+
+
+def test_a_linked_cve_org_finding_stays_when_its_score_falls(session: Session) -> None:
+    """The rule decides whether a finding enters a ticket; once in, the hysteresis governs the ticket (D-006)."""
+    sc = Scenario(session)
+    sc.ci("rds-pagos", sc.team("Datos"))
+    cve_org_only(sc, "rds-pagos")
+    run = sc.scan({"rds-pagos": "new"})
+    lifecycle(sc).apply(session, sc.assess({"rds-pagos": 60}, run).id)
+    (ticket,) = tickets(session, sc)
+    created_in_itop(ticket, "901", 3)
+
+    sc.later(days=1)
+    low = sc.scan({"rds-pagos": "persistent"})
+    lifecycle(sc).apply(session, sc.assess({"rds-pagos": 30}, low).id)
+
+    linked = session.scalars(
+        select(m.TicketFinding.finding_id).where(
+            m.TicketFinding.ticket_id == ticket.id, m.TicketFinding.removed_at.is_(None)
+        )
+    ).all()
+    assert linked == [sc.findings["rds-pagos"].id]
+
+
+def test_a_low_cve_org_finding_does_not_join_its_teams_existing_ticket(session: Session) -> None:
+    """D-103: below medium it neither opens nor joins a ticket, even one an NVD finding of the group already has."""
+    sc = Scenario(session)
+    team = sc.team("Plataforma")
+    sc.ci("node-nvd", team)
+    sc.ci("node-cna", team)
+    cve_org_only(sc, "node-cna")
+    run = sc.scan({"node-nvd": "new", "node-cna": "new"})
+    lifecycle(sc).apply(session, sc.assess({"node-nvd": 30, "node-cna": 30}, run).id)
+    (ticket,) = tickets(session, sc)
+    linked = session.scalars(select(m.TicketFinding.finding_id).where(m.TicketFinding.ticket_id == ticket.id)).all()
+    assert linked == [sc.findings["node-nvd"].id]
+
+
+def test_a_cve_org_finding_without_a_score_waits(session: Session) -> None:
+    sc = Scenario(session)
+    sc.ci("rds-pagos", sc.team("Datos"))
+    sc.ci("other", sc.team("Datos"))
+    cve_org_only(sc, "rds-pagos")
+    run = sc.scan({"rds-pagos": "new", "other": "new"})
+    report = lifecycle(sc).apply(session, sc.assess({"other": 60}, run).id)  # no asset score for rds-pagos
+    (ticket,) = tickets(session, sc)
+    assert report.created == 1
+    linked = session.scalars(select(m.TicketFinding.finding_id).where(m.TicketFinding.ticket_id == ticket.id)).all()
+    assert sc.findings["rds-pagos"].id not in linked
+
+
+def test_a_linked_low_cve_org_finding_follows_its_ci_to_another_team(session: Session) -> None:
+    """T5 review: once in a ticket it moves with its CI, whatever its level (D-006), instead of vanishing from iTop."""
+    sc = Scenario(session)
+    datos, plataforma = sc.team("Datos"), sc.team("Plataforma")
+    sc.ci("rds-pagos", datos)
+    cve_org_only(sc, "rds-pagos")
+    run = sc.scan({"rds-pagos": "new"})
+    lifecycle(sc).apply(session, sc.assess({"rds-pagos": 60}, run).id)
+    (first,) = tickets(session, sc)
+    created_in_itop(first, "902", 3)
+    sc.assets["rds-pagos"].custodian_team_id = plataforma.id
+    session.flush()
+    sc.later(days=1)
+    low = sc.scan({"rds-pagos": "persistent"})
+    lifecycle(sc).apply(session, sc.assess({"rds-pagos": 30}, low).id)
+    assert {t.custodian_team_id for t in tickets(session, sc)} == {datos.id, plataforma.id}

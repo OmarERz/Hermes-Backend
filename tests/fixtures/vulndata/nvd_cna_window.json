@@ -1,0 +1,831 @@
+{
+ "resultsPerPage": 10,
+ "startIndex": 0,
+ "totalResults": 10,
+ "format": "NVD_CVE",
+ "version": "2.0",
+ "timestamp": "2026-11-27T21:00:00.000",
+ "vulnerabilities": [
+  {
+   "cve": {
+    "id": "CVE-2026-100080",
+    "sourceIdentifier": "416baaa9-dc9f-4396-8d5f-8c081fb06d67",
+    "published": "2026-11-06T19:17:03.190",
+    "lastModified": "2026-11-20T06:17:15.877",
+    "vulnStatus": "Received",
+    "descriptions": [
+     {
+      "lang": "en",
+      "value": "In the Linux kernel, the following vulnerability has been resolved:\n\nxen-netback: Fix UAF when reading statistics data\n\nThe network statistic data in the driver is protected by RCU.\nUnfortunately when tearing down the queues after an error during\nconnecting to the frontend (e.g. due to illegal Xenst"
+     }
+    ],
+    "references": [
+     {
+      "url": "https://git.kernel.org/stable/c/36f858f228e3f955b9336af7f94634747c221518",
+      "source": "416baaa9-dc9f-4396-8d5f-8c081fb06d67"
+     },
+     {
+      "url": "https://git.kernel.org/stable/c/37d5a73170579b30e67cc8b19ec69715eea3a6b6",
+      "source": "416baaa9-dc9f-4396-8d5f-8c081fb06d67"
+     }
+    ]
+   }
+  },
+  {
+   "cve": {
+    "id": "CVE-2026-80872",
+    "sourceIdentifier": "416baaa9-dc9f-4396-8d5f-8c081fb06d67",
+    "published": "2026-09-04T17:16:59.160",
+    "lastModified": "2026-09-04T17:16:59.160",
+    "vulnStatus": "Received",
+    "descriptions": [
+     {
+      "lang": "en",
+      "value": "In the Linux kernel, the following vulnerability has been resolved:\n\nALSA: hda/tas2781: Cancel async firmware request at unbind\n\nTAS2781 HDA I2C and SPI queue RCA firmware loading from component\nbind with request_firmware_nowait(). The firmware loader keeps the\ncallback module pinned and holds a dev"
+     }
+    ],
+    "references": [
+     {
+      "url": "https://git.kernel.org/stable/c/5367e2ad14f0ae9350a7aaf2e77c87de39a43ae9",
+      "source": "416baaa9-dc9f-4396-8d5f-8c081fb06d67"
+     },
+     {
+      "url": "https://git.kernel.org/stable/c/da9e3be9cf31d7138d23e9e2f7ba1c102ef09f07",
+      "source": "416baaa9-dc9f-4396-8d5f-8c081fb06d67"
+     }
+    ]
+   }
+  },
+  {
+   "cve": {
+    "id": "CVE-2026-116303",
+    "sourceIdentifier": "f86ef6dc-4d3a-42ad-8f28-e6d5547a5007",
+    "published": "2026-11-12T15:17:37.910",
+    "lastModified": "2026-11-12T22:18:25.117",
+    "vulnStatus": "Awaiting Analysis",
+    "descriptions": [
+     {
+      "lang": "en",
+      "value": "Missing authorization in PostgreSQL type conversion allows a database user to invoke a cast function despite lacking EXECUTE privilege on that function, via foreign keys, to_json(), and others.  A successful attack requires the attacker to search each database for access-restricted cast functions an"
+     }
+    ],
+    "metrics": {
+     "cvssMetricV31": [
+      {
+       "source": "f86ef6dc-4d3a-42ad-8f28-e6d5547a5007",
+       "type": "Secondary",
+       "cvssData": {
+        "version": "3.1",
+        "vectorString": "CVSS:3.1/AV:N/AC:H/PR:L/UI:N/S:U/C:L/I:N/A:N",
+        "baseScore": 3.1,
+        "baseSeverity": "LOW",
+        "attackVector": "NETWORK",
+        "attackComplexity": "HIGH",
+        "privilegesRequired": "LOW",
+        "userInteraction": "NONE",
+        "scope": "UNCHANGED",
+        "confidentialityImpact": "LOW",
+        "integrityImpact": "NONE",
+        "availabilityImpact": "NONE"
+       },
+       "exploitabilityScore": 1.6,
+       "impactScore": 1.4
+      }
+     ],
+     "ssvcV203": [
+      {
+       "source": "134c704f-9b21-4f2e-91b3-4a467353bcc0",
+       "ssvcData": {
+        "timestamp": "2026-11-12T21:31:55.090439Z",
+        "id": "CVE-2026-116303",
+        "options": [
+         {
+          "exploitation": "none"
+         },
+         {
+          "automatable": "no"
+         },
+         {
+          "technicalImpact": "partial"
+         }
+        ],
+        "role": "CISA Coordinator",
+        "version": "2.0.3"
+       }
+      }
+     ]
+    },
+    "weaknesses": [
+     {
+      "source": "f86ef6dc-4d3a-42ad-8f28-e6d5547a5007",
+      "type": "Secondary",
+      "description": [
+       {
+        "lang": "en",
+        "value": "CWE-862"
+       }
+      ]
+     }
+    ],
+    "references": [
+     {
+      "url": "https://www.postgresql.org/support/security/CVE-2026-116303/",
+      "source": "f86ef6dc-4d3a-42ad-8f28-e6d5547a5007"
+     }
+    ]
+   }
+  },
+  {
+   "cve": {
+    "id": "CVE-2026-75604",
+    "sourceIdentifier": "security-advisories@github.com",
+    "published": "2026-09-01T22:17:12.697",
+    "lastModified": "2026-09-09T21:09:13.080",
+    "vulnStatus": "Deferred",
+    "descriptions": [
+     {
+      "lang": "en",
+      "value": "Next.js is a React framework for building full-stack web applications. From 13.4.0 until 15.5.24 and 16.3.3, Next.js applications using Pages Router or App Router without Cache Components on Windows-hosted servers do not consistently escape backslashes in route segments before constructing increment"
+     }
+    ],
+    "metrics": {
+     "cvssMetricV31": [
+      {
+       "source": "security-advisories@github.com",
+       "type": "Secondary",
+       "cvssData": {
+        "version": "3.1",
+        "vectorString": "CVSS:3.1/AV:N/AC:H/PR:N/UI:N/S:C/C:H/I:H/A:H",
+        "baseScore": 9.0,
+        "baseSeverity": "CRITICAL",
+        "attackVector": "NETWORK",
+        "attackComplexity": "HIGH",
+        "privilegesRequired": "NONE",
+        "userInteraction": "NONE",
+        "scope": "CHANGED",
+        "confidentialityImpact": "HIGH",
+        "integrityImpact": "HIGH",
+        "availabilityImpact": "HIGH"
+       },
+       "exploitabilityScore": 2.2,
+       "impactScore": 6.0
+      }
+     ],
+     "ssvcV203": [
+      {
+       "source": "134c704f-9b21-4f2e-91b3-4a467353bcc0",
+       "ssvcData": {
+        "timestamp": "2026-09-03T03:56:24.826443Z",
+        "id": "CVE-2026-75604",
+        "options": [
+         {
+          "exploitation": "none"
+         },
+         {
+          "automatable": "no"
+         },
+         {
+          "technicalImpact": "total"
+         }
+        ],
+        "role": "CISA Coordinator",
+        "version": "2.0.3"
+       }
+      }
+     ]
+    },
+    "weaknesses": [
+     {
+      "source": "security-advisories@github.com",
+      "type": "Secondary",
+      "description": [
+       {
+        "lang": "en",
+        "value": "CWE-22"
+       }
+      ]
+     }
+    ],
+    "references": [
+     {
+      "url": "https://github.com/vercel/next.js/commit/968b9fcb26bdeb8e0a861a9df05361474666d51b",
+      "source": "security-advisories@github.com"
+     },
+     {
+      "url": "https://github.com/vercel/next.js/commit/b0f3460a92b955d3ca41fccff9a525a2b910fbf3",
+      "source": "security-advisories@github.com"
+     }
+    ]
+   }
+  },
+  {
+   "cve": {
+    "id": "CVE-2026-115557",
+    "sourceIdentifier": "cna@python.org",
+    "published": "2026-10-24T15:17:33.600",
+    "lastModified": "2026-11-02T15:17:15.000",
+    "vulnStatus": "Awaiting Analysis",
+    "descriptions": [
+     {
+      "lang": "en",
+      "value": "Python has added a denylist for known compromised certificates to the \"ssl\" module to ensure user safety even without certificate revocation configured. Known compromised certificates will automatically be rejected regardless of the SSLContext policy configuration."
+     }
+    ],
+    "metrics": {
+     "cvssMetricV40": [
+      {
+       "source": "cna@python.org",
+       "type": "Secondary",
+       "cvssData": {
+        "version": "4.0",
+        "vectorString": "CVSS:4.0/AV:N/AC:L/AT:N/PR:N/UI:P/VC:H/VI:H/VA:H/SC:H/SI:H/SA:H/E:X/CR:X/IR:X/AR:X/MAV:X/MAC:X/MAT:X/MPR:X/MUI:X/MVC:X/MVI:X/MVA:X/MSC:X/MSI:X/MSA:X/S:X/AU:X/R:X/V:X/RE:X/U:X",
+        "baseScore": 9.4,
+        "baseSeverity": "CRITICAL",
+        "attackVector": "NETWORK",
+        "attackComplexity": "LOW",
+        "attackRequirements": "NONE",
+        "privilegesRequired": "NONE",
+        "userInteraction": "PASSIVE",
+        "vulnConfidentialityImpact": "HIGH",
+        "vulnIntegrityImpact": "HIGH",
+        "vulnAvailabilityImpact": "HIGH",
+        "subConfidentialityImpact": "HIGH",
+        "subIntegrityImpact": "HIGH",
+        "subAvailabilityImpact": "HIGH",
+        "exploitMaturity": "NOT_DEFINED",
+        "confidentialityRequirement": "NOT_DEFINED",
+        "integrityRequirement": "NOT_DEFINED",
+        "availabilityRequirement": "NOT_DEFINED",
+        "modifiedAttackVector": "NOT_DEFINED",
+        "modifiedAttackComplexity": "NOT_DEFINED",
+        "modifiedAttackRequirements": "NOT_DEFINED",
+        "modifiedPrivilegesRequired": "NOT_DEFINED",
+        "modifiedUserInteraction": "NOT_DEFINED",
+        "modifiedVulnConfidentialityImpact": "NOT_DEFINED",
+        "modifiedVulnIntegrityImpact": "NOT_DEFINED",
+        "modifiedVulnAvailabilityImpact": "NOT_DEFINED",
+        "modifiedSubConfidentialityImpact": "NOT_DEFINED",
+        "modifiedSubIntegrityImpact": "NOT_DEFINED",
+        "modifiedSubAvailabilityImpact": "NOT_DEFINED",
+        "Safety": "NOT_DEFINED",
+        "Automatable": "NOT_DEFINED",
+        "Recovery": "NOT_DEFINED",
+        "valueDensity": "NOT_DEFINED",
+        "vulnerabilityResponseEffort": "NOT_DEFINED",
+        "providerUrgency": "NOT_DEFINED"
+       }
+      }
+     ],
+     "ssvcV203": [
+      {
+       "source": "134c704f-9b21-4f2e-91b3-4a467353bcc0",
+       "ssvcData": {
+        "timestamp": "2026-11-02T14:11:02.533687Z",
+        "id": "CVE-2026-115557",
+        "options": [
+         {
+          "exploitation": "none"
+         },
+         {
+          "automatable": "no"
+         },
+         {
+          "technicalImpact": "total"
+         }
+        ],
+        "role": "CISA Coordinator",
+        "version": "2.0.3"
+       }
+      }
+     ]
+    },
+    "weaknesses": [
+     {
+      "source": "cna@python.org",
+      "type": "Secondary",
+      "description": [
+       {
+        "lang": "en",
+        "value": "CWE-299"
+       }
+      ]
+     }
+    ],
+    "references": [
+     {
+      "url": "http://www.openwall.com/lists/oss-security/2026/10/20/29",
+      "source": "cna@python.org"
+     },
+     {
+      "url": "https://emudhra.we-have-a-problem.com/",
+      "source": "cna@python.org"
+     }
+    ]
+   }
+  },
+  {
+   "cve": {
+    "id": "CVE-2026-114583",
+    "sourceIdentifier": "cna@python.org",
+    "published": "2026-10-22T21:17:16.543",
+    "lastModified": "2026-11-02T13:17:35.597",
+    "vulnStatus": "Awaiting Analysis",
+    "descriptions": [
+     {
+      "lang": "en",
+      "value": "tarfile.tar_filter could be bypassed using crafted link entries, including symlinks with empty or directory-like names, to redirect later archive members outside the intended extraction directory. This allowed a malicious tar archive to cause tarfile.extractall() with filter=\"tar\" to write files out"
+     }
+    ],
+    "metrics": {
+     "cvssMetricV40": [
+      {
+       "source": "cna@python.org",
+       "type": "Secondary",
+       "cvssData": {
+        "version": "4.0",
+        "vectorString": "CVSS:4.0/AV:L/AC:L/AT:N/PR:N/UI:N/VC:N/VI:H/VA:N/SC:N/SI:N/SA:N/E:X/CR:X/IR:X/AR:X/MAV:X/MAC:X/MAT:X/MPR:X/MUI:X/MVC:X/MVI:X/MVA:X/MSC:X/MSI:X/MSA:X/S:X/AU:X/R:X/V:X/RE:X/U:X",
+        "baseScore": 6.9,
+        "baseSeverity": "MEDIUM",
+        "attackVector": "LOCAL",
+        "attackComplexity": "LOW",
+        "attackRequirements": "NONE",
+        "privilegesRequired": "NONE",
+        "userInteraction": "NONE",
+        "vulnConfidentialityImpact": "NONE",
+        "vulnIntegrityImpact": "HIGH",
+        "vulnAvailabilityImpact": "NONE",
+        "subConfidentialityImpact": "NONE",
+        "subIntegrityImpact": "NONE",
+        "subAvailabilityImpact": "NONE",
+        "exploitMaturity": "NOT_DEFINED",
+        "confidentialityRequirement": "NOT_DEFINED",
+        "integrityRequirement": "NOT_DEFINED",
+        "availabilityRequirement": "NOT_DEFINED",
+        "modifiedAttackVector": "NOT_DEFINED",
+        "modifiedAttackComplexity": "NOT_DEFINED",
+        "modifiedAttackRequirements": "NOT_DEFINED",
+        "modifiedPrivilegesRequired": "NOT_DEFINED",
+        "modifiedUserInteraction": "NOT_DEFINED",
+        "modifiedVulnConfidentialityImpact": "NOT_DEFINED",
+        "modifiedVulnIntegrityImpact": "NOT_DEFINED",
+        "modifiedVulnAvailabilityImpact": "NOT_DEFINED",
+        "modifiedSubConfidentialityImpact": "NOT_DEFINED",
+        "modifiedSubIntegrityImpact": "NOT_DEFINED",
+        "modifiedSubAvailabilityImpact": "NOT_DEFINED",
+        "Safety": "NOT_DEFINED",
+        "Automatable": "NOT_DEFINED",
+        "Recovery": "NOT_DEFINED",
+        "valueDensity": "NOT_DEFINED",
+        "vulnerabilityResponseEffort": "NOT_DEFINED",
+        "providerUrgency": "NOT_DEFINED"
+       }
+      }
+     ],
+     "ssvcV203": [
+      {
+       "source": "134c704f-9b21-4f2e-91b3-4a467353bcc0",
+       "ssvcData": {
+        "timestamp": "2026-11-02T12:31:38.077183Z",
+        "id": "CVE-2026-114583",
+        "options": [
+         {
+          "exploitation": "none"
+         },
+         {
+          "automatable": "no"
+         },
+         {
+          "technicalImpact": "partial"
+         }
+        ],
+        "role": "CISA Coordinator",
+        "version": "2.0.3"
+       }
+      }
+     ]
+    },
+    "weaknesses": [
+     {
+      "source": "134c704f-9b21-4f2e-91b3-4a467353bcc0",
+      "type": "Secondary",
+      "description": [
+       {
+        "lang": "en",
+        "value": "CWE-22"
+       }
+      ]
+     }
+    ],
+    "references": [
+     {
+      "url": "https://github.com/python/cpython/commit/04d8fca7da2cf3ebc0881fec8a53a1330c3b665d",
+      "source": "cna@python.org"
+     },
+     {
+      "url": "https://github.com/python/cpython/commit/0901ad4ffb22605f12b705d1c1197f0a01f0ba0b",
+      "source": "cna@python.org"
+     }
+    ]
+   }
+  },
+  {
+   "cve": {
+    "id": "CVE-2026-110952",
+    "sourceIdentifier": "security@apache.org",
+    "published": "2026-10-28T17:17:37.997",
+    "lastModified": "2026-11-05T19:17:09.177",
+    "vulnStatus": "Awaiting Analysis",
+    "descriptions": [
+     {
+      "lang": "en",
+      "value": "A Kafka broker that authenticates clients with SASL/OAUTHBEARER using the bundled JWKS-backed validator always verifies the JWT signature, but two further checks are only performed when explicitly configured:\n\n- The issuer (iss) claim is verified only when sasl.oauthbearer.expected.issuer is set. Wh"
+     }
+    ],
+    "metrics": {
+     "cvssMetricV31": [
+      {
+       "source": "134c704f-9b21-4f2e-91b3-4a467353bcc0",
+       "type": "Secondary",
+       "cvssData": {
+        "version": "3.1",
+        "vectorString": "CVSS:3.1/AV:N/AC:H/PR:N/UI:N/S:U/C:N/I:H/A:N",
+        "baseScore": 5.9,
+        "baseSeverity": "MEDIUM",
+        "attackVector": "NETWORK",
+        "attackComplexity": "HIGH",
+        "privilegesRequired": "NONE",
+        "userInteraction": "NONE",
+        "scope": "UNCHANGED",
+        "confidentialityImpact": "NONE",
+        "integrityImpact": "HIGH",
+        "availabilityImpact": "NONE"
+       },
+       "exploitabilityScore": 2.2,
+       "impactScore": 3.6
+      }
+     ],
+     "ssvcV203": [
+      {
+       "source": "134c704f-9b21-4f2e-91b3-4a467353bcc0",
+       "ssvcData": {
+        "timestamp": "2026-11-05T19:06:04.222838Z",
+        "id": "CVE-2026-110952",
+        "options": [
+         {
+          "exploitation": "none"
+         },
+         {
+          "automatable": "no"
+         },
+         {
+          "technicalImpact": "partial"
+         }
+        ],
+        "role": "CISA Coordinator",
+        "version": "2.0.3"
+       }
+      }
+     ]
+    },
+    "weaknesses": [
+     {
+      "source": "security@apache.org",
+      "type": "Secondary",
+      "description": [
+       {
+        "lang": "en",
+        "value": "CWE-345"
+       },
+       {
+        "lang": "en",
+        "value": "CWE-1188"
+       }
+      ]
+     }
+    ],
+    "references": [
+     {
+      "url": "https://kafka.apache.org/cve-list",
+      "source": "security@apache.org"
+     }
+    ]
+   }
+  },
+  {
+   "cve": {
+    "id": "CVE-2026-112945",
+    "sourceIdentifier": "security-advisories@github.com",
+    "published": "2026-10-20T16:17:05.043",
+    "lastModified": "2026-10-28T15:17:03.200",
+    "vulnStatus": "Awaiting Analysis",
+    "descriptions": [
+     {
+      "lang": "en",
+      "value": "Vite is a frontend tooling framework for JavaScript. Prior to 6.4.4, 7.3.7, 8.1.6, 8.2.4, and 8.3.3, applications using custom middleware are vulnerable when they pass an unchanged browser request URL to server.transformIndexHtml. getHtmlFilename uses the query-bearing request URL to resolve an exis"
+     }
+    ],
+    "metrics": {
+     "cvssMetricV40": [
+      {
+       "source": "security-advisories@github.com",
+       "type": "Secondary",
+       "cvssData": {
+        "version": "4.0",
+        "vectorString": "CVSS:4.0/AV:N/AC:L/AT:P/PR:N/UI:A/VC:L/VI:L/VA:N/SC:N/SI:N/SA:N/E:X/CR:X/IR:X/AR:X/MAV:X/MAC:X/MAT:X/MPR:X/MUI:X/MVC:X/MVI:X/MVA:X/MSC:X/MSI:X/MSA:X/S:X/AU:X/R:X/V:X/RE:X/U:X",
+        "baseScore": 2.1,
+        "baseSeverity": "LOW",
+        "attackVector": "NETWORK",
+        "attackComplexity": "LOW",
+        "attackRequirements": "PRESENT",
+        "privilegesRequired": "NONE",
+        "userInteraction": "ACTIVE",
+        "vulnConfidentialityImpact": "LOW",
+        "vulnIntegrityImpact": "LOW",
+        "vulnAvailabilityImpact": "NONE",
+        "subConfidentialityImpact": "NONE",
+        "subIntegrityImpact": "NONE",
+        "subAvailabilityImpact": "NONE",
+        "exploitMaturity": "NOT_DEFINED",
+        "confidentialityRequirement": "NOT_DEFINED",
+        "integrityRequirement": "NOT_DEFINED",
+        "availabilityRequirement": "NOT_DEFINED",
+        "modifiedAttackVector": "NOT_DEFINED",
+        "modifiedAttackComplexity": "NOT_DEFINED",
+        "modifiedAttackRequirements": "NOT_DEFINED",
+        "modifiedPrivilegesRequired": "NOT_DEFINED",
+        "modifiedUserInteraction": "NOT_DEFINED",
+        "modifiedVulnConfidentialityImpact": "NOT_DEFINED",
+        "modifiedVulnIntegrityImpact": "NOT_DEFINED",
+        "modifiedVulnAvailabilityImpact": "NOT_DEFINED",
+        "modifiedSubConfidentialityImpact": "NOT_DEFINED",
+        "modifiedSubIntegrityImpact": "NOT_DEFINED",
+        "modifiedSubAvailabilityImpact": "NOT_DEFINED",
+        "Safety": "NOT_DEFINED",
+        "Automatable": "NOT_DEFINED",
+        "Recovery": "NOT_DEFINED",
+        "valueDensity": "NOT_DEFINED",
+        "vulnerabilityResponseEffort": "NOT_DEFINED",
+        "providerUrgency": "NOT_DEFINED"
+       }
+      }
+     ],
+     "ssvcV203": [
+      {
+       "source": "134c704f-9b21-4f2e-91b3-4a467353bcc0",
+       "ssvcData": {
+        "timestamp": "2026-10-28T14:10:43.858513Z",
+        "id": "CVE-2026-112945",
+        "options": [
+         {
+          "exploitation": "poc"
+         },
+         {
+          "automatable": "no"
+         },
+         {
+          "technicalImpact": "partial"
+         }
+        ],
+        "role": "CISA Coordinator",
+        "version": "2.0.3"
+       }
+      }
+     ]
+    },
+    "weaknesses": [
+     {
+      "source": "security-advisories@github.com",
+      "type": "Secondary",
+      "description": [
+       {
+        "lang": "en",
+        "value": "CWE-80"
+       }
+      ]
+     }
+    ],
+    "references": [
+     {
+      "url": "https://github.com/vitejs/vite/commit/7dafd8e56f152403a3230608fa4005273c2e9e17",
+      "source": "security-advisories@github.com"
+     },
+     {
+      "url": "https://github.com/vitejs/vite/pull/23653",
+      "source": "security-advisories@github.com"
+     }
+    ]
+   }
+  },
+  {
+   "cve": {
+    "id": "CVE-2026-111943",
+    "sourceIdentifier": "security@golang.org",
+    "published": "2026-10-21T01:17:20.797",
+    "lastModified": "2026-10-30T13:18:28.740",
+    "vulnStatus": "Awaiting Analysis",
+    "descriptions": [
+     {
+      "lang": "en",
+      "value": "On most platforms, Go uses the given system root certificates. However, in some narrower cases, the system trust stores may not be updated without further action. To defend against the narrower set of cases that may remain affected, a denylist was added in crypto/x509 to return an error when calling"
+     }
+    ],
+    "metrics": {
+     "cvssMetricV31": [
+      {
+       "source": "134c704f-9b21-4f2e-91b3-4a467353bcc0",
+       "type": "Secondary",
+       "cvssData": {
+        "version": "3.1",
+        "vectorString": "CVSS:3.1/AV:N/AC:H/PR:N/UI:R/S:U/C:H/I:H/A:N",
+        "baseScore": 6.8,
+        "baseSeverity": "MEDIUM",
+        "attackVector": "NETWORK",
+        "attackComplexity": "HIGH",
+        "privilegesRequired": "NONE",
+        "userInteraction": "REQUIRED",
+        "scope": "UNCHANGED",
+        "confidentialityImpact": "HIGH",
+        "integrityImpact": "HIGH",
+        "availabilityImpact": "NONE"
+       },
+       "exploitabilityScore": 1.6,
+       "impactScore": 5.2
+      }
+     ],
+     "ssvcV203": [
+      {
+       "source": "134c704f-9b21-4f2e-91b3-4a467353bcc0",
+       "ssvcData": {
+        "timestamp": "2026-10-30T13:08:09.750640Z",
+        "id": "CVE-2026-111943",
+        "options": [
+         {
+          "exploitation": "none"
+         },
+         {
+          "automatable": "no"
+         },
+         {
+          "technicalImpact": "total"
+         }
+        ],
+        "role": "CISA Coordinator",
+        "version": "2.0.3"
+       }
+      }
+     ]
+    },
+    "weaknesses": [
+     {
+      "source": "134c704f-9b21-4f2e-91b3-4a467353bcc0",
+      "type": "Secondary",
+      "description": [
+       {
+        "lang": "en",
+        "value": "CWE-299"
+       }
+      ]
+     }
+    ],
+    "references": [
+     {
+      "url": "https://go.dev/cl/851047",
+      "source": "security@golang.org"
+     },
+     {
+      "url": "https://go.dev/issue/82345",
+      "source": "security@golang.org"
+     }
+    ]
+   }
+  },
+  {
+   "cve": {
+    "id": "CVE-2026-100070",
+    "sourceIdentifier": "416baaa9-dc9f-4396-8d5f-8c081fb06d67",
+    "published": "2026-09-25T14:17:13.400",
+    "lastModified": "2026-10-20T18:19:31.813",
+    "vulnStatus": "Analyzed",
+    "descriptions": [
+     {
+      "lang": "en",
+      "value": "In the Linux kernel, the following vulnerability has been resolved:\n\nnetfilter: nf_nat_sip: rewind offset when NAT shrinks the packet\n\nsashiko says:\n If map_addr() changes the packet length, such as when the public NAT IP\n string is shorter or longer than the internal IP, coff will still point to\n t"
+     }
+    ],
+    "metrics": {
+     "cvssMetricV31": [
+      {
+       "source": "nvd@nist.gov",
+       "type": "Primary",
+       "cvssData": {
+        "version": "3.1",
+        "vectorString": "CVSS:3.1/AV:L/AC:L/PR:L/UI:N/S:U/C:N/I:N/A:H",
+        "baseScore": 5.5,
+        "baseSeverity": "MEDIUM",
+        "attackVector": "LOCAL",
+        "attackComplexity": "LOW",
+        "privilegesRequired": "LOW",
+        "userInteraction": "NONE",
+        "scope": "UNCHANGED",
+        "confidentialityImpact": "NONE",
+        "integrityImpact": "NONE",
+        "availabilityImpact": "HIGH"
+       },
+       "exploitabilityScore": 1.8,
+       "impactScore": 3.6
+      }
+     ]
+    },
+    "weaknesses": [
+     {
+      "source": "nvd@nist.gov",
+      "type": "Primary",
+      "description": [
+       {
+        "lang": "en",
+        "value": "NVD-CWE-noinfo"
+       }
+      ]
+     }
+    ],
+    "configurations": [
+     {
+      "nodes": [
+       {
+        "operator": "OR",
+        "negate": false,
+        "cpeMatch": [
+         {
+          "vulnerable": true,
+          "criteria": "cpe:2.3:o:linux:linux_kernel:*:*:*:*:*:*:*:*",
+          "versionStartIncluding": "2.6.26",
+          "versionEndExcluding": "5.10.270",
+          "matchCriteriaId": "D273F6FF-1AB0-4129-9132-7F2BF91CA53F"
+         },
+         {
+          "vulnerable": true,
+          "criteria": "cpe:2.3:o:linux:linux_kernel:*:*:*:*:*:*:*:*",
+          "versionStartIncluding": "5.11",
+          "versionEndExcluding": "5.15.221",
+          "matchCriteriaId": "64865F15-53CF-4958-9535-E9EC89C9EDB9"
+         },
+         {
+          "vulnerable": true,
+          "criteria": "cpe:2.3:o:linux:linux_kernel:*:*:*:*:*:*:*:*",
+          "versionStartIncluding": "5.16",
+          "versionEndExcluding": "6.1.188",
+          "matchCriteriaId": "9731F8D2-153C-4E66-8418-BBD7C3BE0B0D"
+         },
+         {
+          "vulnerable": true,
+          "criteria": "cpe:2.3:o:linux:linux_kernel:*:*:*:*:*:*:*:*",
+          "versionStartIncluding": "6.2",
+          "versionEndExcluding": "6.6.157",
+          "matchCriteriaId": "F5E6592C-4D9C-4D99-B17A-777E25A031F5"
+         },
+         {
+          "vulnerable": true,
+          "criteria": "cpe:2.3:o:linux:linux_kernel:*:*:*:*:*:*:*:*",
+          "versionStartIncluding": "6.7",
+          "versionEndExcluding": "6.12.110",
+          "matchCriteriaId": "A19EC695-B7E1-41E5-B0EA-E331EFDA98A9"
+         },
+         {
+          "vulnerable": true,
+          "criteria": "cpe:2.3:o:linux:linux_kernel:*:*:*:*:*:*:*:*",
+          "versionStartIncluding": "6.13",
+          "versionEndExcluding": "6.18.52",
+          "matchCriteriaId": "0457F732-0EA6-47D3-A69C-17A43B435D23"
+         },
+         {
+          "vulnerable": true,
+          "criteria": "cpe:2.3:o:linux:linux_kernel:*:*:*:*:*:*:*:*",
+          "versionStartIncluding": "6.19",
+          "versionEndExcluding": "7.2.6",
+          "matchCriteriaId": "BAFE7055-A65A-44F4-BD4B-BF067EAE17F3"
+         }
+        ]
+       }
+      ]
+     }
+    ],
+    "references": [
+     {
+      "url": "https://git.kernel.org/stable/c/0f4d30e2e49f343fc28ba1e259fd22969b940c46",
+      "source": "416baaa9-dc9f-4396-8d5f-8c081fb06d67",
+      "tags": [
+       "Patch"
+      ]
+     },
+     {
+      "url": "https://git.kernel.org/stable/c/16aecbe3036f6097c26b51b12e4c1cf207769690",
+      "source": "416baaa9-dc9f-4396-8d5f-8c081fb06d67",
+      "tags": [
+       "Patch"
+      ]
+     }
+    ]
+   }
+  }
+ ]
+}
