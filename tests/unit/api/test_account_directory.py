@@ -6,6 +6,7 @@ import pytest
 
 from api.auth import InMemoryUserDirectory, Role, VerifiedIdentity
 from api.auth.directory import (
+    AccountDisabledError,
     AccountNotCreatedError,
     AccountRequest,
     AuditEntry,
@@ -185,9 +186,21 @@ def test_a_failed_status_change_is_audited_and_keeps_the_copy() -> None:
 
 def test_the_password_email_outcome_is_audited_without_the_address() -> None:
     directory = _directory()
+    directory.authorize_password_email("new-1", "admin-1")
     directory.audit_password_email("new-1", "admin-1", None)
     directory.audit_password_email("new-1", "admin-1", "EMAIL_NOT_FOUND")
     assert directory.audit == [
+        AuditEntry("admin-1", "user.password_email_requested", "new-1", None, None),
         AuditEntry("admin-1", "user.password_email_sent", "new-1", None, None),
         AuditEntry("admin-1", "user.password_email_failed", "new-1", None, {"reason": "EMAIL_NOT_FOUND"}),
     ]
+
+
+def test_the_password_email_needs_an_active_admin_and_an_account_on_in_hermes() -> None:
+    directory = _directory()
+    with pytest.raises(RoleConflictError, match="actor_not_admin"):
+        directory.authorize_password_email("reader-1", "reader-1")
+    directory.deactivate("reader-1")
+    with pytest.raises(AccountDisabledError):
+        directory.authorize_password_email("reader-1", "admin-1")
+    assert directory.audit == []

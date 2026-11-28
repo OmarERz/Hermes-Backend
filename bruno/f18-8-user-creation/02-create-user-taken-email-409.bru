@@ -1,0 +1,34 @@
+meta {
+  name: create-user-taken-email-409
+  type: http
+  seq: 2
+}
+
+post {
+  url: {{baseUrl}}/api/admin/users
+  body: json
+  auth: bearer
+}
+
+auth:bearer {
+  token: {{token}}
+}
+
+script:pre-request {
+  require("./lib/hermes").optIn(bru);
+}
+
+body:json {
+  {"email": "{{newUserEmail}}", "role": "admin"}
+}
+
+assert {
+  res.status: eq 409
+  res.body.error.code: eq email_exists
+}
+
+docs {
+  An e-mail that already has an account is refused with a clear 409.
+
+  operationId: create_user
+}

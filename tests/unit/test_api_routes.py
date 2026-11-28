@@ -24,8 +24,17 @@ from core.metrics.dashboard import Dashboard, DashboardMetric
 
 pytestmark = pytest.mark.unit
 
-# Outside ROUTE_ROLES: F0.2 auth routes, and the iTop webhook (its own Bearer token, F5.1/ARQ-02).
-F0_2_ROUTES = {"/api/health", "/api/me", "/api/admin/users/{uid}/role", "/api/itop/webhook"}
+# Outside ROUTE_ROLES: F0.2 auth routes, the account routes of F18.8 (api.auth.admin_routes, admin only) and the iTop
+# webhook (its own Bearer token, F5.1/ARQ-02).
+OWN_ROUTES = {
+    ("GET", "/api/health"),
+    ("GET", "/api/me"),
+    ("PUT", "/api/admin/users/{uid}/role"),
+    ("POST", "/api/admin/users"),
+    ("POST", "/api/admin/users/{uid}/password-email"),
+    ("PUT", "/api/admin/users/{uid}/status"),
+    ("POST", "/api/itop/webhook"),
+}
 SETTINGS = Settings(  # type: ignore[call-arg]
     _env_file=None,
     database_url=SecretStr("postgresql://a:b@db/h"),
@@ -102,8 +111,8 @@ def app_routes() -> set[tuple[str, str]]:
     return {
         (method.upper(), path)
         for path, operations in APP.openapi()["paths"].items()
-        if path not in F0_2_ROUTES
         for method in operations
+        if (method.upper(), path) not in OWN_ROUTES
     }
 
 

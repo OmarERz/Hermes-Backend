@@ -1,0 +1,36 @@
+meta {
+  name: disable-user
+  type: http
+  seq: 6
+}
+
+put {
+  url: {{baseUrl}}/api/admin/users/{{newUserUid}}/status
+  body: json
+  auth: bearer
+}
+
+auth:bearer {
+  token: {{token}}
+}
+
+script:pre-request {
+  require("./lib/hermes").optIn(bru);
+}
+
+body:json {
+  {"disabled": true}
+}
+
+assert {
+  res.status: eq 200
+  res.body.disabled: eq true
+  res.body.sessions_revoked: eq true
+  res.body.known_user: eq true
+}
+
+docs {
+  Switches the account off in Firebase and in Hermes and revokes its sessions.
+
+  operationId: set_user_status
+}

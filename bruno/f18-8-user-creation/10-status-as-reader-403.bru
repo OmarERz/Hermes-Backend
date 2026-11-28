@@ -1,0 +1,30 @@
+meta {
+  name: status-as-reader-403
+  type: http
+  seq: 10
+}
+
+put {
+  url: {{baseUrl}}/api/admin/users/bruno-no-such-user/status
+  body: json
+  auth: bearer
+}
+
+auth:bearer {
+  token: {{readerToken}}
+}
+
+body:json {
+  {"disabled": true}
+}
+
+assert {
+  res.status: eq 403
+  res.body.error.code: eq forbidden
+}
+
+docs {
+  Only an admin switches accounts off or on.
+
+  operationId: set_user_status
+}

@@ -7,6 +7,7 @@ import threading
 import time
 from collections.abc import Callable, Iterator
 from concurrent.futures import ThreadPoolExecutor
+from contextlib import contextmanager
 from pathlib import Path
 
 import pytest
@@ -14,10 +15,12 @@ from alembic import command
 from alembic.config import Config
 from dbprovision import provisioned_database
 from sqlalchemy import create_engine, select, update
+from sqlalchemy.exc import OperationalError
 from sqlalchemy.orm import Session, sessionmaker
 
 from api.auth import Role, VerifiedIdentity
 from api.auth.directory import (
+    AccountDisabledError,
     AccountNotCreatedError,
     AccountRequest,
     NewAccount,
@@ -613,6 +616,55 @@ def test_a_copy_a_first_sign_in_creates_meanwhile_goes_off_too(sessions: session
         assert session.scalar(select(AppUser.active).where(AppUser.firebase_uid == "a9")) is False
 
 
+def test_a_copy_a_first_sign_in_creates_while_firebase_fails_stays_off(sessions: sessionmaker[Session]) -> None:
+    directory = SqlUserDirectory(sessions)
+    directory.sync_login(identity("boss", Role.ADMIN))
+
+    def first_sign_in_then_firebase_fails() -> bool:
+        with ThreadPoolExecutor(max_workers=1) as pool:
+            pool.submit(directory.sync_login, identity("a10", Role.ADMIN)).result()
+        raise RuntimeError("down")
+
+    with pytest.raises(RuntimeError):
+        directory.change_status("a10", True, "boss", first_sign_in_then_firebase_fails)
+    with sessions() as session:
+        assert session.scalar(select(AppUser.active).where(AppUser.firebase_uid == "a10")) is False
+
+
+class LostCommitAnswer:
+    """A session factory whose next ``begin()`` commits and then fails, as when the connection drops before the
+    answer to COMMIT arrives."""
+
+    def __init__(self, sessions: sessionmaker[Session]) -> None:
+        self._sessions = sessions
+        self.armed = False
+
+    def __call__(self) -> Session:
+        return self._sessions()
+
+    @contextmanager
+    def begin(self) -> Iterator[Session]:
+        with self._sessions.begin() as session:
+            yield session
+        if self.armed:
+            self.armed = False
+            raise OperationalError("COMMIT", {}, ConnectionError("connection lost"))
+
+
+def test_a_creation_whose_commit_answer_was_lost_keeps_the_account(sessions: sessionmaker[Session]) -> None:
+    flaky = LostCommitAnswer(sessions)
+    directory = SqlUserDirectory(flaky)  # type: ignore[arg-type]
+    directory.sync_login(identity("boss", Role.ADMIN))
+
+    def create() -> NewAccount:
+        flaky.armed = True  # the transaction of the copy is the one in progress
+        return NewAccount("n9", "lost@example.com")
+
+    record = directory.create_account(_request("n9", "lost@example.com"), "boss", create, _keep)
+    assert (record.firebase_uid, record.email) == ("n9", "lost@example.com")
+    assert [row[0] for row in audit_rows(sessions, "n9")] == ["user.create_requested", "user.create"]
+
+
 def test_a_status_change_never_needs_a_second_connection_while_it_holds_the_lock(
     sessions: sessionmaker[Session],
 ) -> None:
@@ -715,12 +767,27 @@ def test_status_changes_of_one_account_never_interleave(sessions: sessionmaker[S
     assert active is first_disables  # the last change (the opposite of the first) won in both places
 
 
+def test_the_password_email_needs_an_active_admin_and_an_account_on_in_hermes(sessions: sessionmaker[Session]) -> None:
+    directory = SqlUserDirectory(sessions)
+    directory.sync_login(identity("boss", Role.ADMIN))
+    directory.sync_login(identity("u14", Role.READER))
+    with pytest.raises(RoleConflictError, match="actor_not_admin"):
+        directory.authorize_password_email("boss", "u14")
+    with sessions.begin() as session:
+        session.execute(update(AppUser).where(AppUser.firebase_uid == "u14").values(active=False))
+    with pytest.raises(AccountDisabledError):
+        directory.authorize_password_email("u14", "boss")
+    assert [row[0] for row in audit_rows(sessions, "u14")] == ["user_created"]
+
+
 def test_the_password_email_outcome_is_audited(sessions: sessionmaker[Session]) -> None:
     directory = SqlUserDirectory(sessions)
     admin = directory.sync_login(identity("boss", Role.ADMIN))
+    directory.authorize_password_email("n3", "boss")
     directory.audit_password_email("n3", "boss", None)
     directory.audit_password_email("n3", "boss", "EMAIL_NOT_FOUND")
     assert audit_rows(sessions, "n3") == [
+        ("user.password_email_requested", admin.id, None, None),
         ("user.password_email_sent", admin.id, None, None),
         ("user.password_email_failed", admin.id, None, {"reason": "EMAIL_NOT_FOUND"}),
     ]

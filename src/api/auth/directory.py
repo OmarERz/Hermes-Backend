@@ -34,6 +34,7 @@ ENTITY = "app_user"
 CREATE_REQUESTED = "user.create_requested"
 CREATE = "user.create"
 CREATE_FAILED = "user.create_failed"
+SETUP_EMAIL_REQUESTED = "user.password_email_requested"
 SETUP_EMAIL_SENT = "user.password_email_sent"
 SETUP_EMAIL_FAILED = "user.password_email_failed"
 
@@ -135,6 +136,10 @@ class AccountRequest:
     role: Role
 
 
+class AccountDisabledError(Exception):
+    """The account is switched off in Hermes (its copy is not active)."""
+
+
 class AccountNotCreatedError(Exception):
     """Firebase refused to create the account (e-mail taken or refused, uid taken): nothing exists to clean up."""
 
@@ -178,6 +183,13 @@ class AccountDirectory(Protocol):
         ``user_inactive``) and repeating the request completes it. A failure is recorded as ``user.disable_failed`` (or
         ``user.enable_failed``) and propagates. Returns the copy, or ``None`` if the user never logged in.
         """
+        ...
+
+    def authorize_password_email(self, uid: str, actor_uid: str) -> None:
+        """Allow the password e-mail for ``uid`` and record ``user.password_email_requested``, before Identity Toolkit
+        is called (an e-mail never leaves without a trace). Under the same global lock as role and status changes: the
+        actor must still be an active admin (``RoleConflictError("actor_not_admin")``) and a copy switched off in
+        Hermes gets no e-mail (``AccountDisabledError``)."""
         ...
 
     def audit_password_email(self, uid: str, actor_uid: str, failure: str | None) -> None:
@@ -417,6 +429,15 @@ class InMemoryUserDirectory:
                 self.audit.append(AuditEntry(actor_uid, action, uid, before, after))
                 return updated
 
+    def authorize_password_email(self, uid: str, actor_uid: str) -> None:
+        with self._role_lock:
+            self._require_admin(actor_uid)
+            with self._lock:
+                target = self._users.get(uid)
+                if target is not None and not target.active:
+                    raise AccountDisabledError(uid)
+                self.audit.append(AuditEntry(actor_uid, SETUP_EMAIL_REQUESTED, uid, None, None))
+
     def audit_password_email(self, uid: str, actor_uid: str, failure: str | None) -> None:
         with self._lock:
             self.audit.append(_password_email_entry(uid, actor_uid, failure))
@@ -622,9 +643,18 @@ class SqlUserDirectory:
             self._create_failed(actor_uid, uid, role, _discarded(discard, uid))
             raise UserConflictError(actor_uid) from exc
         except Exception:
+            stored = self._stored(uid) if called else None
+            if stored is not None:
+                return stored  # the commit went through although its answer was lost: never delete that account
             self._create_failed(actor_uid, uid, role, _discarded(discard, uid) if called else None)
             raise
         return record
+
+    def _stored(self, uid: str) -> UserRecord | None:
+        """The copy of ``uid`` if it is stored (it commits together with its ``user.create`` row)."""
+        with self._sessions() as session:
+            row = session.scalar(select(AppUser).where(AppUser.firebase_uid == uid))
+            return _record(row) if row else None
 
     def _create_failed(self, actor_uid: str, uid: str, role: Role, discarded: bool | None) -> None:
         with self._sessions.begin() as session:
@@ -682,7 +712,13 @@ class SqlUserDirectory:
                 select(AppUser.active).where(AppUser.firebase_uid == uid).with_for_update(key_share=True)
             )
             session.execute(update(AppUser).where(AppUser.firebase_uid == uid).values(active=False))
-        revoked = apply()
+        try:
+            revoked = apply()
+        except Exception:
+            # Fails closed here too: a copy a first sign-in created while Firebase answered goes off.
+            with sessions.begin() as session:
+                session.execute(update(AppUser).where(AppUser.firebase_uid == uid).values(active=False))
+            raise
         with sessions.begin() as session:
             # Again: a first sign-in may have created the copy (active) while Firebase answered.
             session.execute(update(AppUser).where(AppUser.firebase_uid == uid).values(active=False))
@@ -711,6 +747,14 @@ class SqlUserDirectory:
             session.add(_audit(AuditEntry(actor_uid, "user.enable", uid, before, after), actor_id, _now()))
             session.flush()
             return _record(user) if user else None
+
+    def authorize_password_email(self, uid: str, actor_uid: str) -> None:
+        with self._sessions.begin() as session:
+            _lock_admins(session)  # an admin demoted or switched off meanwhile is seen as such
+            actor_id = self._active_admin(session, actor_uid)
+            if session.scalar(select(AppUser.active).where(AppUser.firebase_uid == uid)) is False:
+                raise AccountDisabledError(uid)
+            session.add(_audit(AuditEntry(actor_uid, SETUP_EMAIL_REQUESTED, uid, None, None), actor_id, _now()))
 
     def audit_password_email(self, uid: str, actor_uid: str, failure: str | None) -> None:
         with self._sessions.begin() as session:

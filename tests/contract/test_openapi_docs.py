@@ -94,6 +94,8 @@ MODELS: dict[str, type[BaseModel]] = {
     **{name: cls for name, cls in vars(route_models).items() if isinstance(cls, type) and issubclass(cls, BaseModel)},
     "ErrorResponse": ErrorResponse,
     "RoleAssignment": admin_routes.RoleAssignment,
+    "UserCreation": admin_routes.UserCreation,
+    "StatusChange": admin_routes.StatusChange,
     "FeedbackResult": FeedbackResult,
     "ItopWebhookCall": ItopWebhookCall,
     "WebhookAccepted": WebhookAccepted,
