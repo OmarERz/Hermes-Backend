@@ -1,0 +1,30 @@
+meta {
+  name: create-user-as-reader-403
+  type: http
+  seq: 4
+}
+
+post {
+  url: {{baseUrl}}/api/admin/users
+  body: json
+  auth: bearer
+}
+
+auth:bearer {
+  token: {{readerToken}}
+}
+
+body:json {
+  {"email": "bruno-never-created@example.com", "role": "admin"}
+}
+
+assert {
+  res.status: eq 403
+  res.body.error.code: eq forbidden
+}
+
+docs {
+  Only an admin creates accounts.
+
+  operationId: create_user
+}

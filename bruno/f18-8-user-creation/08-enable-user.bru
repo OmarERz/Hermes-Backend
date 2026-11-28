@@ -1,0 +1,34 @@
+meta {
+  name: enable-user
+  type: http
+  seq: 8
+}
+
+put {
+  url: {{baseUrl}}/api/admin/users/{{newUserUid}}/status
+  body: json
+  auth: bearer
+}
+
+auth:bearer {
+  token: {{token}}
+}
+
+script:pre-request {
+  require("./lib/hermes").optIn(bru);
+}
+
+body:json {
+  {"disabled": false}
+}
+
+assert {
+  res.status: eq 200
+  res.body.disabled: eq false
+}
+
+docs {
+  Switches the account back on; its sessions of before the switch-off stay revoked.
+
+  operationId: set_user_status
+}

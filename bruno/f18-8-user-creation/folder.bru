@@ -1,0 +1,10 @@
+meta {
+  name: f18-8-user-creation
+  seq: 22
+}
+
+docs {
+  Accounts an admin creates and switches off or on from the app (D-105, F18.8). Creating an account makes Firebase
+  send a real e-mail, so the requests that create, e-mail or switch accounts only run with stateChanging=1 (test
+  installations only); the 403 and 422 checks always run. 01 picks a new e-mail every run, so the folder runs again.
+}

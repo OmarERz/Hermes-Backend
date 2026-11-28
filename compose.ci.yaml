@@ -5,3 +5,8 @@
 services:
   embeddings:
     build: docker/embeddings-fake
+  # Schemathesis and ZAP create many accounts with the admin token before the Bruno step does (D-105): the e-mails go
+  # to the Auth emulator, so the hourly cap of real installations would only make the later steps fail.
+  api:
+    environment:
+      PASSWORD_EMAILS_PER_HOUR: "100000"

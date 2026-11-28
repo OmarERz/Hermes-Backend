@@ -1,0 +1,30 @@
+meta {
+  name: status-not-a-boolean-422
+  type: http
+  seq: 12
+}
+
+put {
+  url: {{baseUrl}}/api/admin/users/bruno-no-such-user/status
+  body: json
+  auth: bearer
+}
+
+auth:bearer {
+  token: {{token}}
+}
+
+body:json {
+  {"disabled": "yes"}
+}
+
+assert {
+  res.status: eq 422
+  res.body.error.code: eq validation_error
+}
+
+docs {
+  The status is true or false, nothing else; refused before Firebase is asked.
+
+  operationId: set_user_status
+}

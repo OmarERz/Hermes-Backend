@@ -92,6 +92,31 @@ phases.examples.extra-data-sources.responses = false
 phases.coverage.extra-data-sources.responses = false
 phases.fuzzing.extra-data-sources.responses = false
 
+# Switching an account off revokes its sessions (D-105) for the same reason: only generated uids, never the test
+# identities read from other responses (the Bruno step needs their tokens). The password e-mail goes to the emulator
+# and changes nothing, but it follows the same rule so it never e-mails the test identities either.
+[[operations]]
+include-name = "PUT /api/admin/users/{uid}/status"
+phases.stateful.enabled = false
+phases.examples.extra-data-sources.responses = false
+phases.coverage.extra-data-sources.responses = false
+phases.fuzzing.extra-data-sources.responses = false
+checks.positive_data_acceptance.expected-statuses = ["2xx", "3xx", "401", "403", "404", "409", "429", "5xx"]
+
+[[operations]]
+include-name = "POST /api/admin/users/{uid}/password-email"
+phases.stateful.enabled = false
+phases.examples.extra-data-sources.responses = false
+phases.coverage.extra-data-sources.responses = false
+phases.fuzzing.extra-data-sources.responses = false
+checks.positive_data_acceptance.expected-statuses = ["2xx", "3xx", "401", "403", "404", "409", "429", "5xx"]
+
+# Creating an account (D-105): a schema-valid e-mail can already have an account (409 `email_exists`, every example
+# after the first) or be refused by Firebase (422 `invalid_email`, rules the pattern cannot express).
+[[operations]]
+include-name = "POST /api/admin/users"
+checks.positive_data_acceptance.expected-statuses = ["2xx", "3xx", "401", "403", "404", "409", "422", "429", "5xx"]
+
 # Configuration and catalog writes validate semantics the schema cannot express (parameter keys of the formula and
 # settings catalog, ISO country and language codes, formula rules of FRO-05, catalog sector codes, the source rules of D-041). A request that is
 # schema-valid but breaks one of those rules is correctly refused with 422 `validation_error` (documented on every
