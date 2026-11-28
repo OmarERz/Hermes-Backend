@@ -12,6 +12,7 @@ from __future__ import annotations
 import copy
 import gzip
 import json
+import logging
 import uuid
 from datetime import UTC, datetime
 from pathlib import Path
@@ -25,7 +26,7 @@ from sqlalchemy.orm import Session, sessionmaker
 from core.pipeline.wiring import refresh_vulndata
 from core.scan.engine import ScanOptions, run_scan
 from core.vulndata import cna_discovery
-from core.vulndata.cvelist import RAW_URL
+from core.vulndata.cvelist import RAW_URL, CveOrgClient
 from core.vulndata.epss import EPSS_DAILY_URL
 from core.vulndata.http import JsonSource, SourceUnavailableError
 from core.vulndata.kev import KEV_URL
@@ -264,6 +265,68 @@ def test_the_request_budget_bounds_a_refresh(
     sources = Sources(recorded("nvd_cna_window.json"))
     *_, cve_org = sources.refresh(world)
     assert len(sources.github) == 3 and cve_org.capped and cve_org.requests == 3
+    assert cve_org.budget == 6 and cve_org.waiting == cve_org.candidates - 3
+
+
+def kernel_sighting(n: int) -> dict[str, Any]:
+    """An unenriched kernel CVE of the window, newer than the recorded ones; cvelistV5 has no file for it (404)."""
+    return {
+        "cve": {
+            "id": f"CVE-2026-9{n:05d}",
+            "sourceIdentifier": "416baaa9-dc9f-4396-8d5f-8c081fb06d67",
+            "published": "2026-11-20T00:00:00.000",
+            "lastModified": "2026-11-21T00:00:00.000",
+            "vulnStatus": "Received",
+            "descriptions": [{"lang": "en", "value": "In the Linux kernel, the following vulnerability was resolved."}],
+        }
+    }
+
+
+def test_a_fresh_mapping_converges_in_one_refresh_beyond_the_old_cap(
+    engine: Engine, world: sessionmaker[Session], caplog: pytest.LogCaptureFixture
+) -> None:
+    """Rehearsal 2, P2-A: the first refresh after mapping had 5,124 candidates and stopped at the fixed cap of 5,000
+    requests, so a CNA learned from its records (here CPython's, whose CVE-2026-114583 names `tarfile`, not Python)
+    waited a day for its pass. The budget now follows the candidates (two requests each, ceiling 12,000) and each CNA
+    learned gets its pass in the same refresh: the recorded records all arrive, and the scan finds them all."""
+    window = recorded("nvd_cna_window.json")
+    observed = cna_discovery.Observed()
+    for item in [*(kernel_sighting(n) for n in range(5_124)), *window["vulnerabilities"]]:
+        observed.see(item)
+    sources = Sources(window)
+    http = httpx.Client(transport=httpx.MockTransport(sources.handler))
+    client = CveOrgClient(JsonSource(http=http, max_attempts=1, sleep=lambda _s: None))
+    with caplog.at_level(logging.INFO, logger=cna_discovery.__name__):
+        result = cna_discovery.refresh_cve_org(world, client, observed, {})
+    assert (result.capped, result.waiting, result.passes) == (False, 0, 2)
+    assert result.candidates == result.requests == 5_124 + 8  # 7 named + CPython's tarfile record in the 2nd pass
+    assert result.budget == 2 * result.candidates <= cna_discovery.MAX_REQUESTS
+    assert (result.stored, result.missing) == (8, 5_124)
+    assert "cna@python.org" in result.followed_sources and sources.github[-1] == "CVE-2026-114583"
+    assert f"budget of {result.budget} (2 per candidate, at least 500, ceiling 12000)" in caplog.text
+    run_scan(world, ScanOptions(), now=SCAN_AT)
+    assert {key for key, src in findings(engine).items() if src == "cna_affected"} == {
+        key for key, src in EXPECTED.items() if src == "cna_affected"
+    }
+
+
+def test_the_budget_never_passes_its_ceiling(
+    engine: Engine, world: sessionmaker[Session], monkeypatch: pytest.MonkeyPatch, caplog: pytest.LogCaptureFixture
+) -> None:
+    """The budget grows with the candidates but stops at `MAX_REQUESTS`; what it leaves is counted and logged."""
+    monkeypatch.setattr(cna_discovery, "MAX_REQUESTS", 600)
+    observed = cna_discovery.Observed()
+    for n in range(1_000):
+        observed.see(kernel_sighting(n))
+    sources = Sources(EMPTY_PAGE)
+    http = httpx.Client(transport=httpx.MockTransport(sources.handler))
+    client = CveOrgClient(JsonSource(http=http, max_attempts=1, sleep=lambda _s: None))
+    with caplog.at_level(logging.INFO, logger=cna_discovery.__name__):
+        result = cna_discovery.refresh_cve_org(world, client, observed, {})
+    assert result.budget == 600 and result.capped
+    assert result.requests == len(sources.github) == 597  # a record is asked while its worst case (4) still fits
+    assert result.waiting == 1_000 - 597
+    assert "ran out: 403 candidates wait for the next refresh" in caplog.text
 
 
 def test_retries_count_against_the_request_budget(
