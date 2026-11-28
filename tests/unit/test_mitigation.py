@@ -88,8 +88,8 @@ def test_a_fixed_version_inside_another_affected_branch_is_not_advised() -> None
             affected_ranges=[("1.0", True, "1.5", False), ("2.0", True, "2.3", False)],
         )
     )
-    # 1.5 is outside [1.0, 1.5) but inside no other range here; both are valid fixes of their own branch
-    assert result.correction == ("Actualizar a 1.5 o superior.", "Actualizar a 2.3 o superior.")
+    # 1.5 is outside [1.0, 1.5) and inside no other range, but [2.0, 2.3) comes after it: the advice stops before it
+    assert result.correction == ("Actualizar a 1.5 o posterior, sin llegar a 2.0.", "Actualizar a 2.3 o superior.")
     overlapping = compose(
         MitigationData(
             "CVE-2026-1",
@@ -207,3 +207,34 @@ def test_each_bound_uses_the_scan_comparator_when_it_can() -> None:
         )
     )
     assert result.correction == ("Actualizar a 2.1 o superior.",)
+
+
+def test_kernel_cna_lines_give_each_fixed_version_of_a_line() -> None:
+    """F15.9: the kernel CNA's gaps end at each line's fix (`(5.15.*, 6.1.192)`, `(6.1.*, 6.6.162)`); a wildcard bound
+    is its whole line, so 6.1.192 is not read as inside `(6.1.*, 6.6.162)` and stays advised."""
+    data = MitigationData(
+        cve_id="CVE-2026-100080",
+        fixed_versions=["6.1.192", "6.6.162"],
+        affected_ranges=[("5.15.*", False, "6.1.192", False), ("6.1.*", False, "6.6.162", False)],
+    )
+    assert compose(data).correction == (
+        "Actualizar a 6.1.192 o posterior dentro de la línea 6.1.",  # (6.1.*, 6.6.162) is affected (T4 review r3, P0)
+        "Actualizar a 6.6.162 o superior.",
+    )
+
+
+@pytest.mark.parametrize(
+    ("start", "inclusive", "expected"),
+    [
+        ("3.2.0", True, "Actualizar a 3.0.18 o posterior, sin llegar a 3.2.0."),
+        ("3.1", False, "Actualizar a 3.0.18 o posterior, hasta 3.1."),
+        ("3.2.*", True, "Actualizar a 3.0.18 o posterior, sin llegar a la línea 3.2."),
+    ],
+)
+def test_or_higher_stops_before_the_next_affected_range(start: str, inclusive: bool, expected: str) -> None:
+    data = MitigationData(
+        cve_id="CVE-2025-9230",
+        fixed_versions=["3.0.18"],
+        affected_ranges=[("3.0.0", True, "3.0.18", False), (start, inclusive, None, None)],
+    )
+    assert compose(data).correction == (expected,)

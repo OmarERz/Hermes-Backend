@@ -20,7 +20,7 @@ from sqlalchemy.orm import Session
 
 from core.db import models as m
 from core.mitigation.text import clean_text, safe_url
-from core.scan.versions import compare_versions, parse_version
+from core.scan.versions import bound_order, parse_version, wildcard_line
 
 MAX_IOCS: Final = 20
 MAX_WORKAROUNDS: Final = 10
@@ -78,8 +78,9 @@ def version_key(version: str) -> tuple[tuple[int, int, str], ...]:
 
 
 def _bound_order(version: str, bound: str) -> int:
-    """-1, 0 or 1 for one range bound: the scan's comparator when it reads both, else the simple order."""
-    order = compare_versions(version, bound)
+    """-1, 0 or 1 for one range bound: the scan's comparator when it reads both (a CNA wildcard bound such as `6.1.*`
+    is its whole line, F15.9), else the simple order."""
+    order = bound_order(version, bound)
     if order is not None:
         return order
     left, right = version_key(version), version_key(bound)
@@ -107,12 +108,47 @@ def _order(version: str) -> tuple[int, object]:
     return (0, parsed) if parsed is not None else (1, version_key(version))
 
 
+Range = tuple[str | None, bool | None, str | None, bool | None]
+
+
+def _correction(version: str, ranges: Sequence[Range]) -> str:
+    """«o superior» only when no affected range lies after the fixed version; otherwise the advice stops before the
+    first one, as the data say (F15.9 review: «6.1.192 o superior» must not cover the affected 6.6 line)."""
+    later = [r for r in ranges if r[0] is not None and _starts_after(version, r)]
+    if not later:
+        return f"Actualizar a {version} o superior."
+    start, inclusive = min(later, key=lambda r: _start_key(str(r[0])))[:2]
+    line = wildcard_line(str(start))
+    if line is not None:
+        name = ".".join(map(str, line))
+        if inclusive:
+            return f"Actualizar a {version} o posterior, sin llegar a la línea {name}."
+        return f"Actualizar a {version} o posterior dentro de la línea {name}."
+    if inclusive:
+        return f"Actualizar a {version} o posterior, sin llegar a {start}."
+    return f"Actualizar a {version} o posterior, hasta {start}."
+
+
+def _starts_after(version: str, rng: Range) -> bool:
+    start, inclusive = rng[0], rng[1]
+    if start is None:
+        return False
+    order = _bound_order(version, start)
+    return order < 0 or (order == 0 and not inclusive)
+
+
+def _start_key(start: str) -> tuple[int, object]:
+    line = wildcard_line(start)
+    return _order(".".join(map(str, line)) if line is not None else start)
+
+
 def compose(data: MitigationData) -> Mitigation:
-    """A fixed version is only advised when no affected range contains it ("1.5 or higher" must not mean 2.1)."""
+    """A fixed version is only advised when no affected range contains it ("1.5 or higher" must not mean 2.1), and
+    «or higher» only reaches up to the next affected range."""
     candidates = {clean_text(v, 60) for v in data.fixed_versions if clean_text(v, 60)}
     versions = sorted((v for v in candidates if not any(_inside(v, r) for r in data.affected_ranges)), key=_order)
     if versions:
-        correction = tuple(f"Actualizar a {v} o superior." for v in versions)
+        correction = tuple(_correction(v, data.affected_ranges) for v in versions)
     else:
         correction = (
             "Los datos no publican una versión corregida: aplicar las medidas temporales y consultar al fabricante.",

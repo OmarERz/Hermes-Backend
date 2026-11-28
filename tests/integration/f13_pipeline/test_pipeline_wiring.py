@@ -153,9 +153,10 @@ def test_the_vulnerability_refresh_downloads_outside_transactions(
     )
     monkeypatch.setattr("core.pipeline.wiring.load_epss", loader("epss-load", EpssResult))
     monkeypatch.setattr("core.pipeline.wiring._kev_pending", lambda _factory, _today: ["CVE-2026-0777"])
-    nvd, kev, epss, kev_records = refresh_vulndata(
+    nvd, kev, epss, kev_records, cve_org = refresh_vulndata(
         cast("sessionmaker[Session]", tracking), cast("Any", Nvd()), cast("Any", None)
     )()
+    assert cve_org.fetched == 0  # no mapping has CNA names here: CVE.org is not asked (F15.9)
     assert (nvd.stored, nvd.skipped, kev.stored, epss.stored, epss.skipped) == (4, 1, 3, 1, 1)
     assert kev_records.stored == 2
     assert calls == [

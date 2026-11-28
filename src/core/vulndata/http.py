@@ -77,6 +77,7 @@ class JsonSource:
     http: httpx.Client | None = None
     sleep: Callable[[float], None] = time.sleep
     stop: StopSignal | None = None
+    sent: int = 0  # HTTP requests sent, every attempt and redirect included (the CVE.org budget counts them)
 
     def request(
         self,
@@ -150,6 +151,7 @@ class JsonSource:
                 self.stop.check()
             if self.limiter:
                 self.limiter.acquire()
+            self.sent += 1
             try:
                 response = client.send(request)
             except httpx.TransportError as exc:

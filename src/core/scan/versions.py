@@ -2,12 +2,15 @@
 
 Versions that cannot be placed on that scale (no leading number, unknown words) return None: the scan records a
 comparison error and does not guess. A release is a run of numbers; after it come an optional pre-release label
-(`alpha`, `beta`, `rc`...) or post-release label (`post`, `sp`), each with its own number.
+(`alpha`, `beta`, `rc`...) or post-release label (`post`, `sp`), each with its own number. A range bound may also be a
+CVE JSON 5 wildcard line (`6.1.*`, CNA `lessThanOrEqual`): it stands for every version of that line, so a version is
+before it, inside it or after it.
 """
 
 from __future__ import annotations
 
 import re
+from collections.abc import Callable
 from typing import Final, NamedTuple
 
 TOKEN: Final = re.compile(r"[0-9]+|[a-z]+")  # ASCII digits only: `\d` would also take Arabic-Indic and full-width ones
@@ -22,6 +25,8 @@ DIGITS: Final = "0123456789"
 # word such as `fips` or `beta1`
 LETTER_RELEASE: Final = re.compile(r"([0-9]+(?:\.[0-9]+)*)(z?[a-z])")
 WILDCARD: Final = "x"  # `1.2x` names a line, not one version
+# A whole line as a range bound: `6.1.*` (CVE JSON 5) or `2.4.x`; a lone `*` is no bound at all (an open side)
+WILDCARD_LINE: Final = re.compile(r"v?([0-9]+(?:\.[0-9]+)*)\.[*x]")
 
 
 class Version(NamedTuple):
@@ -106,6 +111,29 @@ def known_order(left: str, right: str) -> int | None:
     return (a > b) - (a < b)
 
 
+def wildcard_line(bound: str) -> tuple[int, ...] | None:
+    """The release numbers a wildcard bound names (`6.1.*` -> (6, 1)); None for any other bound."""
+    text = bound.strip().lower()
+    match = WILDCARD_LINE.fullmatch(text) if len(text) <= MAX_LENGTH else None
+    return tuple(int(number) for number in match.group(1).split(".")) if match else None
+
+
+def bound_order(version: str, bound: str, order: Callable[[str, str], int | None] | None = None) -> int | None:
+    """-1, 0 or 1: the version before, at or after a range bound; None when it cannot be told (ESC-13).
+
+    A wildcard bound is its whole line: 0 for any version of it (`6.1.192` against `6.1.*`), so an inclusive end
+    `<= 6.1.*` keeps the line and an exclusive start `> 6.1.*` begins after it. Any other bound uses `order`
+    (`compare_versions` by default; the judge passes `known_order`)."""
+    line = wildcard_line(bound)
+    if line is None:
+        return (order or compare_versions)(version, bound)
+    parsed = parse_version(version)
+    if parsed is None:
+        return None
+    head = (parsed.release + (0,) * len(line))[: len(line)]
+    return (head > line) - (head < line)
+
+
 def in_range(
     version: str,
     start: str | None,
@@ -120,13 +148,13 @@ def in_range(
     if parse_version(version) is None:
         return None
     if start is not None:
-        order = compare_versions(version, start)
+        order = bound_order(version, start)
         if order is None:
             return None
         if order < 0 or (order == 0 and not start_inclusive):
             return False
     if end is not None:
-        order = compare_versions(version, end)
+        order = bound_order(version, end)
         if order is None:
             return None
         if order > 0 or (order == 0 and not end_inclusive):

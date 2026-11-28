@@ -89,7 +89,8 @@ def test_fixed_versions_come_from_the_range_that_matches_the_mapping(demo: Engin
         )
     with Session(demo) as session:
         result = build_mitigation(session, gid)
-    assert result is not None and result.correction == ("Actualizar a 2.4.1 o superior.",)
+    # [2.5, 3.0] of the same product comes after 2.4.1: «or higher» stops before it (F15.9, T4 review r3)
+    assert result is not None and result.correction == ("Actualizar a 2.4.1 o posterior, sin llegar a 2.5.",)
 
 
 def test_indicators_linked_to_the_cve_become_detection_steps(demo: Engine) -> None:
