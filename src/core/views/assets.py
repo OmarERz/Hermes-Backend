@@ -267,6 +267,8 @@ class SoftwareItem:
     by_status: dict[str, int] = field(default_factory=dict)  # live installations per status, keys `STATUSES`
     licences: list[ProductLicence] = field(default_factory=list)  # the product's live licences, by name
     licensed_instances: int = 0  # live installations with a live licence assigned (any licence, as iTop links it)
+    cna_vendor: str | None = None  # the CNA names of the mapping (F15.9)
+    cna_product: str | None = None
 
 
 @dataclass(frozen=True)
@@ -323,6 +325,8 @@ def _software(findings: _Findings, installs: Sequence[Any], licences: Sequence[A
                     for r in tied.get(product_id, [])
                 ],
                 licensed_instances=sum(assigned.values()),
+                cna_vendor=first.cna_vendor,
+                cna_product=first.cna_product,
             )
         )
     return out

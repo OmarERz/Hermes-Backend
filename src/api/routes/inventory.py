@@ -18,6 +18,7 @@ from api.routes.findings import ItopUrl, licence_info
 from api.routes.models import (
     CatalogueLicence,
     Classification,
+    CnaNames,
     Criticality,
     InstalledSoftwareItem,
     InventoryAsset,
@@ -162,6 +163,7 @@ def inventory_software(
                 ci_count=s.ci_count,
                 cpe=s.cpe,
                 has_cpe=s.cpe is not None,
+                cna=CnaNames(vendor=s.cna_vendor, product=s.cna_product) if s.cna_vendor and s.cna_product else None,
                 open_vulnerabilities=s.open_vulnerabilities,
                 worst_level=cast(Level | None, s.worst_level),
                 categories=cast(list[SoftwareCategory], s.categories),

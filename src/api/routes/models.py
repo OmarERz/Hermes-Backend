@@ -251,13 +251,42 @@ _CPE_PART = r"[A-Za-z0-9](?:[A-Za-z0-9._~+\-]|\\[:._~+\-]){0,199}"
 CPE_NAME_PATTERN = rf"^cpe:2\.3:[aoh]:{_CPE_PART}:{_CPE_PART}(?::(?:[^:\\]|\\.)*)+$"
 
 
+# A CNA name as CVE.org writes it (F15.9, `core.cpe.mapping`): 1 to 200 characters, no control characters (C0, DEL,
+# C1) and at least one that is not a space, so a schema-valid name is never refused later. U+FEFF counts as a space in
+# JSON Schema (ECMAScript `\s`) but not in the server's regex engine, so it never counts as the visible one either.
+CNA_NAME_PATTERN = r"^[^\x00-\x1f\x7f-\x9f]*[^\s\x00-\x1f\x7f-\x9f\ufeff][^\x00-\x1f\x7f-\x9f]*$"
+
+
+class CnaNames(_Model):
+    """CNA vendor and product of a software product, as CVE.org writes them in `affected[]` (ESC-05, F15.9)."""
+
+    vendor: str = Field(
+        min_length=1,
+        max_length=200,
+        pattern=CNA_NAME_PATTERN,
+        description="Fabricante como lo escribe el CNA en CVE.org (por ejemplo `Linux` o `n/a`).",
+    )
+    product: str = Field(
+        min_length=1,
+        max_length=200,
+        pattern=CNA_NAME_PATTERN,
+        description="Producto como lo escribe el CNA en CVE.org (por ejemplo `Linux` o `CPython`).",
+    )
+
+
 class MappingInput(_Model):
     cpe: str = Field(pattern=CPE_NAME_PATTERN, max_length=512)
+    cna: CnaNames | None = Field(
+        default=None,
+        description="Nombres del CNA (CVE.org) del producto, para comparar sus rangos con certeza 0.9. Si se omite, "
+        "se conservan los que ya tenía el mapeo; `null` los quita.",
+    )
 
 
 class Mapping(_Model):
     software: str
     cpe: str
+    cna: CnaNames | None = Field(default=None, description="Nombres del CNA (CVE.org) que quedaron en el mapeo.")
 
 
 # --- grouped views, detail, history, comparison -------------------------------------------------------------------
@@ -1026,6 +1055,9 @@ class SoftwareItem(_Model):
     ci_count: int
     cpe: str | None
     has_cpe: bool
+    cna: CnaNames | None = Field(
+        default=None, description="Nombres del CNA (CVE.org) del mapeo; nulo si el mapeo no tiene (F15.9)."
+    )
     open_vulnerabilities: int
     worst_level: Level | None
     categories: list[SoftwareCategory] = Field(
