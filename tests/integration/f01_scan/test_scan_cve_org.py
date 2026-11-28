@@ -14,15 +14,18 @@ import gzip
 import json
 import logging
 import uuid
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from typing import Any
 
 import httpx
 import pytest
-from sqlalchemy import Engine, text
+from sqlalchemy import Engine, select, text
 from sqlalchemy.orm import Session, sessionmaker
 
+from core.cpe.mapping import MappingInput, set_mapping
+from core.db import models as m
+from core.pipeline.cycles import Pipeline, ScanCycleOutput, Steps
 from core.pipeline.wiring import refresh_vulndata
 from core.scan.engine import ScanOptions, run_scan
 from core.vulndata import cna_discovery
@@ -106,9 +109,13 @@ class Sources:
         return EMPTY_PAGE if "cveId" in params else self.window  # otherwise the recency window
 
     def refresh(self, factory: sessionmaker[Session], attempts: int = 1) -> Any:
+        return self.refresh_step(factory, attempts)()
+
+    def refresh_step(self, factory: sessionmaker[Session], attempts: int = 1) -> Any:
+        """The worker's refresh step (`Steps.refresh`) against these sources."""
         http = httpx.Client(transport=httpx.MockTransport(self.handler))
         source = JsonSource(http=http, max_attempts=attempts, sleep=lambda _s: None)
-        return refresh_vulndata(factory, NvdClient(JsonSource(http=http)), source)()
+        return refresh_vulndata(factory, NvdClient(JsonSource(http=http)), source)
 
 
 def run(engine: Engine, statement: str, params: dict[str, Any] | None = None) -> None:
@@ -492,3 +499,63 @@ def test_a_cve_nvd_rejects_loses_its_cna_ranges_even_if_a_later_step_fails(
     assert rows(
         engine, "SELECT count(*) FROM cve_affected_range WHERE cve_id = 'CVE-2026-100080' AND source = 'cna_affected'"
     ) == [(0,)]
+
+
+def test_the_readme_flow_brings_cve_org_findings_without_restarting_the_worker(
+    engine: Engine, world: sessionmaker[Session]
+) -> None:
+    """Rehearsal 2, P2-B: load the inventory, scan, `make itop-map-cpe` (it adds the CNA names), scan again. The second
+    scan gave 0 CVE.org findings until the worker restarted; now it refreshes first because a mapping changed after
+    the last refresh, and a third scan does not refresh again."""
+    cna = {product: names for _, product, _, _, names in INSTALLS if names}
+    run(engine, "UPDATE cpe_mapping SET cna_vendor = NULL, cna_product = NULL, mapped_at = :t", {"t": SCAN_AT})
+    sources = Sources(recorded("nvd_cna_window.json"))
+    clock = [SCAN_AT + timedelta(hours=1)]
+
+    def scan(run_id: uuid.UUID | None, reason: str) -> ScanCycleOutput:
+        return ScanCycleOutput(run_scan(world, ScanOptions(reason=reason, run_id=run_id), now=SCAN_AT).run_id)
+
+    steps = Steps(news=None, scan=scan, refresh=sources.refresh_step(world))
+    pipeline = Pipeline(world, steps, clock=lambda: clock[0])
+    pipeline.refresh_cycle()  # at worker start, before the CNA names exist: nothing to ask CVE.org
+    assert sources.github == []
+    pipeline.scan_cycle()
+    assert findings(engine) == {("eks-nodo-01", "CVE-2026-100070"): "nvd_cpe"}
+    clock[0] += timedelta(minutes=30)
+    with world() as session, session.begin():  # what `PUT /api/mappings/{software}` does for each product
+        for row in session.execute(
+            select(m.CpeMapping, m.SoftwareProduct.itop_name).join(
+                m.SoftwareProduct, m.SoftwareProduct.id == m.CpeMapping.software_product_id
+            )
+        ).all():
+            mapping, product = row
+            if product in cna:
+                names = MappingInput(mapping.nvd_vendor, mapping.nvd_product, *cna[product], mapping.nvd_part)
+                set_mapping(session, mapping.software_product_id, names, now=clock[0])
+    clock[0] += timedelta(minutes=30)
+    report = pipeline.scan_cycle()
+    assert "vulnerability data refreshed first: a CPE mapping changed since the last refresh" in report.notes
+    assert findings(engine) == EXPECTED
+    asked = len(sources.github)
+    pipeline.scan_cycle()
+    assert len(sources.github) == asked  # no second refresh for the same change
+
+
+def test_a_scan_after_an_interrupted_refresh_refreshes_again(engine: Engine, world: sessionmaker[Session]) -> None:
+    """GitHub fails during the refresh a mapping change triggered: the refresh is incomplete, so the next scan tries
+    again (the CVE.org cache skips what was stored) instead of waiting a day for the scheduled one."""
+    sources = Sources(recorded("nvd_cna_window.json"))
+    clock = [SCAN_AT]
+
+    def scan(run_id: uuid.UUID | None, reason: str) -> ScanCycleOutput:
+        return ScanCycleOutput(run_scan(world, ScanOptions(reason=reason, run_id=run_id), now=SCAN_AT).run_id)
+
+    pipeline = Pipeline(world, Steps(news=None, scan=scan, refresh=sources.refresh_step(world)), clock=lambda: clock[0])
+    sources.github_down = True
+    first = pipeline.scan_cycle()  # no refresh has completed in this process: it refreshes, GitHub is down
+    assert "CVE.org did not finish this refresh; the next scan refreshes again" in first.notes
+    assert findings(engine) == {("eks-nodo-01", "CVE-2026-100070"): "nvd_cpe"}
+    sources.github_down = False
+    clock[0] += timedelta(hours=1)
+    pipeline.scan_cycle()
+    assert findings(engine) == EXPECTED and pipeline.refreshed_at == clock[0]

@@ -316,6 +316,13 @@ licencia de una instalación, con la licencia como objeto `SoftwareLicence`), `d
   emulador de Firebase el token sale de `make -s emulator-token ROLE=analyst`; con un proyecto real de Firebase hace
   falta el token de ID de un usuario con rol de analista (o asigna los CPE en la pantalla de pendientes del front).
   Un producto con `null` queda a propósito sin CPE (aparece en la pantalla de pendientes).
+- La sección `cna:` agrega los nombres que usa el CNA de cada producto en CVE.org (`make itop-map-cpe` los envía con
+  el CPE). No hace falta reiniciar el trabajador: si un mapeo (CPE o nombres del CNA) cambió después del último
+  refresco de datos de vulnerabilidades, el siguiente escaneo refresca primero (ventana de NVD, KEV, EPSS y CVE.org)
+  y luego compara, una sola vez por cambio (si CVE.org no termina, por ejemplo porque GitHub falla, el escaneo
+  siguiente lo intenta otra vez). Ese escaneo tarda más: la primera vez con el kernel mapeado son unos
+  30 minutos (cerca de 5 000 registros de CVE.org en GitHub, todos en ese mismo refresco); el registro del trabajador
+  dice `vulnerability data refreshed first` y la línea `CVE.org: … candidates in … passes` sin `(capped)`.
 
 **Conectar Hermes con iTop**
 

@@ -3,7 +3,8 @@
 * News (hourly, and once after each scan): ingestion → keyword filter → the news analyst on new relevant stories
   → `correlate_stories` → each group the news crossed is evaluated (trigger `news`), with the judge → tickets.
   Dismissal candidates go to the judge's mode 2.
-* Scan (scheduled or requested): the simulated scan → `correlate_new_groups` on the groups it created or reopened
+* Scan (scheduled or requested): the vulnerability refresh first when a CPE mapping changed since the last one
+  (F15.12, rehearsal 2 P2-B) → the simulated scan → `correlate_new_groups` on the groups it created or reopened
   → the CVE analyst on pending CVEs (F3.3, injected) → every group it changed is evaluated (trigger
   `new_finding`) → tickets; then an extra news cycle (`after_scan`).
 * Nightly: recalculation of every open group **without the judge** (COR-05).
@@ -41,12 +42,15 @@ from core.scoring.queue import (
     next_queued_recalculation,
     requeue_abandoned_recalculations,
 )
+from core.shutdown import ShutdownRequested
 
 log = logging.getLogger("core.pipeline")
 
 SCAN_EVALUATED_STATUSES: Final = ("new", "reopened", "fixed", "persistent")
 SCAN_CORRELATED_STATUSES: Final = ("new", "reopened")
 CATCH_UP: Final = timedelta(hours=72)  # how far back analysed stories with no trace of correlation are retried
+# The scheduled refresh is skipped when a scan refreshed this recently (a scan queued at worker start runs first).
+REFRESH_FRESH: Final = timedelta(hours=1)
 
 # (session, group_id, run_id, trigger, judge or None) -> the stored assessment id, None when nothing changed.
 Evaluator = Callable[[Session, uuid.UUID, uuid.UUID, str, PipelineJudge | None], uuid.UUID | None]
@@ -129,6 +133,9 @@ class Pipeline:
     session_factory: sessionmaker[Session]
     steps: Steps
     clock: Callable[[], datetime] = utcnow
+    # When the last vulnerability refresh this process completed started: a mapping saved after it is not in the
+    # catalogue yet (CVE.org discovery reads the mappings), so the next scan refreshes first (P2-B).
+    refreshed_at: datetime | None = None
 
     # --- cycles ---------------------------------------------------------------------------------------------
     def news_cycle(self, trigger_reason: str = "schedule") -> CycleReport:
@@ -149,6 +156,7 @@ class Pipeline:
         with cycle_lock(self.session_factory) as acquired:
             if not acquired:
                 return self._skipped(report)  # nothing ran: a queued request stays queued for the next tick
+            self._refresh_for_mappings(report)
             output = self.steps.scan(run_id, reason)
             report.run_id = output.run_id
             changed, correlated = self._scan_groups(output.run_id)
@@ -169,10 +177,16 @@ class Pipeline:
             report.ran = False
             report.notes.append("vulnerability refresh is not configured")
             return report
+        if self.refreshed_at is not None and self.clock() - self.refreshed_at < REFRESH_FRESH:
+            report.ran = False
+            report.notes.append(f"a scan refreshed the vulnerability data at {self.refreshed_at:%H:%M} UTC")
+            self._log(report)
+            return report
         with cycle_lock(self.session_factory) as acquired:
             if not acquired:
                 return self._skipped(report)
-            self.steps.refresh()
+            started = self.clock()
+            self._mark_refresh(report, started, self.steps.refresh())
         self._log(report)
         return report
 
@@ -222,6 +236,38 @@ class Pipeline:
         return True
 
     # --- steps ----------------------------------------------------------------------------------------------
+    def _refresh_for_mappings(self, report: CycleReport) -> None:
+        """P2-B: the vulnerability refresh (NVD window, KEV, EPSS and CVE.org) runs before the scan when a CPE mapping
+        (its CPE or its CNA names) was saved after the last refresh this process completed started, or when none has
+        completed yet. At most once per change: a scan that follows sees the new mark and does not refresh again.
+        A failed refresh leaves the scan with what is stored and the next scan tries again."""
+        if self.steps.refresh is None:
+            return
+        with self.session_factory() as session:
+            if not mapping_changed_since(session, self.refreshed_at):
+                return
+        started = self.clock()
+        try:
+            result = self.steps.refresh()
+        except ShutdownRequested:
+            raise
+        except Exception:
+            report.failures += 1
+            report.notes.append("the vulnerability refresh before the scan failed; the scan uses the stored data")
+            log.exception("the vulnerability refresh before the scan failed; the next scan tries again")
+            return
+        report.notes.append("vulnerability data refreshed first: a CPE mapping changed since the last refresh")
+        self._mark_refresh(report, started, result)
+
+    def _mark_refresh(self, report: CycleReport, started: datetime, result: object) -> None:
+        """A complete refresh covers the mappings saved before it started. One that CVE.org could not finish (GitHub
+        down, budget spent: `VulndataRefresh.complete`) leaves the mark where it was, so the next scan after a
+        mapping change refreshes again."""
+        if getattr(result, "complete", True):
+            self.refreshed_at = started
+            return
+        report.notes.append("CVE.org did not finish this refresh; the next scan refreshes again")
+
     def _news(self, report: CycleReport, trigger_reason: str) -> None:
         if self.steps.news is None:
             report.ran = False
@@ -340,6 +386,15 @@ class Pipeline:
             report.failures,
             "".join(f"; {note}" for note in report.notes),
         )
+
+
+def mapping_changed_since(session: Session, since: datetime | None) -> bool:
+    """A CPE mapping saved after `since` (any mapping when `since` is None). Saving a mapping (`PUT /api/mappings`,
+    `make itop-map-cpe`) stamps `mapped_at`, whether its CPE or its CNA names changed."""
+    saved = select(m.CpeMapping.software_product_id)
+    if since is not None:
+        saved = saved.where(m.CpeMapping.mapped_at > since)
+    return bool(session.scalar(select(exists(saved))))
 
 
 def _uncorrelated_stories(session: Session, since: datetime) -> list[uuid.UUID]:

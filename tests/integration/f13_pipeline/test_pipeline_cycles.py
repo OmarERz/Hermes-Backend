@@ -3,20 +3,23 @@
 from __future__ import annotations
 
 import uuid
+from collections.abc import Callable, Iterator
+from contextlib import contextmanager
 from dataclasses import dataclass, field
-from datetime import datetime
+from datetime import datetime, timedelta
 from typing import Any
 
 import pytest
 from pipeline_support import NOW, judge_caller, make_story, one_reason_review
-from sqlalchemy import select
+from sqlalchemy import func, select
 from sqlalchemy.orm import Session, sessionmaker
 
 from core.correlation.engine import Placed, StoryOutcome
 from core.db import models as m
-from core.pipeline.cycles import CVE_ANALYST_OFF, NewsCycleOutput, Pipeline, ScanCycleOutput, Steps
+from core.pipeline.cycles import CVE_ANALYST_OFF, REFRESH_FRESH, NewsCycleOutput, Pipeline, ScanCycleOutput, Steps
 from core.pipeline.judging import PipelineJudge
 from core.pipeline.locks import cycle_lock
+from core.shutdown import ShutdownRequested
 from doubles.llm import tool_call_completion
 from harness.judge import dismissal_package, finding_package
 
@@ -280,3 +283,149 @@ def test_the_nightly_cycle_logs_the_counts_of_its_recalculation(factory: session
     assert (report.ran, report.groups, report.assessments) == (True, 3, 2)
     unknown = Pipeline(factory, Steps(news=no_news, recalculate=lambda _s: None)).nightly_cycle()
     assert (unknown.groups, unknown.assessments) == (0, 0)
+
+
+REFRESHED_FIRST = "vulnerability data refreshed first: a CPE mapping changed since the last refresh"
+
+
+def scan_steps(calls: list[str], refresh: Callable[[], object] | None = None) -> Steps:
+    """A scan and a refresh that only record their calls; the rest of the scan cycle has nothing to do."""
+    steps = Steps(
+        news=None,
+        scan=lambda _r, _q: calls.append("scan") or ScanCycleOutput(uuid.uuid4()),
+        refresh=refresh or (lambda: calls.append("refresh")),
+    )
+    steps.correlate_groups = lambda _s, _g, _n: []
+    return steps
+
+
+def latest_mapping(factory: sessionmaker[Session]) -> datetime:
+    with factory() as session:
+        latest = session.scalar(select(func.max(m.CpeMapping.mapped_at)))
+    assert latest is not None  # the demo seed maps its products
+    return latest
+
+
+@contextmanager
+def mapping_saved_at(factory: sessionmaker[Session], when: datetime) -> Iterator[None]:
+    """One mapping saved again at `when` (as `PUT /api/mappings` or `make itop-map-cpe` do); put back afterwards."""
+    with factory() as session, session.begin():
+        row = session.scalars(select(m.CpeMapping).order_by(m.CpeMapping.software_product_id).limit(1)).one()
+        product, before = row.software_product_id, row.mapped_at
+        row.mapped_at = when
+    try:
+        yield
+    finally:
+        with factory() as session, session.begin():
+            session.get_one(m.CpeMapping, product).mapped_at = before
+
+
+def test_a_scan_refreshes_first_when_a_mapping_changed_since_the_last_refresh(
+    factory: sessionmaker[Session],
+) -> None:
+    """Rehearsal 2, P2-B: the README flow (load, scan, `make itop-map-cpe`, scan) gave no CVE.org finding on the
+    second scan, because CVE.org is only loaded by the refresh (at worker start and daily). Now the scan refreshes
+    first when a mapping was saved after the last refresh started, once per change."""
+    calls: list[str] = []
+    now = [latest_mapping(factory) + timedelta(hours=1)]
+    pipeline = Pipeline(factory, scan_steps(calls), clock=lambda: now[0])
+    assert pipeline.refresh_cycle().ran is True  # the refresh at worker start
+    pipeline.scan_cycle()
+    assert calls == ["refresh", "scan"]  # no mapping saved since: no second refresh
+    with mapping_saved_at(factory, now[0] + timedelta(minutes=5)):
+        now[0] += timedelta(minutes=10)
+        report = pipeline.scan_cycle()
+        assert calls[2:] == ["refresh", "scan"]  # before the scan matches anything
+        assert REFRESHED_FIRST in report.notes
+        assert pipeline.refreshed_at == now[0]
+        pipeline.scan_cycle()
+        assert calls[4:] == ["scan"]  # idempotent: the change is already in the catalogue
+
+
+def test_a_mapping_saved_while_the_refresh_ran_is_refreshed_again(factory: sessionmaker[Session]) -> None:
+    """The mark is the start of the refresh: CVE.org may have read the mappings before a save made during it."""
+    calls: list[str] = []
+    start = latest_mapping(factory) + timedelta(hours=1)
+    pipeline = Pipeline(factory, scan_steps(calls), clock=lambda: start)
+    pipeline.refresh_cycle()
+    with mapping_saved_at(factory, start + timedelta(seconds=1)):
+        pipeline.scan_cycle()
+    assert calls == ["refresh", "refresh", "scan"]
+
+
+def test_a_failed_refresh_before_the_scan_leaves_the_scan_and_is_tried_again(factory: sessionmaker[Session]) -> None:
+    calls: list[str] = []
+    failing = [True]
+
+    def refresh() -> None:
+        calls.append("refresh")
+        if failing[0]:
+            raise RuntimeError("NVD is down")
+
+    pipeline = Pipeline(factory, scan_steps(calls, refresh), clock=lambda: latest_mapping(factory) + timedelta(hours=1))
+    report = pipeline.scan_cycle()  # no refresh has completed in this process yet
+    assert calls == ["refresh", "scan"] and report.failures == 1 and pipeline.refreshed_at is None
+    assert "the vulnerability refresh before the scan failed; the scan uses the stored data" in report.notes
+    failing[0] = False
+    assert REFRESHED_FIRST in pipeline.scan_cycle().notes
+    assert calls[2:] == ["refresh", "scan"]
+
+
+def test_a_shutdown_during_the_refresh_stops_the_scan(factory: sessionmaker[Session]) -> None:
+    calls: list[str] = []
+
+    def refresh() -> None:
+        raise ShutdownRequested
+
+    with pytest.raises(ShutdownRequested):
+        Pipeline(factory, scan_steps(calls, refresh)).scan_cycle()
+    assert calls == []
+
+
+def test_the_scheduled_refresh_skips_right_after_a_scan_refreshed(factory: sessionmaker[Session]) -> None:
+    """A scan queued at worker start runs before the start-up refresh: it refreshes (none has completed yet) and the
+    scheduled refresh that follows is skipped, until `REFRESH_FRESH` has passed."""
+    calls: list[str] = []
+    now = [latest_mapping(factory) + timedelta(hours=1)]
+    pipeline = Pipeline(factory, scan_steps(calls), clock=lambda: now[0])
+    pipeline.scan_cycle()
+    skipped = pipeline.refresh_cycle()
+    assert calls == ["refresh", "scan"] and skipped.ran is False
+    assert skipped.notes == [f"a scan refreshed the vulnerability data at {now[0]:%H:%M} UTC"]
+    now[0] += REFRESH_FRESH
+    assert pipeline.refresh_cycle().ran is True
+    assert calls[2:] == ["refresh"]
+
+
+def test_without_a_refresh_step_the_scan_does_not_look_at_the_mappings(factory: sessionmaker[Session]) -> None:
+    calls: list[str] = []
+    steps = scan_steps(calls)
+    steps.refresh = None
+    assert Pipeline(factory, steps).scan_cycle().failures == 0
+    assert calls == ["scan"]
+
+
+@dataclass
+class Outcome:
+    complete: bool
+
+
+def test_an_incomplete_refresh_does_not_cover_the_mappings(factory: sessionmaker[Session]) -> None:
+    """GitHub stopped CVE.org (or its budget ran out): the mark stays, so the next scan refreshes again."""
+    calls: list[str] = []
+    outcomes = [Outcome(complete=False), Outcome(complete=True)]
+
+    def refresh() -> Outcome:
+        calls.append("refresh")
+        return outcomes.pop(0)
+
+    now = [latest_mapping(factory) + timedelta(hours=1)]
+    pipeline = Pipeline(factory, scan_steps(calls, refresh), clock=lambda: now[0])
+    report = pipeline.scan_cycle()
+    assert pipeline.refreshed_at is None
+    assert "CVE.org did not finish this refresh; the next scan refreshes again" in report.notes
+    now[0] += timedelta(minutes=10)
+    pipeline.scan_cycle()
+    assert calls == ["refresh", "scan", "refresh", "scan"] and pipeline.refreshed_at == now[0]
+    pipeline.scan_cycle()
+    assert calls[4:] == ["scan"]
