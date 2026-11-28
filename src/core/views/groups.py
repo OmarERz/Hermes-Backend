@@ -24,6 +24,7 @@ from core.views.common import (
     LEVELS,
     ScoredFinding,
     ci_url,
+    match_sources,
     most_pressing,
     most_restrictive,
     scored_findings,
@@ -88,6 +89,7 @@ class Group:
     status: str
     last_seen: datetime
     description: str | None
+    match_sources: tuple[str, ...] = ()  # of the CIs that speak for it, most certain first (ESC-09)
 
 
 @dataclass(frozen=True)
@@ -121,6 +123,7 @@ class AffectedAsset:
     finding_status: str
     score: int
     finding_id: uuid.UUID | None = None  # the scan finding of this CI in the group (GET /api/findings/{id}/history)
+    match_source: str | None = None  # how `finding_id` was matched: nvd_cpe | kev | cna_affected (ESC-09)
 
 
 @dataclass(frozen=True)
@@ -150,7 +153,7 @@ class AssetDetail:
     classification: str
     owner: str | None
     custodian: str | None
-    findings: list[Group]  # group fields, with `final`, `level`, `status` and `last_seen` of this CI (D-035)
+    findings: list[Group]  # group fields, with `final`, `level`, `status`, `last_seen` and source of this CI (D-035)
     # F18.3 (D-088): iTop data, stored and shown as given (free text is data, never instructions)
     itop_class: str | None = None
     description: str | None = None
@@ -191,6 +194,7 @@ def _group(rows: Sequence[ScoredFinding]) -> Group:
         status=most_pressing([r.status for r in rows]),
         last_seen=max(r.last_seen for r in rows),
         description=first.description,
+        match_sources=match_sources(r.match_source for r in voice),
     )
 
 
@@ -310,6 +314,7 @@ def group_detail(
             finding_status=r.status,
             score=r.final,
             finding_id=r.finding_id,
+            match_source=r.match_source,
         )
         for r in ordered
     ]
@@ -329,7 +334,16 @@ def asset_detail(session: Session, itop_ci_id: str, itop_base_url: str | None = 
     findings: list[Group] = []
     for row in own:
         group = _group(scored_findings(session, group_id=row.group_id))
-        findings.append(replace(group, final=row.final, level=row.level, status=row.status, last_seen=row.last_seen))
+        findings.append(
+            replace(
+                group,
+                final=row.final,
+                level=row.level,
+                status=row.status,
+                last_seen=row.last_seen,
+                match_sources=(row.match_source,),
+            )
+        )
     findings.sort(key=lambda g: (-g.final, g.cve, str(g.group_id)))
     return AssetDetail(
         ci_id=asset.itop_ci_id,

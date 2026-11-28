@@ -18,6 +18,9 @@ ReviewStatus = Literal[
     "applied", "suggestion", "partial_review", "judge_disagreement", "no_judge_review", "rejected", "queued"
 ]
 Verdict = Literal["relevant", "false_positive", "wrong_priority", "investigating", "stop_suggestions"]
+# How the scan matched a finding (ESC-09, F15.9) and that match's certainty, as decimal text (F18.9)
+MatchSource = Literal["nvd_cpe", "kev", "cna_affected"]
+Certainty = Literal["1.0", "0.9"]
 
 
 # The numeric id of a ticket in iTop, as every `ticket_itop_id` input takes it (filters and feedback).
@@ -305,6 +308,14 @@ class VulnerabilityGroup(_Model):
     exposed: bool
     status: FindingStatus
     last_seen: str
+    match_sources: list[MatchSource] = Field(
+        default_factory=list,
+        description="Cómo se detectaron sus hallazgos (F18.9), sin repetir y de la más a la menos segura: `nvd_cpe` "
+        "(rango de NVD, certeza 1.0), `kev` (CVE de KEV de CISA que coincidió por los rangos del CNA en CVE.org, "
+        "certeza 1.0) y `cna_affected` (solo los rangos del CNA en CVE.org, certeza 0.9). Cuenta los activos que "
+        "hablan por el grupo (los vigentes, o todos si ya está corregido); en el detalle de un activo, solo la de ese "
+        "activo.",
+    )
 
 
 class VulnerabilityBand(_Model):
@@ -352,6 +363,18 @@ class AffectedAsset(_Model):
         description="Id del hallazgo de este CI en la vulnerabilidad: se usa en GET /api/findings/{id}/history. "
         "Viene en el detalle de vulnerabilidad; es nulo en una recomendación (su CI puede ser el de una alerta, "
         "sin hallazgo de escaneo).",
+    )
+    match_source: MatchSource | None = Field(
+        default=None,
+        description="Cómo se detectó el hallazgo `finding_id` (F18.9): `nvd_cpe` (rango de NVD), `kev` (CVE de KEV de "
+        "CISA que coincidió por los rangos del CNA en CVE.org) o `cna_affected` (solo los rangos del CNA en CVE.org). "
+        "Si el CI tiene varias instalaciones del producto, es la de la instalación con el estado más urgente, la "
+        "misma de `finding_id` y `finding_status`. Nulo cuando `finding_id` es nulo (en una recomendación).",
+    )
+    certainty: Certainty | None = Field(
+        default=None,
+        description="Certeza de esa coincidencia, como texto decimal (ESC-09): `1.0` para `nvd_cpe` y `kev`, `0.9` "
+        "para `cna_affected`. Nula cuando `match_source` es nulo.",
     )
 
 
