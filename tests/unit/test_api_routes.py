@@ -5,7 +5,7 @@ from __future__ import annotations
 import json
 import uuid
 from collections.abc import Iterator
-from datetime import UTC, datetime
+from datetime import UTC, date, datetime
 
 import pytest
 from fastapi.testclient import TestClient
@@ -291,13 +291,31 @@ def test_cursor_and_sse_are_documented() -> None:
 def test_metrics_come_from_the_dashboard_service(client: TestClient) -> None:
     as_role(Role.READER)
     now = datetime(2026, 11, 22, 12, tzinfo=UTC)
-    dashboard = Dashboard(now, [DashboardMetric("precision", "Precisión", "87.5", "%")])
+    noise = DashboardMetric("noise_avoided", "Ruido evitado", "0", None, date(2026, 11, 21), "Del día anterior.")
+    dashboard = Dashboard(now, [DashboardMetric("precision", "Precisión", "87.5", "%"), noise])
     APP.dependency_overrides[get_dashboard_source] = lambda: lambda _now: dashboard
     response = client.get("/api/metrics")
     assert response.status_code == 200
     assert response.json() == {
         "generated_at": "2026-11-22T12:00:00Z",
-        "metrics": [{"key": "precision", "label": "Precisión", "value": "87.5", "unit": "%"}],
+        "metrics": [
+            {
+                "key": "precision",
+                "label": "Precisión",
+                "value": "87.5",
+                "unit": "%",
+                "as_of": None,
+                "description": None,
+            },
+            {
+                "key": "noise_avoided",
+                "label": "Ruido evitado",
+                "value": "0",
+                "unit": None,
+                "as_of": "2026-11-21",
+                "description": "Del día anterior.",
+            },
+        ],
     }
 
 

@@ -268,7 +268,17 @@ def metrics(source: MetricsSource) -> MetricsDashboard:
     dashboard = source(datetime.now(UTC))
     return MetricsDashboard(
         generated_at=dashboard.generated_at.isoformat().replace("+00:00", "Z"),
-        metrics=[Metric(key=m.key, label=m.label, value=m.value, unit=m.unit) for m in dashboard.metrics],
+        metrics=[
+            Metric(
+                key=m.key,
+                label=m.label,
+                value=m.value,
+                unit=m.unit,
+                as_of=m.as_of.isoformat() if m.as_of else None,
+                description=m.description,
+            )
+            for m in dashboard.metrics
+        ],
     )
 
 

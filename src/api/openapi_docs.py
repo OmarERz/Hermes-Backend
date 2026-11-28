@@ -787,7 +787,9 @@ FIELDS: Final[dict[str, str]] = {
     "assets": "Activos afectados.",
     "attempts": "Intentos de entrega hechos.",
     "author": "Quién hizo el cambio.",
-    "avoided_noise": "Hallazgos de CVSS alto que Hermes bajó de prioridad.",
+    "avoided_noise": "Hallazgos de CVSS alto que Hermes bajó de prioridad: en vivo, los hallazgos vigentes con CVSS de "
+    "9.0 o más y final menor a 50. La métrica `noise_avoided` de `GET /api/metrics` es la del día UTC anterior, al "
+    "cierre de la noche anterior.",
     "bands": "Una banda por nivel con su conteo y los grupos de la página.",
     "base": "Puntaje base (0 a 100) calculado por la fórmula, antes del juez.",
     "changed_findings": "Cuántos hallazgos abiertos cambiarían de nivel.",

@@ -308,15 +308,15 @@ class VulnerabilityGroup(_Model):
     last_seen: str
     cvss: str | None = Field(
         default=None,
-        description="CVSS con el que se puntuó el grupo (el de NVD o, si falta, el del CNA, D-104), como texto "
-        "decimal. Nulo si el CVE no tiene CVSS publicado.",
+        description="CVSS que usó la evaluación que da la puntuación de esta fila (la foto del dato al evaluar, "
+        "elegido según D-104), como texto decimal. Nulo si esa evaluación se hizo sin CVSS publicado.",
     )
     severity: Severity | None = Field(
         default=None,
-        description="Severidad del grupo según la escala de su CVSS (crítica de 9.0 a 10, alta de 7.0 a 8.9, media de "
-        "4.0 a 6.9, baja de 0.1 a 3.9). `unrated`: sin CVSS publicado; la puntuación usó una severidad estimada (0.8 "
-        "por precaución o el vector que infirió el Analista de CVE) y la justificación lo dice. Nula solo con un CVSS "
-        "de 0.0.",
+        description="Severidad según la escala de `cvss` (crítica de 9.0 a 10, alta de 7.0 a 8.9, media de 4.0 a 6.9, "
+        "baja de 0.1 a 3.9). `unrated`: la evaluación mostrada se hizo sin CVSS publicado y usó una severidad estimada "
+        "(0.8 por precaución o el vector que infirió el Analista de CVE), como dice su justificación; un CI corregido "
+        "conserva la de su última evaluación aunque el CVE tenga CVSS después. Nula solo con un CVSS de 0.0.",
     )
 
 
@@ -658,6 +658,16 @@ class Metric(_Model):
     label: str
     value: str
     unit: str | None
+    as_of: str | None = Field(
+        default=None,
+        description="Día UTC (AAAA-MM-DD) del valor: el job nocturno guarda cada noche el día anterior. Nulo en el "
+        "nivel de la escalera del juez, que es el actual.",
+    )
+    description: str | None = Field(
+        default=None,
+        description="Alcance y fecha de la métrica, en español, para rotularla. Hoy la traen las tres que la pantalla "
+        "de comparación también muestra en vivo (`reclassified`, `hidden_criticals`, `noise_avoided`).",
+    )
 
 
 class MetricsDashboard(_Model):
