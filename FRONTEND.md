@@ -61,6 +61,20 @@ y funciona con los datos de `make demo`.
   si Firebase no responde (reintenta más tarde).
 - El primer admin se asigna fuera del front (consola de Firebase o el emulador). Un admin no puede cambiar su
   propio rol (409 `own_role`).
+- **Alta de usuarios (D-105):** el admin crea una cuenta con `POST /api/admin/users` `{email, role}`. El backend la
+  crea en Firebase **sin contraseña**, con el correo sin verificar y el rol, y guarda su copia; Firebase le envía a la
+  persona un correo con la plantilla de restablecimiento y un enlace para crear su contraseña. Hermes nunca ve ni
+  guarda la contraseña ni el enlace, y el front no llama a Firebase para esto. Responde 201 con `uid`, `email`, `role`
+  y `password_email_sent`: si es falso, la cuenta quedó creada pero el correo no salió; reenvíalo con
+  `POST /api/admin/users/{uid}/password-email` (también sirve cuando el enlace venció: dura una hora; 409
+  `user_disabled` si la cuenta está desactivada). Errores: 409 `email_exists` (el correo ya tiene cuenta), 422
+  `invalid_email` (Firebase no acepta el correo), 429 `too_many_emails` (más de 20 correos de acceso por admin en una
+  hora), 503 `auth_unavailable` (reintenta). Muestra el éxito como «Se envió un correo a … para crear su contraseña».
+- **Desactivar y reactivar (D-105):** `PUT /api/admin/users/{uid}/status` `{disabled: true|false}`. Desactivar apaga
+  la cuenta en Firebase y en Hermes y revoca sus sesiones (sus peticiones dan 401 o 403 `user_inactive` al instante);
+  reactivar revoca otra vez antes de encenderla, así que la persona inicia sesión de nuevo. Nadie cambia el estado de
+  su propia cuenta (409 `own_status`) ni desactiva al último administrador activo que ya inició sesión (409
+  `last_admin`). Responde `{uid, disabled, sessions_revoked, known_user}`.
 
 ## 3. Mapa de pantallas → rutas → rol mínimo
 
@@ -69,7 +83,7 @@ Los requisitos de cada pantalla (FRO-xx) están en la especificación del produc
 | Pantalla | Rutas | Rol mínimo |
 |---|---|---|
 | Sesión / perfil propio | `GET /api/me` | reader |
-| Usuarios y roles | `GET /api/admin/users`, `PUT /api/admin/users/{uid}/role` | admin |
+| Usuarios y roles | `GET /api/admin/users`, `PUT /api/admin/users/{uid}/role`, `POST /api/admin/users`, `POST /api/admin/users/{uid}/password-email`, `PUT /api/admin/users/{uid}/status` | admin |
 | Parámetros (sensibilidad del juez, motivos del juez, fórmula, niveles) | `GET /api/config/schema`, `GET /api/config`, `PUT /api/config` (cada parámetro trae su `min_role`; los motivos son `reasons.<code>.enabled`), `GET /api/config/versions`, `POST /api/config/versions/{v}/restore` | reader para ver; editar según el parámetro; restaurar: admin |
 | Simulación antes de guardar la fórmula o la sensibilidad | `POST /api/formula/simulate` | admin |
 | Perfil de la empresa y empresas pares | `GET/PUT /api/profile`, `GET/POST /api/peer-companies`, `PUT/DELETE /api/peer-companies/{id}` | reader para ver; admin para editar |
@@ -207,8 +221,10 @@ Todo error responde con:
   encola una corrida.
 - **Usuarios:** `GET /api/admin/users` lista todas las cuentas de Firebase, hayan iniciado sesión o no, ordenadas
   por correo y paginadas. Cada una trae `role` (el guardado: mándalo como `expected_role` al cambiarlo; nulo si
-  nunca inició sesión), `claim_role`, `effective_role` (el que tendría una petición suya ahora; nulo si se
-  rechazaría), `active`, `signed_in` y `last_login_at`. Responde 503 `auth_unavailable` si Firebase no responde.
+  Hermes no tiene copia), `claim_role`, `effective_role` (el que tendría una petición suya ahora; nulo si se
+  rechazaría), `active`, `signed_in` (si ya inició sesión en Hermes: una cuenta creada desde el front tiene `role`
+  pero `signed_in` falso hasta que crea su contraseña y entra) y `last_login_at`. Responde 503 `auth_unavailable` si
+  Firebase no responde.
 - **Cola de errores (FRO-18):** `GET /api/error-queue` junta, de lo más reciente a lo más antiguo, los eventos de
   notificación y las escrituras en iTop que agotaron sus reintentos y los elementos que un analista o el juez no
   pudieron validar (`kind`: `notification`, `itop`, `llm_validation`). Solo los que traen `retryable: true` (hoy, los
