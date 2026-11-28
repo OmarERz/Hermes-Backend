@@ -116,9 +116,9 @@ def test_a_half_made_account_is_discarded_and_audited_by_uid(deleted: bool) -> N
 
 def test_disable_and_enable_change_the_copy_and_are_audited() -> None:
     directory = _directory()
-    off = directory.change_status("reader-1", True, "admin-1", lambda: True)
+    off = directory.change_status("reader-1", True, "admin-1", lambda _on: True)
     assert off is not None and off.active is False
-    on = directory.change_status("reader-1", False, "admin-1", lambda: True)
+    on = directory.change_status("reader-1", False, "admin-1", lambda _on: True)
     assert on is not None and on.active is True
     assert directory.audit == [
         AuditEntry("admin-1", "user.disable_requested", "reader-1", None, {"active": False}),
@@ -130,9 +130,28 @@ def test_disable_and_enable_change_the_copy_and_are_audited() -> None:
     ]
 
 
+def test_a_switch_on_says_whether_hermes_already_has_the_account_on() -> None:
+    directory = _directory()
+    seen: list[bool] = []
+    directory.change_status("reader-1", False, "admin-1", lambda on: seen.append(on) is None)  # copy active: applied
+    directory.change_status("reader-1", True, "admin-1", lambda on: seen.append(on) is None)  # a switch-off: never
+    directory.change_status("reader-1", False, "admin-1", lambda on: seen.append(on) is None)  # copy off: revoke
+    directory.change_status("never", False, "admin-1", lambda on: seen.append(on) is None)  # no copy, never on: revoke
+    # No copy yet: the audit trail says whether the last switch-on completed.
+    directory.change_status("never", False, "admin-1", lambda on: seen.append(on) is None)  # retried: applied
+    with pytest.raises(RuntimeError):
+        directory.change_status("never", True, "admin-1", _firebase_down)  # partial switch-off
+    directory.change_status("never", False, "admin-1", lambda on: seen.append(on) is None)  # revoke again
+    assert seen == [True, False, False, False, True, False]
+
+
+def _firebase_down(_on: bool) -> bool:
+    raise RuntimeError("firebase down")
+
+
 def test_status_of_a_user_who_never_logged_in_changes_only_firebase() -> None:
     directory = _directory()
-    assert directory.change_status("never", True, "admin-1", lambda: True) is None
+    assert directory.change_status("never", True, "admin-1", lambda _on: True) is None
     assert directory.audit[-1] == AuditEntry(
         "admin-1", "user.disable", "never", None, {"active": False, "sessions_revoked": True}
     )
@@ -154,26 +173,26 @@ def test_the_last_active_admin_is_never_switched_off() -> None:
         directory.change_status("admin-1", True, "admin-1", _no_status_change)
     # With another active admin it is allowed (the route still refuses an admin's own account).
     directory.sync_login(VerifiedIdentity("admin-2", "admin2@example.com", None, Role.ADMIN))
-    record = directory.change_status("admin-1", True, "admin-1", lambda: True)
+    record = directory.change_status("admin-1", True, "admin-1", lambda _on: True)
     assert record is not None and record.active is False
     # Switching an account on never needs another admin.
-    assert directory.change_status("reader-1", False, "admin-2", lambda: True) is not None
+    assert directory.change_status("reader-1", False, "admin-2", lambda _on: True) is not None
 
 
-def _no_status_change() -> bool:
+def _no_status_change(_on: bool) -> bool:
     raise AssertionError("Firebase must not be called")
 
 
 def test_a_failed_status_change_is_audited_and_keeps_the_copy() -> None:
     directory = _directory()
 
-    def down() -> bool:
+    def down(_on: bool) -> bool:
         raise RuntimeError("firebase down")
 
     with pytest.raises(RuntimeError):
         directory.change_status("reader-1", True, "admin-1", down)
     with pytest.raises(RoleConflictError):
-        directory.change_status("admin-1", True, "reader-1", lambda: True)
+        directory.change_status("admin-1", True, "reader-1", lambda _on: True)
     record = directory.get("reader-1")
     assert record is not None and record.active is True
     assert [(entry.actor_uid, entry.action, entry.entity_id) for entry in directory.audit] == [

@@ -99,11 +99,21 @@ def test_an_account_switched_off_cannot_sign_in_and_its_token_is_refused(
 
     assert manager.set_disabled(account.uid, True) is True  # again: the revocation is repeated, nothing else
     assert manager.set_disabled(account.uid, False) is True
-    assert _sign_in(emulator_host, email, password).status_code == 200
+    signed_in = _sign_in(emulator_host, email, password)
+    assert signed_in.status_code == 200
     # The session of before the switch-off does not come back to life with the account.
     with pytest.raises(TokenError) as still_refused:
         verifier.verify(token)
     assert still_refused.value.reason == "token_revoked"
+    # A repeated switch-on already applied (on in Hermes too) leaves the session opened since alone...
+    fresh = signed_in.json()["idToken"]
+    assert manager.set_disabled(account.uid, False, on_in_hermes=True) is False
+    assert verifier.verify(fresh).uid == account.uid
+    # ...while a switch-on after a switch-off that never reached Firebase revokes the sessions of before.
+    assert manager.set_disabled(account.uid, False, on_in_hermes=False) is True
+    with pytest.raises(TokenError) as revoked:
+        verifier.verify(fresh)
+    assert revoked.value.reason == "token_revoked"
 
 
 def test_a_taken_email_is_refused_and_a_discarded_account_is_gone(verifier: FirebaseTokenVerifier) -> None:

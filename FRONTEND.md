@@ -72,7 +72,8 @@ y funciona con los datos de `make demo`.
   hora), 503 `auth_unavailable` (reintenta). Muestra el éxito como «Se envió un correo a … para crear su contraseña».
 - **Desactivar y reactivar (D-105):** `PUT /api/admin/users/{uid}/status` `{disabled: true|false}`. Desactivar apaga
   la cuenta en Firebase y en Hermes y revoca sus sesiones (sus peticiones dan 401 o 403 `user_inactive` al instante);
-  reactivar revoca otra vez antes de encenderla, así que la persona inicia sesión de nuevo. Nadie cambia el estado de
+  reactivar revoca otra vez antes de encenderla, así que la persona inicia sesión de nuevo (repetir una reactivación
+  que ya se aplicó en Firebase y en Hermes no cierra sus sesiones nuevas). Nadie cambia el estado de
   su propia cuenta (409 `own_status`) ni desactiva al último administrador activo que ya inició sesión (409
   `last_admin`). Responde `{uid, disabled, sessions_revoked, known_user}`.
 

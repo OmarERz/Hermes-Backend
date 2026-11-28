@@ -354,8 +354,8 @@ def _add_status_route(router: APIRouter) -> None:
         directory: AccountDirectory = request.app.state.user_directory
         outcome = {"revoked": False}
 
-        def apply() -> bool:
-            outcome["revoked"] = accounts.set_disabled(uid, body.disabled)
+        def apply(on_in_hermes: bool) -> bool:
+            outcome["revoked"] = accounts.set_disabled(uid, body.disabled, on_in_hermes)
             return outcome["revoked"]
 
         try:

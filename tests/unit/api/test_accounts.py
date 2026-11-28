@@ -257,8 +257,31 @@ def test_enabling_revokes_the_old_sessions_before_switching_the_account_on(
     monkeypatch: pytest.MonkeyPatch, calls: list[tuple[str, Any]]
 ) -> None:
     manager = _timed_manager(monkeypatch, calls)
-    assert manager.set_disabled("u1", False) is True
-    assert calls == [("sleep", 0.75), ("revoke", "u1"), ("update", ("u1", {"disabled": False}))]
+    assert manager.set_disabled("off", False) is True  # the `calls` fixture has "off" switched off in Firebase
+    assert calls == [("sleep", 0.75), ("revoke", "off"), ("update", ("off", {"disabled": False}))]
+
+
+def test_a_switch_on_already_applied_changes_nothing(
+    monkeypatch: pytest.MonkeyPatch, calls: list[tuple[str, Any]]
+) -> None:
+    """A retried switch-on (its first answer lost): on in Firebase and in Hermes, the sessions opened since stay."""
+    manager = _timed_manager(monkeypatch, calls)
+    assert manager.set_disabled("u1", False, on_in_hermes=True) is False
+    assert calls == []
+
+
+def test_a_switch_on_after_a_partial_switch_off_still_revokes(
+    monkeypatch: pytest.MonkeyPatch, calls: list[tuple[str, Any]]
+) -> None:
+    """The switch-off turned the copy off but never reached Firebase: the old sessions are revoked before Hermes takes
+    the account back (Firebase has it on already, so nothing else changes there)."""
+    manager = _timed_manager(monkeypatch, calls)
+    assert manager.set_disabled("u1", False, on_in_hermes=False) is True
+    assert calls == [("sleep", 0.75), ("revoke", "u1")]
+    # Off in Firebase, the revocation and the switch-on happen whatever Hermes says.
+    calls.clear()
+    assert manager.set_disabled("off", False, on_in_hermes=True) is True
+    assert calls == [("sleep", 0.75), ("revoke", "off"), ("update", ("off", {"disabled": False}))]
 
 
 def test_a_failed_revocation_keeps_the_account_off(
@@ -270,7 +293,7 @@ def test_a_failed_revocation_keeps_the_account_off(
     assert calls == [("update", ("u1", {"disabled": True}))]
     # Switching it on needs the revocation first: without it the account stays off.
     with pytest.raises(AuthUnavailableError):
-        manager.set_disabled("u1", False)
+        manager.set_disabled("off", False)
     assert calls == [("update", ("u1", {"disabled": True}))]
 
 
@@ -301,8 +324,8 @@ def test_set_disabled_maps_firebase_errors(
         manager.set_disabled("u1", True)
     assert calls == []
     with pytest.raises(expected):
-        manager.set_disabled("u1", False)
-    assert calls == [("revoke", "u1")]
+        manager.set_disabled("off", False)
+    assert calls == [("revoke", "off")]
 
 
 # --- the password e-mail ---------------------------------------------------------------------------------------

@@ -38,6 +38,7 @@ class FakeAccounts:
         self.errors: dict[str, Exception] = {}
         self.accounts: dict[str, AccountInfo] = {"u-reader": AccountInfo("u-reader", "reader@example.com", False)}
         self.uids: list[str] = []  # the uids Hermes picked, in order
+        self.on_in_hermes: list[bool] = []  # what each status change was told about the copy
 
     def _fail(self, step: str) -> None:
         if step in self.errors:
@@ -59,12 +60,13 @@ class FakeAccounts:
             raise UnknownUserError(uid)
         return self.accounts[uid]
 
-    def set_disabled(self, uid: str, disabled: bool) -> bool:
+    def set_disabled(self, uid: str, disabled: bool, on_in_hermes: bool = False) -> bool:
         self._fail("set_disabled")
         if uid not in self.accounts:
             raise UnknownUserError(uid)
         self.calls.append(("set_disabled", (uid, disabled)))
-        return True
+        self.on_in_hermes.append(on_in_hermes)
+        return disabled or not on_in_hermes  # a switch-on already applied revokes nothing
 
     def send_password_setup(self, email: str, user_ip: str | None = None) -> None:
         self._fail("send")
@@ -422,9 +424,17 @@ def test_an_admin_disables_and_enables_an_account(
     assert on.status_code == 200
     assert client.get("/api/me", headers=bearer("reader")).status_code == 200
     assert accounts.calls == [("set_disabled", ("u-reader", True)), ("set_disabled", ("u-reader", False))]
+    assert accounts.on_in_hermes == [False, False]  # the copy was off when it was switched on: revoke again
+    # The same switch-on again (its first answer lost): already applied, the sessions opened since stay open.
+    again = client.put("/api/admin/users/u-reader/status", json={"disabled": False}, headers=bearer("admin"))
+    assert again.status_code == 200
+    assert (again.json()["sessions_revoked"], accounts.on_in_hermes[-1]) == (False, True)
+    assert client.get("/api/me", headers=bearer("reader")).status_code == 200
     assert [entry.action for entry in _account_audit(directory)] == [
         "user.disable_requested",
         "user.disable",
+        "user.enable_requested",
+        "user.enable",
         "user.enable_requested",
         "user.enable",
     ]

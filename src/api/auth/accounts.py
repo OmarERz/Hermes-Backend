@@ -16,7 +16,9 @@ Disabling an account switches it off in Firebase (it cannot sign in or refresh, 
 ID tokens) and revokes its refresh tokens. Firebase keeps the revocation time in whole seconds and only refuses tokens
 issued *before* that second, so every revocation waits for the next full second (as ``api.auth.role_admin`` does).
 Switching an account back on revokes its sessions again first and refuses to switch it on if that fails: a session of
-before the switch-off never comes back to life, even when the revocation at switch-off time failed.
+before the switch-off never comes back to life, even when the revocation at switch-off time failed or the switch-off
+never reached Firebase. Only a switch-on already applied (Firebase has the account on and Hermes too) is left as it is,
+so a repeated switch-on never closes the sessions opened since.
 
 Error messages of the SDK can quote the e-mail, so only exception classes are logged; the e-mail and the response
 bodies of Identity Toolkit are never logged.
@@ -115,11 +117,11 @@ class AccountManager(Protocol):
         """The account's e-mail and state; ``UnknownUserError`` if the uid does not exist."""
         ...
 
-    def set_disabled(self, uid: str, disabled: bool) -> bool:
+    def set_disabled(self, uid: str, disabled: bool, on_in_hermes: bool = False) -> bool:
         """Switch the account off or on and revoke its refresh tokens; returns whether they were revoked. Switching
         off never fails on the revocation (the account is off already); switching on revokes first and raises
-        ``AuthUnavailableError`` without switching it on when that fails. ``UnknownUserError`` if the uid does not
-        exist."""
+        ``AuthUnavailableError`` without switching it on when that fails. A switch-on already applied (``on_in_hermes``
+        and Firebase has the account on) is left untouched (False). ``UnknownUserError`` if the uid does not exist."""
         ...
 
     def send_password_setup(self, email: str, user_ip: str | None) -> None:
@@ -214,7 +216,7 @@ class FirebaseAccountManager:
             raise AuthUnavailableError from exc
         return AccountInfo(uid=user.uid, email=user.email, disabled=bool(user.disabled))
 
-    def set_disabled(self, uid: str, disabled: bool) -> bool:
+    def set_disabled(self, uid: str, disabled: bool, on_in_hermes: bool = False) -> bool:
         app = self._app()
         if disabled:
             self._update(app, uid, disabled=True)
@@ -225,12 +227,15 @@ class FirebaseAccountManager:
                 # tokens; switching it on later revokes again before anything else.
                 return False
             return True
-        self.lookup(uid)  # an unknown uid is a 404, not a failed revocation
+        on_in_firebase = not self.lookup(uid).disabled  # an unknown uid is a 404 here, not a failed revocation
+        if on_in_firebase and on_in_hermes:
+            return False  # already applied (a retried switch-on): the sessions opened since stay open
         try:
             self._revoke_after_this_second(app, uid)
         except RevocationPendingError as exc:
             raise AuthUnavailableError from exc  # stays off: a session of before the switch-off could come back
-        self._update(app, uid, disabled=False)
+        if not on_in_firebase:
+            self._update(app, uid, disabled=False)
         return True
 
     @staticmethod

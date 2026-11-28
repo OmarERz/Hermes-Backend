@@ -502,9 +502,9 @@ def test_disable_and_enable_set_active_on_the_copy_and_are_audited(sessions: ses
     admin = directory.sync_login(identity("boss", Role.ADMIN))
     directory.sync_login(identity("u9", Role.ANALYST))
 
-    off = directory.change_status("u9", True, "boss", lambda: True)
-    on = directory.change_status("u9", False, "boss", lambda: False)
-    never = directory.change_status("never", True, "boss", lambda: True)
+    off = directory.change_status("u9", True, "boss", lambda _on: True)
+    on = directory.change_status("u9", False, "boss", lambda _on: False)
+    never = directory.change_status("never", True, "boss", lambda _on: True)
 
     assert off is not None and off.active is False
     assert on is not None and on.active is True
@@ -528,13 +528,13 @@ def test_a_failed_status_change_is_audited_and_fails_closed(sessions: sessionmak
     directory.sync_login(identity("boss", Role.ADMIN))
     directory.sync_login(identity("u10", Role.READER))
 
-    def firebase_down() -> bool:
+    def firebase_down(_on: bool) -> bool:
         raise RuntimeError("down")
 
     with pytest.raises(RuntimeError):
         directory.change_status("u10", True, "boss", firebase_down)
     with pytest.raises(RoleConflictError, match="actor_not_admin"):
-        directory.change_status("boss", True, "u10", lambda: True)
+        directory.change_status("boss", True, "u10", lambda _on: True)
 
     assert [row[0] for row in audit_rows(sessions, "u10")] == [
         "user_created",
@@ -560,16 +560,16 @@ def test_the_last_active_admin_is_never_switched_off(sessions: sessionmaker[Sess
         session.execute(update(AppUser).where(AppUser.firebase_uid == "a2").values(active=False))
     touched: list[str] = []
     with pytest.raises(RoleConflictError, match="last_admin"):
-        directory.change_status("a1", True, "a1", lambda: touched.append("a1") is None)
+        directory.change_status("a1", True, "a1", lambda _on: touched.append("a1") is None)
     # An admin created from the app has no password until it follows its e-mail: it is no backup yet.
     directory.create_account(
         _request("a3", "invited@example.com", Role.ADMIN), "a1", lambda: NewAccount("a3", "invited@example.com"), _keep
     )
     with pytest.raises(RoleConflictError, match="last_admin"):
-        directory.change_status("a1", True, "a1", lambda: touched.append("a1") is None)
+        directory.change_status("a1", True, "a1", lambda _on: touched.append("a1") is None)
     assert touched == []
     # Switching the other admin back on needs no second admin.
-    record = directory.change_status("a2", False, "a1", lambda: True)
+    record = directory.change_status("a2", False, "a1", lambda _on: True)
     assert record is not None and record.active is True
     assert [row[0] for row in audit_rows(sessions, "a1")][-2:] == ["user.disable_requested", "user.disable_failed"]
 
@@ -587,7 +587,7 @@ def test_the_copy_is_off_before_firebase_and_stays_off_if_firebase_fails(session
         with sessions() as session:
             return session.scalar(select(AppUser.active).where(AppUser.firebase_uid == "u11"))
 
-    def firebase_fails() -> bool:
+    def firebase_fails(_on: bool) -> bool:
         with ThreadPoolExecutor(max_workers=1) as pool:
             seen.append(pool.submit(active_now).result())
         raise RuntimeError("down")
@@ -596,7 +596,7 @@ def test_the_copy_is_off_before_firebase_and_stays_off_if_firebase_fails(session
         directory.change_status("u11", True, "boss", firebase_fails)
     assert seen == [False]
     assert active_now() is False
-    record = directory.change_status("u11", False, "boss", lambda: True)
+    record = directory.change_status("u11", False, "boss", lambda _on: True)
     assert record is not None and record.active is True
 
 
@@ -605,7 +605,7 @@ def test_a_copy_a_first_sign_in_creates_meanwhile_goes_off_too(sessions: session
     directory = SqlUserDirectory(sessions)
     directory.sync_login(identity("boss", Role.ADMIN))
 
-    def first_sign_in_while_firebase_answers() -> bool:
+    def first_sign_in_while_firebase_answers(_on: bool) -> bool:
         with ThreadPoolExecutor(max_workers=1) as pool:  # another connection, as a real request would be
             pool.submit(directory.sync_login, identity("a9", Role.ADMIN)).result()
         return True
@@ -620,7 +620,7 @@ def test_a_copy_a_first_sign_in_creates_while_firebase_fails_stays_off(sessions:
     directory = SqlUserDirectory(sessions)
     directory.sync_login(identity("boss", Role.ADMIN))
 
-    def first_sign_in_then_firebase_fails() -> bool:
+    def first_sign_in_then_firebase_fails(_on: bool) -> bool:
         with ThreadPoolExecutor(max_workers=1) as pool:
             pool.submit(directory.sync_login, identity("a10", Role.ADMIN)).result()
         raise RuntimeError("down")
@@ -679,14 +679,14 @@ def test_a_status_change_never_needs_a_second_connection_while_it_holds_the_lock
         directory.sync_login(identity("u13", Role.READER))
         in_firebase, release = threading.Event(), threading.Event()
 
-        def first() -> bool:
+        def first(_on: bool) -> bool:
             in_firebase.set()
             return release.wait(10)
 
         with ThreadPoolExecutor(max_workers=2) as pool:
             one = pool.submit(directory.change_status, "u13", True, "boss", first)
             assert in_firebase.wait(10)
-            two = pool.submit(directory.change_status, "u13", False, "boss", lambda: True)
+            two = pool.submit(directory.change_status, "u13", False, "boss", lambda _on: True)
             time.sleep(0.5)  # the second change holds the other connection, waiting for the lock
             release.set()
             assert one.result(timeout=30) is not None
@@ -705,12 +705,12 @@ def test_reciprocal_disables_never_leave_the_system_without_an_admin(sessions: s
     in_section, release = threading.Event(), threading.Event()
     applied: list[str] = []
 
-    def first() -> bool:
+    def first(_on: bool) -> bool:
         applied.append("a2")
         in_section.set()
         return release.wait(10)
 
-    def disable(target: str, actor: str, apply: Callable[[], bool]) -> str:
+    def disable(target: str, actor: str, apply: Callable[[bool], bool]) -> str:
         try:
             directory.change_status(target, True, actor, apply)
         except RoleConflictError as exc:
@@ -720,7 +720,7 @@ def test_reciprocal_disables_never_leave_the_system_without_an_admin(sessions: s
     with ThreadPoolExecutor(max_workers=2) as pool:
         one = pool.submit(disable, "a2", "a1", first)
         assert in_section.wait(10)
-        two = pool.submit(disable, "a1", "a2", lambda: applied.append("a1") is None)
+        two = pool.submit(disable, "a1", "a2", lambda _on: applied.append("a1") is None)
         time.sleep(0.5)  # the second change reaches the global lock while the first is still inside
         release.set()
         outcomes = (one.result(timeout=30), two.result(timeout=30))
@@ -739,16 +739,16 @@ def test_status_changes_of_one_account_never_interleave(sessions: sessionmaker[S
     directory.sync_login(identity("boss", Role.ADMIN))
     directory.sync_login(identity("u12", Role.READER))
     if not first_disables:
-        directory.change_status("u12", True, "boss", lambda: True)
+        directory.change_status("u12", True, "boss", lambda _on: True)
     in_firebase, release = threading.Event(), threading.Event()
     firebase: list[bool] = []
 
-    def first() -> bool:
+    def first(_on: bool) -> bool:
         firebase.append(first_disables)
         in_firebase.set()
         return release.wait(10)
 
-    def second() -> bool:
+    def second(_on: bool) -> bool:
         firebase.append(not first_disables)
         return True
 
@@ -765,6 +765,30 @@ def test_status_changes_of_one_account_never_interleave(sessions: sessionmaker[S
     with sessions() as session:
         active = session.scalar(select(AppUser.active).where(AppUser.firebase_uid == "u12"))
     assert active is first_disables  # the last change (the opposite of the first) won in both places
+
+
+def test_a_switch_on_says_whether_hermes_already_has_the_account_on(sessions: sessionmaker[Session]) -> None:
+    """Only a switch-on already applied (the copy is active) keeps the sessions; after a partial switch-off (the copy
+    off, Firebase never reached) the old sessions are revoked again."""
+    directory = SqlUserDirectory(sessions)
+    directory.sync_login(identity("boss", Role.ADMIN))
+    directory.sync_login(identity("u15", Role.READER))
+    seen: list[bool] = []
+    directory.change_status("u15", False, "boss", lambda on: seen.append(on) is None)
+    with pytest.raises(RuntimeError):
+        directory.change_status("u15", True, "boss", _firebase_down)  # partial: the copy stays off
+    directory.change_status("u15", False, "boss", lambda on: seen.append(on) is None)
+    directory.change_status("never", False, "boss", lambda on: seen.append(on) is None)
+    # No copy yet (the person may have signed in to Firebase without calling Hermes): the audit trail decides.
+    directory.change_status("never", False, "boss", lambda on: seen.append(on) is None)  # retried: applied
+    with pytest.raises(RuntimeError):
+        directory.change_status("never", True, "boss", _firebase_down)  # partial switch-off
+    directory.change_status("never", False, "boss", lambda on: seen.append(on) is None)  # revoke again
+    assert seen == [True, False, False, True, False]
+
+
+def _firebase_down(_on: bool) -> bool:
+    raise RuntimeError("down")
 
 
 def test_the_password_email_needs_an_active_admin_and_an_account_on_in_hermes(sessions: sessionmaker[Session]) -> None:

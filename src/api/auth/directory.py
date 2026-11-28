@@ -55,6 +55,21 @@ def _discarded(discard: Callable[[str], None], uid: str) -> bool:
     return True
 
 
+# The status rows that say how the last change of an account ended: a completed switch-on, or a switch-off asked for.
+_STATUS_MARKS = ("user.enable", "user.disable_requested")
+
+
+def _switched_on_last(session: Session, uid: str) -> bool:
+    """Whether the last status change recorded for ``uid`` is a completed switch-on (for an account with no copy)."""
+    last = session.scalar(
+        select(AuditLog.action)
+        .where(AuditLog.entity_type == ENTITY, AuditLog.entity_id == uid, AuditLog.action.in_(_STATUS_MARKS))
+        .order_by(AuditLog.created_at.desc(), AuditLog.id.desc())
+        .limit(1)
+    )
+    return last == "user.enable"
+
+
 def _status_action(disabled: bool) -> str:
     return "user.disable" if disabled else "user.enable"
 
@@ -169,9 +184,15 @@ class AccountDirectory(Protocol):
         """
         ...
 
-    def change_status(self, uid: str, disabled: bool, actor_uid: str, apply: Callable[[], bool]) -> UserRecord | None:
+    def change_status(
+        self, uid: str, disabled: bool, actor_uid: str, apply: Callable[[bool], bool]
+    ) -> UserRecord | None:
         """Switch a user off (``disabled``) or on through ``apply`` (Firebase; it returns whether the sessions were
-        revoked), then set ``active`` on the copy, audited as ``user.disable`` or ``user.enable``.
+        revoked), then set ``active`` on the copy, audited as ``user.disable`` or ``user.enable``. ``apply`` gets
+        whether Hermes already has the account on: its stored copy is active or, for an account with no copy yet, its
+        last status change recorded is a completed ``user.enable`` (a switch-on already applied, so Firebase keeps the
+        sessions opened since). It is False for every switch-off, and after a partial switch-off (the old sessions are
+        revoked again).
 
         As ``change_role``: ``user.disable_requested`` (or ``user.enable_requested``) is committed before Firebase is
         touched, so the trail shows a change even if it stops half way; then, serialized with role changes, the actor
@@ -405,7 +426,9 @@ class InMemoryUserDirectory:
         with self._lock:
             self.audit.append(AuditEntry(actor_uid, CREATE_FAILED, uid, None, _create_failure(role, discarded)))
 
-    def change_status(self, uid: str, disabled: bool, actor_uid: str, apply: Callable[[], bool]) -> UserRecord | None:
+    def change_status(
+        self, uid: str, disabled: bool, actor_uid: str, apply: Callable[[bool], bool]
+    ) -> UserRecord | None:
         action = _status_action(disabled)
         with self._lock:
             self.audit.append(AuditEntry(actor_uid, f"{action}_requested", uid, None, {"active": not disabled}))
@@ -414,7 +437,14 @@ class InMemoryUserDirectory:
                 self._require_admin(actor_uid)
                 if disabled:
                     self._refuse_last_admin(uid)
-                revoked = apply()
+                with self._lock:
+                    copy = self._users.get(uid)
+                    last = next(
+                        (e.action for e in reversed(self.audit) if e.entity_id == uid and e.action in _STATUS_MARKS),
+                        None,
+                    )
+                on = copy.active if copy is not None else last == "user.enable"
+                revoked = apply(not disabled and on)
             except Exception:
                 with self._lock:
                     self.audit.append(AuditEntry(actor_uid, f"{action}_failed", uid, None, {"active": not disabled}))
@@ -661,7 +691,9 @@ class SqlUserDirectory:
             entry = AuditEntry(actor_uid, CREATE_FAILED, uid, None, _create_failure(role, discarded))
             session.add(_audit(entry, self._actor(session, actor_uid), _now()))
 
-    def change_status(self, uid: str, disabled: bool, actor_uid: str, apply: Callable[[], bool]) -> UserRecord | None:
+    def change_status(
+        self, uid: str, disabled: bool, actor_uid: str, apply: Callable[[bool], bool]
+    ) -> UserRecord | None:
         action = _status_action(disabled)
         with self._sessions.begin() as session:
             entry = AuditEntry(actor_uid, f"{action}_requested", uid, None, {"active": not disabled})
@@ -697,7 +729,7 @@ class SqlUserDirectory:
 
     @staticmethod
     def _switch_off(
-        sessions: sessionmaker[Session], uid: str, actor_uid: str, apply: Callable[[], bool]
+        sessions: sessionmaker[Session], uid: str, actor_uid: str, apply: Callable[[bool], bool]
     ) -> UserRecord | None:
         """The copy goes off first, committed under the role lock, then Firebase: a concurrent change (two admins
         switching each other off) sees the switch-off under that lock, and every request of the user is refused from
@@ -713,7 +745,7 @@ class SqlUserDirectory:
             )
             session.execute(update(AppUser).where(AppUser.firebase_uid == uid).values(active=False))
         try:
-            revoked = apply()
+            revoked = apply(False)
         except Exception:
             # Fails closed here too: a copy a first sign-in created while Firebase answered goes off.
             with sessions.begin() as session:
@@ -730,14 +762,16 @@ class SqlUserDirectory:
 
     @staticmethod
     def _switch_on(
-        sessions: sessionmaker[Session], uid: str, actor_uid: str, apply: Callable[[], bool]
+        sessions: sessionmaker[Session], uid: str, actor_uid: str, apply: Callable[[bool], bool]
     ) -> UserRecord | None:
         """Firebase first, then the copy, under the role lock: if the database fails after Firebase, the copy still
         refuses the user (403 ``user_inactive``) until the request is repeated."""
         with sessions.begin() as session:
             _lock_role_change(session, uid)
             actor_id = SqlUserDirectory._active_admin(session, actor_uid)
-            revoked = apply()
+            # Status changes of this account are serialized (``_account_lock``): the copy read here stays as it is.
+            copy_active = session.scalar(select(AppUser.active).where(AppUser.firebase_uid == uid))
+            revoked = apply(copy_active if copy_active is not None else _switched_on_last(session, uid))
             # As in change_role: the row lock only for the local write, after Firebase answered.
             user = session.scalar(select(AppUser).where(AppUser.firebase_uid == uid).with_for_update(key_share=True))
             before = {"active": user.active} if user else None
