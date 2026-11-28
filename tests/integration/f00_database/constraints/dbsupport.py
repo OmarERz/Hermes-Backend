@@ -86,7 +86,7 @@ class Builder:
     # Values that keep table-level CHECKs and triggers satisfied.
     OVERRIDES: ClassVar[dict[str, dict[str, Any]]] = {
         "company_profile": {"id": 1},
-        "cpe_mapping": {"nvd_vendor": "vendor", "nvd_product": "product"},
+        "cpe_mapping": {"nvd_part": "a", "nvd_vendor": "vendor", "nvd_product": "product"},
         "judge_reason_type": {"applies_to_asset": False},
         "team": {"is_default": False},
         "profile_sector": {"is_primary": False},

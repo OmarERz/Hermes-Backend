@@ -30,6 +30,7 @@ LIMIT: Final = 20
 PAGE_SIZE: Final = 500
 MAX_PAGES: Final = 4  # versions each take a dictionary record, so one page may hold a single product
 CPE_FIELDS: Final = 6
+CPE_PARTS: Final = frozenset({"a", "o", "h"})  # application, operating system, hardware (CPE 2.3)
 
 
 @dataclass(frozen=True)
@@ -66,12 +67,20 @@ def cpe_uri(vendor: str, product: str) -> str:
     return f"cpe:2.3:a:{escape(vendor)}:{escape(product)}:*:*:*:*:*:*:*:*"
 
 
-def parse_cpe_name(name: str) -> tuple[str, str] | None:
+def parse_cpe_parts(name: str) -> tuple[str, str, str] | None:
+    """(part, vendor, product) of a CPE 2.3 name whose part is `a`, `o` or `h` and that names a vendor and product."""
     parts = split_cpe_fields(name)
-    if len(parts) < CPE_FIELDS or parts[:2] != ["cpe", "2.3"] or parts[2] not in {"a", "o"}:
+    if len(parts) < CPE_FIELDS or parts[:2] != ["cpe", "2.3"] or parts[2] not in CPE_PARTS:
         return None
     vendor, product = (unescape_cpe(p) for p in parts[3:5])
-    return (vendor, product) if vendor not in {"", "*", "-"} and product not in {"", "*", "-"} else None
+    return (parts[2], vendor, product) if vendor not in {"", "*", "-"} and product not in {"", "*", "-"} else None
+
+
+def parse_cpe_name(name: str) -> tuple[str, str] | None:
+    """(vendor, product) of an application or operating system CPE 2.3 name (the dictionary search, which rebuilds
+    the name with part `a`; hardware is left out so a hardware result is never saved as an application)."""
+    parsed = parse_cpe_parts(name)
+    return None if parsed is None or parsed[0] not in {"a", "o"} else (parsed[1], parsed[2])
 
 
 @dataclass

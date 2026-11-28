@@ -144,7 +144,12 @@ def test_inventory_issues_list_incomplete_cis_and_unmapped_software(engine: Engi
         nginx = session.scalars(select(m.SoftwareProduct).where(m.SoftwareProduct.itop_name == "nginx")).one()
         session.add(
             m.CpeMapping(
-                software_product_id=nginx.id, nvd_vendor="f5", nvd_product="nginx", origin="manual", mapped_at=T0
+                software_product_id=nginx.id,
+                nvd_part="a",
+                nvd_vendor="f5",
+                nvd_product="nginx",
+                origin="manual",
+                mapped_at=T0,
             )
         )
     assert ("software_unmapped", "nginx") not in issues(engine)

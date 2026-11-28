@@ -1,7 +1,8 @@
 """Save and remove the mapping of a software product to NVD (CPE) and CNA names (ESC-05, manual origin).
 
 The mapping is made once per product; the version comes from `installed_software`. NVD names follow the CPE
-rules (lower case, no spaces); CNA names are free text as CVE.org writes them. Mode 3 (`origin = "mode3"`) is a
+rules (lower case, no spaces) and keep the part of the CPE name (`a` application, `o` operating system, `h`
+hardware; D-107); CNA names are free text as CVE.org writes them. Mode 3 (`origin = "mode3"`) is a
 later, optional feature and is never overwritten silently: only an analyst's manual mapping replaces it.
 """
 
@@ -20,6 +21,7 @@ from core.db import models as m
 
 CPE_NAME: Final = re.compile(r"^[a-z0-9][a-z0-9._~+:\-]{0,199}$")
 MAX_CNA_LENGTH: Final = 200
+CPE_PARTS: Final = frozenset({"a", "o", "h"})
 FIRST_PRINTABLE: Final = 32
 
 
@@ -33,6 +35,7 @@ class MappingInput:
     nvd_product: str | None = None
     cna_vendor: str | None = None
     cna_product: str | None = None
+    nvd_part: str | None = None  # required with an NVD pair, never without one (D-107)
 
 
 def _clean(value: str | None) -> str | None:
@@ -58,11 +61,17 @@ def validate(data: MappingInput) -> MappingInput:
         raise MappingError("Fabricante y producto van juntos, tanto en NVD como en el CNA.")
     if nvd_product is None and cna_product is None:
         raise MappingError("Se necesita al menos un par fabricante y producto (NVD o CNA).")
+    part = _clean(data.nvd_part)
     if nvd_vendor is not None and nvd_product is not None:
         nvd_vendor, nvd_product = nvd_vendor.lower(), nvd_product.lower()
         if not CPE_NAME.match(nvd_vendor) or not CPE_NAME.match(nvd_product):
             raise MappingError("Los nombres de NVD solo admiten minúsculas, números y . _ ~ + : -")
-    return MappingInput(nvd_vendor, nvd_product, cna_vendor, cna_product)
+        if part is None or part.lower() not in CPE_PARTS:
+            raise MappingError("La parte del CPE debe ser a (aplicación), o (sistema operativo) o h (hardware).")
+        part = part.lower()
+    elif part is not None:
+        raise MappingError("La parte del CPE solo va con el par de NVD.")
+    return MappingInput(nvd_vendor, nvd_product, cna_vendor, cna_product, part)
 
 
 def set_mapping(
@@ -79,6 +88,7 @@ def set_mapping(
         raise LookupError("software product not found")
     values = {
         "software_product_id": software_product_id,
+        "nvd_part": clean.nvd_part,
         "nvd_vendor": clean.nvd_vendor,
         "nvd_product": clean.nvd_product,
         "cna_vendor": clean.cna_vendor,

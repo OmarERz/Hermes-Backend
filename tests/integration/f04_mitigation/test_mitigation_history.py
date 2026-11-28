@@ -71,9 +71,9 @@ def test_fixed_versions_come_from_the_range_that_matches_the_mapping(demo: Engin
     cve = one(demo, "SELECT cve_id FROM finding_group LIMIT 1")
     run(
         demo,
-        "INSERT INTO cpe_mapping (software_product_id, nvd_vendor, nvd_product, origin, mapped_at) "
-        "SELECT software_product_id, 'acme', 'tool', 'manual', now() FROM finding_group WHERE id = :g "
-        "ON CONFLICT (software_product_id) DO UPDATE SET nvd_vendor = 'acme', nvd_product = 'tool'",
+        "INSERT INTO cpe_mapping (software_product_id, nvd_part, nvd_vendor, nvd_product, origin, mapped_at) "
+        "SELECT software_product_id, 'a', 'acme', 'tool', 'manual', now() FROM finding_group WHERE id = :g "
+        "ON CONFLICT (software_product_id) DO UPDATE SET nvd_part = 'a', nvd_vendor = 'acme', nvd_product = 'tool'",
         {"g": gid},
     )
     for vendor, start, end, inclusive in (

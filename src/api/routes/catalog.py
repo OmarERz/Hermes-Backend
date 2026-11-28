@@ -27,7 +27,7 @@ from core.cpe.candidates import (
     cpe_uri,
     local_candidates,
     merge_candidates,
-    parse_cpe_name,
+    parse_cpe_parts,
     search_dictionary,
 )
 from core.cpe.mapping import MappingError, set_mapping
@@ -119,13 +119,14 @@ def cpe_candidates(
 
 @router.put("/api/mappings/{software}", dependencies=[guard("PUT", "/api/mappings/{software}")])
 def put_mapping(software: UuidId, mapping: MappingInput, session: SessionDep, user: CurrentUserDep) -> Mapping:
-    """Maps a software product (its identifier) to the vendor and product of a CPE name (ESC-05, ESC-06)."""
+    """Maps a software product (its identifier) to the part, vendor and product of a CPE name (ESC-05, ESC-06, D-107):
+    `o` keeps an operating system such as the Linux kernel apart from an application."""
     try:  # defence in depth: the path pattern already refuses anything but a UUID (422)
         product_id = uuid.UUID(software)
     except ValueError:
         raise ApiError(404, "not_found", "El software no existe.") from None
-    pair = parse_cpe_name(mapping.cpe)
-    if pair is None:  # defence in depth: CPE_NAME_PATTERN already refuses these in the schema (422)
+    parsed = parse_cpe_parts(mapping.cpe)
+    if parsed is None:  # defence in depth: CPE_NAME_PATTERN already refuses these in the schema (422)
         raise ApiError(
             422,
             "validation_error",
@@ -136,10 +137,11 @@ def put_mapping(software: UuidId, mapping: MappingInput, session: SessionDep, us
     current = session.get(CpeMapping, product_id)
     # Editing the NVD pair keeps the CNA pair of an existing mapping: CVE.org matches must not disappear.
     data = MappingData(
-        nvd_vendor=pair[0],
-        nvd_product=pair[1],
+        nvd_vendor=parsed[1],
+        nvd_product=parsed[2],
         cna_vendor=current.cna_vendor if current else None,
         cna_product=current.cna_product if current else None,
+        nvd_part=parsed[0],
     )
     before = _mapping_snapshot(current)
     try:
@@ -169,6 +171,7 @@ def _mapping_snapshot(row: CpeMapping | None) -> dict[str, str | None] | None:
     if row is None:
         return None
     return {
+        "nvd_part": row.nvd_part,
         "nvd_vendor": row.nvd_vendor,
         "nvd_product": row.nvd_product,
         "cna_vendor": row.cna_vendor,

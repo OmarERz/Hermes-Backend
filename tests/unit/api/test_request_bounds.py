@@ -29,7 +29,7 @@ from api.routes.models import (
     StixExportRequest,
 )
 from core.configuration.errors import ValidationFailedError, check_text
-from core.cpe.candidates import parse_cpe_name
+from core.cpe.candidates import parse_cpe_parts
 from core.cpe.mapping import MappingInput as MappingData
 from core.cpe.mapping import validate
 
@@ -124,6 +124,6 @@ def test_ordinary_unicode_names_pass() -> None:
 def test_every_schema_valid_cpe_name_is_one_the_mapping_accepts(name: str) -> None:
     """F12.3: the schema pattern is the mapping's own rule, so a schema-valid name is never refused later."""
     MappingInput.model_validate({"cpe": name})
-    pair = parse_cpe_name(name)
-    assert pair is not None
-    validate(MappingData(nvd_vendor=pair[0], nvd_product=pair[1]))
+    parsed = parse_cpe_parts(name)
+    assert parsed is not None
+    validate(MappingData(nvd_vendor=parsed[1], nvd_product=parsed[2], nvd_part=parsed[0]))

@@ -242,12 +242,13 @@ class CpeCandidate(_Model):
     score: float
 
 
-# A CPE 2.3 name whose vendor and product the mapping can store (F12.3): part `a` or `o`, then vendor and product that
+# A CPE 2.3 name whose part, vendor and product the mapping can store (F12.3, D-107): part `a`, `o` or `h`, then vendor
+# and product that
 # start with a letter or digit and hold only letters, digits, `. _ ~ + -` or an escaped colon (the rule of
 # `core.cpe.mapping`, case-insensitive), then at least one more field. Anything else is a 422 from the schema itself,
 # so a schema-valid name is never refused later (Schemathesis "schema-valid request rejected").
 _CPE_PART = r"[A-Za-z0-9](?:[A-Za-z0-9._~+\-]|\\[:._~+\-]){0,199}"
-CPE_NAME_PATTERN = rf"^cpe:2\.3:[ao]:{_CPE_PART}:{_CPE_PART}(?::(?:[^:\\]|\\.)*)+$"
+CPE_NAME_PATTERN = rf"^cpe:2\.3:[aoh]:{_CPE_PART}:{_CPE_PART}(?::(?:[^:\\]|\\.)*)+$"
 
 
 class MappingInput(_Model):

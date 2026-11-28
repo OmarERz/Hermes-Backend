@@ -61,7 +61,7 @@ mapped = st.from_regex(r"[a-z0-9][a-z0-9._~+:\-]{0,30}", fullmatch=True)
 
 @given(mapped, mapped)
 def test_valid_mappings_validate_and_are_stable(vendor: str, product: str) -> None:
-    once = validate(MappingInput(vendor, product, None, None))
+    once = validate(MappingInput(vendor, product, None, None, "a"))
     assert validate(once) == once
 
 

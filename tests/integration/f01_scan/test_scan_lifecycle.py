@@ -75,9 +75,9 @@ def world(engine: Engine) -> Engine:
         )
     run(
         engine,
-        "INSERT INTO cpe_mapping (software_product_id, nvd_vendor, nvd_product, cna_vendor, cna_product, "
+        "INSERT INTO cpe_mapping (software_product_id, nvd_part, nvd_vendor, nvd_product, cna_vendor, cna_product, "
         "origin, mapped_at) "
-        "VALUES (:p, 'f5', 'nginx', 'F5', 'NGINX', 'manual', now())",
+        "VALUES (:p, 'a', 'f5', 'nginx', 'F5', 'NGINX', 'manual', now())",
         {"p": IDS["nginx"]},
     )
     # CVE-2026-1001: recent, NVD range [1.20.0, 1.25.3). CVE-2020-2002: old, same range, not in KEV.

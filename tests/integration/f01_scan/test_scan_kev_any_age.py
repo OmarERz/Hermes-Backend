@@ -123,8 +123,8 @@ def world(engine: Engine) -> sessionmaker[Session]:
             )
             run(
                 engine,
-                "INSERT INTO cpe_mapping (software_product_id, nvd_vendor, nvd_product, origin, mapped_at) "
-                "VALUES (:p, :v, :n, 'manual', now())",
+                "INSERT INTO cpe_mapping (software_product_id, nvd_part, nvd_vendor, nvd_product, origin, mapped_at) "
+                "VALUES (:p, 'a', :v, :n, 'manual', now())",
                 {"p": products[product], "v": vendor, "n": nvd_product},
             )
         run(

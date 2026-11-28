@@ -132,8 +132,8 @@ def test_editing_the_cpe_keeps_the_cna_names(client: TestClient, engine: Engine)
     product = seed_inventory(engine)
     run(
         engine,
-        "INSERT INTO cpe_mapping (software_product_id, nvd_vendor, nvd_product, cna_vendor, cna_product, "
-        "origin, mapped_at) VALUES (:p, 'f5', 'nginx', 'F5 Networks', 'NGINX Plus', 'manual', now())",
+        "INSERT INTO cpe_mapping (software_product_id, nvd_part, nvd_vendor, nvd_product, cna_vendor, cna_product, "
+        "origin, mapped_at) VALUES (:p, 'a', 'f5', 'nginx', 'F5 Networks', 'NGINX Plus', 'manual', now())",
         {"p": product},
     )
     as_role(client, Role.ANALYST)
@@ -143,6 +143,22 @@ def test_editing_the_cpe_keeps_the_cna_names(client: TestClient, engine: Engine)
     assert rows(engine, "SELECT nvd_vendor, cna_vendor, cna_product FROM cpe_mapping") == [
         ("nginx", "F5 Networks", "NGINX Plus")
     ]
+
+
+def test_the_mapping_route_stores_the_part_of_the_cpe(client: TestClient, engine: Engine) -> None:
+    """D-107 (F20 dry run, P2-1): the kernel is mapped as an operating system (`o`), hardware (`h`) is accepted,
+    replacing the mapping replaces the part, and the audit keeps both parts."""
+    product = seed_inventory(engine)
+    as_role(client, Role.ANALYST)
+    kernel = "cpe:2.3:o:linux:linux_kernel:*:*:*:*:*:*:*:*"
+    response = client.put(f"/api/mappings/{product}", json={"cpe": kernel})
+    assert response.status_code == 200 and response.json()["cpe"] == kernel
+    assert rows(engine, "SELECT nvd_part, nvd_vendor, nvd_product FROM cpe_mapping") == [("o", "linux", "linux_kernel")]
+    hardware = "cpe:2.3:h:cisco:asa_5505:-:*:*:*:*:*:*:*"
+    assert client.put(f"/api/mappings/{product}", json={"cpe": hardware}).status_code == 200
+    assert rows(engine, "SELECT nvd_part, nvd_vendor FROM cpe_mapping") == [("h", "cisco")]
+    audit = rows(engine, "SELECT before ->> 'nvd_part', after ->> 'nvd_part' FROM audit_log ORDER BY created_at")
+    assert audit == [(None, "o"), ("o", "h")]
 
 
 def test_the_nvd_dictionary_is_only_queried_when_a_key_is_configured() -> None:
