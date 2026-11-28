@@ -1,9 +1,9 @@
 """Candidate search for the CPE mapping (ESC-06): NVD's CPE dictionary plus what we already hold.
 
 `GET https://services.nvd.nist.gov/rest/json/cpes/2.0?keywordSearch=...` answers `products[].cpe.cpeName`
-(`cpe:2.3:a:<vendor>:<product>:...`), `deprecated` and `titles`. ⚠️ Endpoint and fields follow NVD's published
-API and could not be re-read from its JavaScript documentation here. The local candidates come from the affected
-ranges already loaded (`cve_affected_range`), so the search still works offline and without a key.
+(`cpe:2.3:<part>:<vendor>:<product>:...`, part `a`, `o` or `h`), `deprecated` and `titles`. ⚠️ Endpoint and fields
+follow NVD's published API and could not be re-read from its JavaScript documentation here. The local candidates come
+from the affected ranges already loaded (`cve_affected_range`), so the search still works offline and without a key.
 The query is data: it is only ever sent as a URL parameter or a bound SQL value.
 """
 
@@ -17,7 +17,7 @@ from pydantic import SecretStr
 from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
-from core.cpe.fields import split_cpe_fields, unescape_cpe
+from core.cpe.fields import CPE_PARTS, DEFAULT_PART, split_cpe_fields, unescape_cpe
 from core.db import models as m
 from core.vulndata.http import JsonSource, SourceRefusedError, SourceUnavailableError
 from core.vulndata.records import NVD_CPE
@@ -30,7 +30,6 @@ LIMIT: Final = 20
 PAGE_SIZE: Final = 500
 MAX_PAGES: Final = 4  # versions each take a dictionary record, so one page may hold a single product
 CPE_FIELDS: Final = 6
-CPE_PARTS: Final = frozenset({"a", "o", "h"})  # application, operating system, hardware (CPE 2.3)
 
 
 @dataclass(frozen=True)
@@ -41,6 +40,7 @@ class Candidate:
     score: float  # 0-1 similarity to the query
     title: str | None = None
     cve_count: int | None = None
+    part: str = DEFAULT_PART  # the dictionary's own part; a local pair takes the part of a mapping that has it
 
 
 def clean_query(raw: str) -> str:
@@ -58,13 +58,15 @@ def similarity(query: str, vendor: str, product: str) -> float:
     return len(wanted & have) / len(wanted | have)
 
 
-def cpe_uri(vendor: str, product: str) -> str:
-    """The CPE 2.3 name of a vendor and product with every version wildcarded, as the front shows it."""
+def cpe_uri(vendor: str, product: str, part: str | None = DEFAULT_PART) -> str:
+    """The CPE 2.3 name of a vendor and product with every version wildcarded, as the front shows it. The part is the
+    one the mapping stores (`o` for an operating system such as the Linux kernel, D-107); `a` when there is none."""
 
-    def escape(part: str) -> str:
-        return re.sub(r"([^A-Za-z0-9_.\-])", r"\\\1", part)
+    def escape(field: str) -> str:
+        return re.sub(r"([^A-Za-z0-9_.\-])", r"\\\1", field)
 
-    return f"cpe:2.3:a:{escape(vendor)}:{escape(product)}:*:*:*:*:*:*:*:*"
+    kind = part if part in CPE_PARTS else DEFAULT_PART
+    return f"cpe:2.3:{kind}:{escape(vendor)}:{escape(product)}:*:*:*:*:*:*:*:*"
 
 
 def parse_cpe_parts(name: str) -> tuple[str, str, str] | None:
@@ -77,10 +79,9 @@ def parse_cpe_parts(name: str) -> tuple[str, str, str] | None:
 
 
 def parse_cpe_name(name: str) -> tuple[str, str] | None:
-    """(vendor, product) of an application or operating system CPE 2.3 name (the dictionary search, which rebuilds
-    the name with part `a`; hardware is left out so a hardware result is never saved as an application)."""
+    """(vendor, product) of a CPE 2.3 name, as `parse_cpe_parts` reads it."""
     parsed = parse_cpe_parts(name)
-    return None if parsed is None or parsed[0] not in {"a", "o"} else (parsed[1], parsed[2])
+    return None if parsed is None else (parsed[1], parsed[2])
 
 
 @dataclass
@@ -94,11 +95,15 @@ class CpeDictionaryClient:
         cpe = item.get("cpe") if isinstance(item, dict) else None
         if not isinstance(cpe, dict) or cpe.get("deprecated") or not isinstance(cpe.get("cpeName"), str):
             return
-        pair = parse_cpe_name(cpe["cpeName"])
-        if pair is None or pair in found:
+        parsed = parse_cpe_parts(cpe["cpeName"])
+        if parsed is None or parsed[1:] in found:
             return
+        part, *pair = parsed
         titles = [t.get("title") for t in cpe.get("titles") or [] if isinstance(t, dict) and t.get("lang") == "en"]
-        found[pair] = Candidate(*pair, "nvd_dictionary", similarity(query, *pair), titles[0] if titles else None)
+        title = titles[0] if titles else None
+        found[(pair[0], pair[1])] = Candidate(
+            pair[0], pair[1], "nvd_dictionary", similarity(query, *pair), title, part=part
+        )
 
     def search(self, keyword: str) -> list[Candidate]:
         query = clean_query(keyword)
@@ -135,8 +140,25 @@ def local_candidates(session: Session, keyword: str, limit: int = LIMIT) -> list
         )
         .group_by(m.CveAffectedRange.vendor, m.CveAffectedRange.product)
     )
-    found = [Candidate(v, p, "local", similarity(query, v, p), None, n) for v, p, n in rows]
+    counted = list(rows)
+    parts = _mapped_parts(session, {(v, p) for v, p, _ in counted})
+    found = [
+        Candidate(v, p, "local", similarity(query, v, p), None, n, parts.get((v, p), DEFAULT_PART))
+        for v, p, n in counted
+    ]
     return sorted(found, key=lambda c: (-c.score, c.vendor, c.product))[:limit]
+
+
+def _mapped_parts(session: Session, pairs: set[tuple[str, str]]) -> dict[tuple[str, str], str]:
+    """The CPE part a mapping already stores for each NVD pair (ranges do not keep it); the lowest when two differ."""
+    if not pairs:
+        return {}
+    rows = session.execute(
+        select(m.CpeMapping.nvd_vendor, m.CpeMapping.nvd_product, func.min(m.CpeMapping.nvd_part))
+        .where(m.CpeMapping.nvd_vendor.in_({v for v, _ in pairs}), m.CpeMapping.nvd_part.is_not(None))
+        .group_by(m.CpeMapping.nvd_vendor, m.CpeMapping.nvd_product)
+    )
+    return {(str(v), str(p)): str(part) for v, p, part in rows if (v, p) in pairs and part}
 
 
 def merge_candidates(local: list[Candidate], remote: list[Candidate], limit: int = LIMIT) -> list[Candidate]:
@@ -147,7 +169,9 @@ def merge_candidates(local: list[Candidate], remote: list[Candidate], limit: int
         merged[(item.vendor, item.product)] = (
             item
             if known is None
-            else Candidate(item.vendor, item.product, "nvd_dictionary", item.score, item.title, known.cve_count)
+            else Candidate(
+                item.vendor, item.product, "nvd_dictionary", item.score, item.title, known.cve_count, item.part
+            )
         )
     return sorted(merged.values(), key=lambda c: (-c.score, c.vendor, c.product))[:limit]
 

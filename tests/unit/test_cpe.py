@@ -6,7 +6,7 @@ import httpx
 import pytest
 from pydantic import SecretStr
 
-from core.cpe.candidates import CpeDictionaryClient, clean_query, parse_cpe_name, parse_cpe_parts, similarity
+from core.cpe.candidates import CpeDictionaryClient, clean_query, cpe_uri, parse_cpe_name, parse_cpe_parts, similarity
 from core.cpe.mapping import MappingError, MappingInput, validate
 from core.vulndata.http import JsonSource, SourceUnavailableError
 
@@ -57,7 +57,7 @@ def test_invalid_mappings_are_refused_with_a_readable_message(data: MappingInput
 def test_cpe_names_parse_with_escapes_and_wildcards() -> None:
     assert parse_cpe_name("cpe:2.3:a:f5:nginx:1.24.0:*:*:*:*:*:*:*") == ("f5", "nginx")
     assert parse_cpe_name("cpe:2.3:a:vendor\\:inc:wid\\+get:*:*:*:*:*:*:*:*") == ("vendor:inc", "wid+get")
-    assert parse_cpe_name("cpe:2.3:h:acme:box:1:*:*:*:*:*:*:*") is None  # the search keeps leaving hardware out
+    assert parse_cpe_name("cpe:2.3:h:acme:box:1:*:*:*:*:*:*:*") == ("acme", "box")  # the search keeps the part
     assert parse_cpe_name("cpe:2.3:x:acme:box:1:*:*:*:*:*:*:*") is None
     assert parse_cpe_name("cpe:2.3:a:*:x:1:*:*:*:*:*:*:*") is None
     assert parse_cpe_name("garbage") is None
@@ -75,6 +75,28 @@ def test_cpe_names_parse_with_escapes_and_wildcards() -> None:
 )
 def test_the_part_of_a_cpe_name_is_read(name: str, expected: tuple[str, str, str] | None) -> None:
     assert parse_cpe_parts(name) == expected
+
+
+def test_the_cpe_uri_keeps_the_stored_part() -> None:
+    assert cpe_uri("linux", "linux_kernel", "o") == "cpe:2.3:o:linux:linux_kernel:*:*:*:*:*:*:*:*"
+    assert cpe_uri("cisco", "asa_5505", "h") == "cpe:2.3:h:cisco:asa_5505:*:*:*:*:*:*:*:*"
+    assert cpe_uri("f5", "nginx") == "cpe:2.3:a:f5:nginx:*:*:*:*:*:*:*:*"
+    assert cpe_uri("f5", "nginx", None) == "cpe:2.3:a:f5:nginx:*:*:*:*:*:*:*:*"  # a CNA-only mapping has no part
+    assert cpe_uri("f5", "nginx", "x") == "cpe:2.3:a:f5:nginx:*:*:*:*:*:*:*:*"
+
+
+@pytest.mark.parametrize(
+    ("name", "part"),
+    [("cpe:2.3:o:linux:linux_kernel:6.1:*:*:*:*:*:*:*", "o"), ("cpe:2.3:h:cisco:asa_5505:-:*:*:*:*:*:*:*", "h")],
+)
+def test_dictionary_candidates_keep_their_part(name: str, part: str) -> None:
+    def answer(request: httpx.Request) -> httpx.Response:
+        return httpx.Response(200, json={"products": [{"cpe": {"cpeName": name, "titles": []}}], "totalResults": 1})
+
+    client = CpeDictionaryClient(JsonSource(http=httpx.Client(transport=httpx.MockTransport(answer))))
+    (found,) = client.search("some product")
+    assert found.part == part
+    assert cpe_uri(found.vendor, found.product, found.part).split(":")[2] == part
 
 
 def test_similarity_and_query_cleaning() -> None:

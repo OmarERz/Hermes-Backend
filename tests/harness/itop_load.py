@@ -69,7 +69,7 @@ FILE_KEYS: Final = frozenset({"objects", "env", "cpe"})
 _REF: Final = re.compile(r"^@(\w+):(.+)$", re.S)
 _ENV_NAME: Final = re.compile(r"^[A-Z][A-Z0-9_]*$")
 # cpe:2.3:part:vendor:product followed by the other eight components (the API needs a full CPE name).
-_CPE_NAME: Final = re.compile(r"^cpe:2\.3:[ao](?::(?:[^:\\\s]|\\.)+){2}(?::(?:[^:\\\s]|\\.)*){8}$")
+_CPE_NAME: Final = re.compile(r"^cpe:2\.3:[aoh](?::(?:[^:\\\s]|\\.)+){2}(?::(?:[^:\\\s]|\\.)*){8}$")
 _ACTION_LABELS: Final = {
     "create": "+ create   ",
     "update": "~ update   ",

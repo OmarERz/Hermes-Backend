@@ -516,6 +516,19 @@ def test_the_approved_inventory_loads_and_a_second_run_changes_nothing(capsys: p
     assert "internet_exposed" not in cis["superset-bi"]
 
 
+def test_cpe_names_of_every_part_are_accepted(tmp_path: Path) -> None:
+    """D-107: application, operating system and hardware CPE names all reach the API with their part."""
+    text = (
+        "cpe:\n"
+        "  nginx: 'cpe:2.3:a:f5:nginx:*:*:*:*:*:*:*:*'\n"
+        "  kernel: 'cpe:2.3:o:linux:linux_kernel:*:*:*:*:*:*:*:*'\n"
+        "  firewall: 'cpe:2.3:h:cisco:asa_5505:*:*:*:*:*:*:*:*'\n"
+        "objects:\n  - { class: Server, name: a }\n"
+    )
+    inventory = itop_load.parse_inventory(write(tmp_path, text))
+    assert [name.split(":")[2] for name in inventory.cpe.values() if name] == ["a", "o", "h"]
+
+
 def test_the_approved_inventory_maps_the_kernel_cpe_of_one_node_only() -> None:
     inventory = itop_load.parse_inventory(INVENTORY)
     assert inventory.cpe["Linux Kernel"] == "cpe:2.3:o:linux:linux_kernel:*:*:*:*:*:*:*:*"

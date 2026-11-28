@@ -15,6 +15,7 @@ from typing import Any, Final
 
 import stix2
 
+from core.cpe.fields import CPE_PARTS, DEFAULT_PART
 from core.stix.ids import stix_id
 
 HEX: Final = {"sha256": (re.compile(r"^[0-9a-fA-F]{64}$"), "SHA-256"), "md5": (re.compile(r"^[0-9a-fA-F]{32}$"), "MD5")}
@@ -45,6 +46,7 @@ class SoftwareRecord:
     version: str | None = None
     cpe_vendor: str | None = None
     cpe_product: str | None = None
+    cpe_part: str | None = None  # a | o | h, as the mapping stores it (D-107); `a` when unknown
 
 
 @dataclass(frozen=True)
@@ -98,11 +100,12 @@ def indicator_pattern(ioc_type: str, value: str) -> str | None:
     return None
 
 
-def cpe_name(vendor: str, product: str, version: str | None) -> str:
-    def escape(part: str) -> str:
-        return re.sub(r"([^A-Za-z0-9_.\-])", r"\\\1", part)
+def cpe_name(vendor: str, product: str, version: str | None, part: str | None = "a") -> str:
+    def escape(field: str) -> str:
+        return re.sub(r"([^A-Za-z0-9_.\-])", r"\\\1", field)
 
-    return f"cpe:2.3:a:{escape(vendor)}:{escape(product)}:{escape(version) if version else '*'}:*:*:*:*:*:*:*"
+    kind = part if part in CPE_PARTS else DEFAULT_PART
+    return f"cpe:2.3:{kind}:{escape(vendor)}:{escape(product)}:{escape(version) if version else '*'}:*:*:*:*:*:*:*"
 
 
 def marking_refs(marking_id: str | None) -> list[str] | None:
@@ -139,7 +142,11 @@ def vulnerability(rec: VulnerabilityRecord, marking_id: str | None) -> Any:
 
 
 def software(rec: SoftwareRecord, marking_id: str | None) -> Any:
-    cpe = cpe_name(rec.cpe_vendor, rec.cpe_product, rec.version) if rec.cpe_vendor and rec.cpe_product else None
+    cpe = (
+        cpe_name(rec.cpe_vendor, rec.cpe_product, rec.version, rec.cpe_part)
+        if rec.cpe_vendor and rec.cpe_product
+        else None
+    )
     return stix2.Software(
         name=rec.name,
         vendor=rec.vendor or None,

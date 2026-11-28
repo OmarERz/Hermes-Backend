@@ -11,6 +11,8 @@ import re
 from typing import Final
 
 _ESCAPED: Final = re.compile(r"\\(.)", re.DOTALL)
+CPE_PARTS: Final = frozenset({"a", "o", "h"})  # application, operating system, hardware (CPE 2.3, D-107)
+DEFAULT_PART: Final = "a"  # how a name is rebuilt when no part is stored
 
 
 def split_cpe_fields(name: str) -> list[str]:

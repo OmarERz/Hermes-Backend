@@ -161,6 +161,24 @@ def test_the_mapping_route_stores_the_part_of_the_cpe(client: TestClient, engine
     assert audit == [(None, "o"), ("o", "h")]
 
 
+def test_the_inventory_and_the_candidates_show_the_stored_part(client: TestClient, engine: Engine) -> None:
+    """D-107 (F20 dry run, P2-1): the kernel shows as `cpe:2.3:o:…` in the inventory, and a local candidate takes the
+    part its mapping stores (NVD ranges do not keep it)."""
+    product = seed_inventory(engine)
+    as_role(client, Role.ANALYST)
+    kernel = "cpe:2.3:o:linux:linux_kernel:*:*:*:*:*:*:*:*"
+    assert client.put(f"/api/mappings/{product}", json={"cpe": kernel}).status_code == 200
+    assert [item["cpe"] for item in client.get("/api/inventory/software").json()["items"]] == [kernel]
+    run(engine, "INSERT INTO cve (id) VALUES ('CVE-2026-0002')")
+    run(
+        engine,
+        "INSERT INTO cve_affected_range (cve_id, source, vendor, product) "
+        "VALUES ('CVE-2026-0002', 'nvd_cpe', 'linux', 'linux_kernel')",
+    )
+    found = client.get("/api/cpe/candidates", params={"q": "linux kernel"}).json()
+    assert [c["cpe"] for c in found] == [kernel]
+
+
 def test_the_nvd_dictionary_is_only_queried_when_a_key_is_configured() -> None:
     assert create_app(make_settings()).state.cpe_dictionary is None
     keyed = Settings(

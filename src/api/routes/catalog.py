@@ -111,7 +111,9 @@ def cpe_candidates(
         ) from None
     return [
         CpeCandidate(
-            cpe=cpe_uri(c.vendor, c.product), title=c.title or f"{c.vendor} {c.product}", score=round(c.score, 2)
+            cpe=cpe_uri(c.vendor, c.product, c.part),
+            title=c.title or f"{c.vendor} {c.product}",
+            score=round(c.score, 2),
         )
         for c in found
     ]

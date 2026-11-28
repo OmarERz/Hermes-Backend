@@ -17,11 +17,11 @@ from typing import Final
 from sqlalchemy.dialects.postgresql import insert
 from sqlalchemy.orm import Session
 
+from core.cpe.fields import CPE_PARTS
 from core.db import models as m
 
 CPE_NAME: Final = re.compile(r"^[a-z0-9][a-z0-9._~+:\-]{0,199}$")
 MAX_CNA_LENGTH: Final = 200
-CPE_PARTS: Final = frozenset({"a", "o", "h"})
 FIRST_PRINTABLE: Final = 32
 
 

@@ -53,6 +53,15 @@ def test_the_cpe_is_escaped() -> None:
     assert b.cpe_name("vendor:inc", "wid+get", None) == "cpe:2.3:a:vendor\\:inc:wid\\+get:*:*:*:*:*:*:*:*"
 
 
+def test_the_cpe_keeps_the_part_of_the_mapping() -> None:
+    """D-107 (F20 dry run, P2-1): an operating system is exported with part `o`, never the old fixed `a`."""
+    assert b.cpe_name("linux", "linux_kernel", "6.1.0", "o") == "cpe:2.3:o:linux:linux_kernel:6.1.0:*:*:*:*:*:*:*"
+    assert b.cpe_name("cisco", "asa_5505", None, "h") == "cpe:2.3:h:cisco:asa_5505:*:*:*:*:*:*:*:*"
+    assert b.cpe_name("f5", "nginx", None, None) == "cpe:2.3:a:f5:nginx:*:*:*:*:*:*:*:*"
+    kernel = b.software(b.SoftwareRecord("Linux Kernel", "linux", "6.1.0", "linux", "linux_kernel", "o"), MARK)
+    assert kernel.cpe == "cpe:2.3:o:linux:linux_kernel:6.1.0:*:*:*:*:*:*:*"
+
+
 def sample_bundle() -> stix2.Bundle:
     vuln = b.vulnerability(
         b.VulnerabilityRecord(
