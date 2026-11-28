@@ -4,7 +4,15 @@ from __future__ import annotations
 
 import pytest
 
-from core.scan.versions import bound_order, compare_versions, in_range, known_order, parse_version, release_of
+from core.scan.versions import (
+    bound_order,
+    compare_versions,
+    in_range,
+    known_order,
+    line_edge_order,
+    parse_version,
+    release_of,
+)
 
 
 @pytest.mark.parametrize(
@@ -135,3 +143,19 @@ def test_wildcard_bounds_in_ranges() -> None:
     assert in_range("6.1.0", "5.15.*", False, "6.1.192", False) is True
     assert in_range("6.1.0", "6.1.*", True, None, None) is True
     assert in_range("6.1.0", "x.*", True, None, None) is None  # an unreadable bound is never guessed
+
+
+@pytest.mark.parametrize(
+    ("left", "left_after", "right", "right_after", "expected"),
+    [
+        ((6, 1), True, (6, 6), False, -1),  # after all 6.1.x comes before the start of 6.6
+        ((3,), True, (3, 0), False, 1),  # after all 3.x is after the start of 3.0
+        ((3,), False, (3, 0), True, -1),
+        ((1, 9007199254740992), False, (1, 9007199254740993), False, -1),
+        ((2, 4), True, (2, 4), True, 0),
+    ],
+)
+def test_line_edges_are_ordered_with_integers(
+    left: tuple[int, ...], left_after: bool, right: tuple[int, ...], right_after: bool, expected: int
+) -> None:
+    assert line_edge_order(left, left_after, right, right_after) == expected

@@ -238,3 +238,44 @@ def test_or_higher_stops_before_the_next_affected_range(start: str, inclusive: b
         affected_ranges=[("3.0.0", True, "3.0.18", False), (start, inclusive, None, None)],
     )
     assert compose(data).correction == (expected,)
+
+
+def test_the_first_later_range_is_where_affected_versions_really_start() -> None:
+    """T4 review forced finding: `(6.1.*, …)` starts after the whole 6.1 line, so `[6.1.200, 6.1.210)` comes first."""
+    data = MitigationData(
+        cve_id="CVE-2026-1",
+        fixed_versions=["6.1.192"],
+        affected_ranges=[("6.1.*", False, "6.6.162", False), ("6.1.200", True, "6.1.210", False)],
+    )
+    assert compose(data).correction == ("Actualizar a 6.1.192 o posterior, sin llegar a 6.1.200.",)
+
+
+@pytest.mark.parametrize("order", [1, -1])
+def test_a_letter_release_start_is_placed_by_its_numbers_against_a_line(order: int) -> None:
+    """T4b review: `[1.1.1w, 3.0.5)` starts before `(3.0.*, 3.2.0)`, in either order of the data."""
+    ranges = [("1.1.1w", True, "3.0.5", False), ("3.0.*", False, "3.2.0", False)][::order]
+    data = MitigationData(cve_id="CVE-2026-1", fixed_versions=["1.1.0"], affected_ranges=ranges)
+    assert compose(data).correction == ("Actualizar a 1.1.0 o posterior, sin llegar a 1.1.1w.",)
+
+
+def test_a_v_prefix_and_a_letter_release_are_ordered_by_their_numbers() -> None:
+    """T4b review r2: `v1.0.2` comes before `1.1.1w` (release numbers first, as `known_order`)."""
+    data = MitigationData(
+        cve_id="CVE-2026-1",
+        fixed_versions=["1.0.1"],
+        affected_ranges=[("1.1.1w", True, "1.1.2", False), ("v1.0.2", True, "1.0.3", False)],
+    )
+    assert compose(data).correction == ("Actualizar a 1.0.1 o posterior, sin llegar a v1.0.2.",)
+
+
+def test_huge_line_components_are_never_confused() -> None:
+    """T4b review r2: lines are compared as integers, so 1.9007199254740992 and 1.9007199254740993 differ."""
+    data = MitigationData(
+        cve_id="CVE-2026-1",
+        fixed_versions=["1.0"],
+        affected_ranges=[
+            ("1.9007199254740993.*", True, None, None),
+            ("1.9007199254740992.*", True, "1.9007199254740993", False),
+        ],
+    )
+    assert compose(data).correction == ("Actualizar a 1.0 o posterior, sin llegar a la línea 1.9007199254740992.",)

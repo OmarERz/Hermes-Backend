@@ -135,12 +135,10 @@ def load_watch(session: Session) -> Watch:
 def watch_from(rows: Sequence[Sequence[str | None]]) -> Watch:
     """The watch of (CNA vendor, CNA product, NVD product, iTop name) rows."""
     pairs = frozenset((str(row[0]).lower(), str(row[1]).lower()) for row in rows)
-    words = {
-        " ".join(str(name).replace("_", " ").split()).lower()
-        for row in rows
-        for name in row[1:]
-        if name and len(str(name).strip()) >= MIN_KEYWORD
-    }
+    names = [str(name).strip().lower() for row in rows for name in row[1:] if name]
+    # an NVD product counts as written (`linux_kernel`) and with its underscores as spaces (`linux kernel`)
+    words = {" ".join(form.split()) for name in names for form in (name, name.replace("_", " "))}
+    words = {word for word in words if len(word) >= MIN_KEYWORD}
     if not words:
         return Watch(pairs, None)
     # literal words only (descriptions are third-party data); any run of spaces or line breaks between them

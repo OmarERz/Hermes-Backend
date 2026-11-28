@@ -134,6 +134,20 @@ def bound_order(version: str, bound: str, order: Callable[[str, str], int | None
     return (head > line) - (head < line)
 
 
+def line_edge_order(left: tuple[int, ...], left_after: bool, right: tuple[int, ...], right_after: bool) -> int:
+    """-1, 0 or 1 ordering two edges of wildcard lines, each just before its whole line (`after` False) or just after
+    it (`after` True): an inclusive start or exclusive end sits before its line, an exclusive start or inclusive end
+    after it. Integers throughout, so no two lines are ever confused."""
+    for a, b in zip(left, right, strict=False):
+        if a != b:
+            return -1 if a < b else 1
+    if len(left) == len(right):
+        return (left_after > right_after) - (left_after < right_after)
+    if len(left) < len(right):  # the left line holds the right one
+        return 1 if left_after else -1
+    return -1 if right_after else 1
+
+
 def in_range(
     version: str,
     start: str | None,

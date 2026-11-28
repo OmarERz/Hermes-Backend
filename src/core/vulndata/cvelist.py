@@ -32,7 +32,7 @@ from typing import Any, Final
 
 from sqlalchemy.orm import Session
 
-from core.scan.versions import Version, bound_order, compare_versions, parse_version, wildcard_line
+from core.scan.versions import Version, bound_order, compare_versions, line_edge_order, parse_version, wildcard_line
 from core.vulndata.http import JsonSource, SourceRefusedError
 from core.vulndata.records import (
     CNA_AFFECTED,
@@ -178,6 +178,9 @@ def _segments(item: dict[str, Any]) -> list[Segment] | None:
     for at, new_status in (change for change in ordered if _within(change[0], start, end)):
         if new_status == status:
             continue  # no flip: the segment goes on
+        if start[0] is not None and compare_versions(at, start[0]) == 0:
+            status = new_status  # a change at an inclusive start applies from the start: no empty segment
+            continue
         segments.append((start, (at, False), status))
         start, status = (at, True), new_status
     segments.append((start, end, status))
@@ -186,7 +189,8 @@ def _segments(item: dict[str, Any]) -> list[Segment] | None:
 
 def _within(at: str, start: Bound, end: Bound) -> bool:
     """A change applies inside its entry's own interval only (CVE JSON 5): after the start, before the end."""
-    after_start = start[0] is None or (order := compare_versions(at, start[0])) is None or order > 0
+    order = None if start[0] is None else compare_versions(at, start[0])
+    after_start = start[0] is None or order is None or order > 0 or (order == 0 and bool(start[1]))
     if end[0] is None:
         return after_start
     position = bound_order(at, end[0])
@@ -266,8 +270,7 @@ def _end_order(left: Bound, right: Bound) -> int | None:
         order = compare_versions(left_text, right_text)
         return None if order is None else order or (bool(left[1]) - bool(right[1]))
     if left_line is not None and right_line is not None:
-        lkey, rkey = _line_key(left_line, bool(left[1])), _line_key(right_line, bool(right[1]))
-        return (lkey > rkey) - (lkey < rkey)
+        return line_edge_order(left_line, bool(left[1]), right_line, bool(right[1]))  # an inclusive end is after
     if left_line is None:
         flipped = _end_order(right, left)
         return None if flipped is None else -flipped
@@ -277,11 +280,6 @@ def _end_order(left: Bound, right: Bound) -> int | None:
     if left[1]:  # `<= X.Y.*`: after every version of the line
         return 1 if position <= 0 else -1
     return 1 if position < 0 else -1  # `< X.Y.*`: before the first version of the line
-
-
-def _line_key(line: tuple[int, ...], inclusive: bool) -> tuple[float, ...]:
-    """Where a wildcard end falls: just after its whole line when inclusive, just before it otherwise."""
-    return (*map(float, line), float("inf") if inclusive else float("-inf"))
 
 
 def _constraints(text: str) -> tuple[Bound, Bound] | None:

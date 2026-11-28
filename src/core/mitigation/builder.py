@@ -20,7 +20,7 @@ from sqlalchemy.orm import Session
 
 from core.db import models as m
 from core.mitigation.text import clean_text, safe_url
-from core.scan.versions import bound_order, parse_version, wildcard_line
+from core.scan.versions import bound_order, known_order, line_edge_order, parse_version, release_of, wildcard_line
 
 MAX_IOCS: Final = 20
 MAX_WORKAROUNDS: Final = 10
@@ -80,7 +80,7 @@ def version_key(version: str) -> tuple[tuple[int, int, str], ...]:
 def _bound_order(version: str, bound: str) -> int:
     """-1, 0 or 1 for one range bound: the scan's comparator when it reads both (a CNA wildcard bound such as `6.1.*`
     is its whole line, F15.9), else the simple order."""
-    order = bound_order(version, bound)
+    order = bound_order(version, bound, known_order)  # release numbers decide when only letters differ (`1.1.1w`)
     if order is not None:
         return order
     left, right = version_key(version), version_key(bound)
@@ -117,7 +117,11 @@ def _correction(version: str, ranges: Sequence[Range]) -> str:
     later = [r for r in ranges if r[0] is not None and _starts_after(version, r)]
     if not later:
         return f"Actualizar a {version} o superior."
-    start, inclusive = min(later, key=lambda r: _start_key(str(r[0])))[:2]
+    first = later[0]
+    for rng in later[1:]:
+        if _starts_before(rng, first):
+            first = rng
+    start, inclusive = first[0], first[1]
     line = wildcard_line(str(start))
     if line is not None:
         name = ".".join(map(str, line))
@@ -137,9 +141,33 @@ def _starts_after(version: str, rng: Range) -> bool:
     return order < 0 or (order == 0 and not inclusive)
 
 
-def _start_key(start: str) -> tuple[int, object]:
-    line = wildcard_line(start)
-    return _order(".".join(map(str, line)) if line is not None else start)
+def _starts_before(a: Range, b: Range) -> bool:
+    """Whether range `a` becomes affected before range `b`: a plain start is its version; a wildcard start is the
+    beginning of its line when inclusive and the end of it when exclusive (`(6.1.*, …)` starts after every 6.1.x)."""
+    start_a, start_b = str(a[0]), str(b[0])
+    line_a, line_b = wildcard_line(start_a), wildcard_line(start_b)
+    if line_a is None and line_b is None:
+        order = _bound_order(start_a, start_b)
+        return order < 0 or (order == 0 and bool(a[1]) and not b[1])
+    if line_a is not None and line_b is not None:
+        return line_edge_order(line_a, not a[1], line_b, not b[1]) < 0
+    if line_a is None:
+        position = _line_position(start_a, line_b or ())  # the plain start against b's line
+        return position is not None and (position < 0 if b[1] else position <= 0)
+    return not _starts_before(b, a)
+
+
+def _line_position(version: str, line: tuple[int, ...]) -> int | None:
+    """-1, 0 or 1: the version before, inside or after a wildcard line; a letter release (`1.1.1w`) the comparator
+    cannot read is placed by its release numbers, which come first on its scale whatever the letters mean."""
+    position = bound_order(version, ".".join(map(str, line)) + ".*")
+    if position is not None:
+        return position
+    release = release_of(version)
+    if release is None:
+        return None
+    head = (release + (0,) * len(line))[: len(line)]
+    return (head > line) - (head < line)
 
 
 def compose(data: MitigationData) -> Mitigation:

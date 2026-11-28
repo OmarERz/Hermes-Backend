@@ -414,3 +414,23 @@ def test_the_newest_nvd_copy_of_a_cve_is_the_one_the_cache_compares() -> None:
     observed.see(item("2026-11-20T00:00:00"), in_window=False)
     (kept,) = _unique(observed.sightings)
     assert kept.last_modified == datetime(2026, 11, 20, tzinfo=UTC) and kept.in_window
+
+
+def test_a_change_at_an_inclusive_start_applies_from_the_start() -> None:
+    """T4 review forced finding: `[1.0.0, 2.0.0)` unaffected, changed to affected at 1.0.0, is affected throughout."""
+    item = {
+        "version": "1.0.0",
+        "lessThan": "2.0.0",
+        "status": "unaffected",
+        "changes": [{"at": "1.0.0", "status": "affected"}],
+    }
+    assert acme(None, item) == [tool("1.0.0", True, "2.0.0", False)]
+
+
+def test_the_nvd_product_name_counts_as_written_too() -> None:
+    """T4 review forced finding: a description may name `linux_kernel` itself."""
+    from core.vulndata.cna_discovery import watch_from  # noqa: PLC0415
+
+    watch = watch_from([("Linux", "Linux Foundation Kernel", "linux_kernel", "Kernel X")])
+    assert watch.mentions("affects linux_kernel builds")
+    assert watch.mentions("affects the Linux kernel")
