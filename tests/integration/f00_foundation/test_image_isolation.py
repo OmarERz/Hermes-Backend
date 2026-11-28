@@ -15,7 +15,7 @@ from harness.isolation import COMPOSE_PROJECT, LABEL, LABELS, RUN_ID, built_imag
 
 pytestmark = pytest.mark.integration
 # The backend base image, pinned by digest: already on the host for the backend and emulator builds.
-BASE = "python:3.12.16-slim-bookworm@sha256:935c3c5b12357a7e10caa9c1e6ca5692344d97cf229832ef584be2cec9fc03df"
+BASE = "python:3.12.16-slim-bookworm@sha256:44cf1793efa7c7a476bb0f2cff81443f4a072c90c1cb127e2924933daa3e8c64"
 
 
 @pytest.fixture
