@@ -102,8 +102,9 @@ def test_the_noise_avoided_metric_says_its_scope_and_date(factory: sessionmaker[
 
     noise = next(x for x in metrics if x["key"] == "noise_avoided")
     assert (noise["value"], noise["as_of"]) == ("0", "2026-11-27")
+    # the day in the text is the value's own: a night that stored nothing leaves an older one (feature review)
     assert noise["description"] == (
-        "Puntajes de CI con CVSS de 9.0 o más y final menor a 50, entre las evaluaciones del día UTC anterior, al "
-        "cierre de la noche anterior. La pantalla de comparación la calcula en vivo sobre los hallazgos vigentes, así "
-        "que puede dar otra cifra."
+        "Puntajes de CI con CVSS de 9.0 o más y final menor a 50, entre las evaluaciones del día UTC 2026-11-27, al "
+        "cierre de esa noche. La pantalla de comparación la calcula en vivo sobre los hallazgos vigentes, así que "
+        "puede dar otra cifra."
     )

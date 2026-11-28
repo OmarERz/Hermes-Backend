@@ -30,10 +30,11 @@ class MetricInfo:
     label: str
     kind: Kind
     fold: Fold = "only"  # only: the '' dimension; sum/max/min: across the dimensions of the latest day
-    description: str | None = None  # scope and date, for the front to label it (Spanish)
+    description: str | None = None  # scope, for the front to label it (Spanish); `{day}` is the value's UTC day
 
 
-NIGHTLY_SCOPE: Final = "entre las evaluaciones del día UTC anterior, al cierre de la noche anterior"
+# The day is the value's own (`as_of`): normally yesterday, older when a night stored nothing for it.
+NIGHTLY_SCOPE: Final = "entre las evaluaciones del día UTC {day}, al cierre de esa noche"
 LIVE_ELSEWHERE: Final = (
     "La pantalla de comparación la calcula en vivo sobre los hallazgos vigentes, así que puede dar otra cifra."
 )
@@ -157,7 +158,8 @@ def build_dashboard(session: Session, now: datetime) -> Dashboard:
         value = _fold(values, info.fold)
         if value is not None:
             shown = format_value(value, info.kind)
-            metrics.append(DashboardMetric(code, info.label, shown, UNITS[info.kind], day, info.description))
+            described = info.description.format(day=day.isoformat()) if info.description else None
+            metrics.append(DashboardMetric(code, info.label, shown, UNITS[info.kind], day, described))
     level, _ = current_level(session)
     metrics.append(
         DashboardMetric(

@@ -213,9 +213,10 @@ Todo error responde con:
   feedback sobre evaluaciones que ajustó el juez, y `precision` feedback `relevant` o `false_positive`; con
   `make demo`, que no crea feedback, no aparecen. No esperes una lista fija de claves.
 - **Fecha y alcance de cada métrica:** cada métrica trae `as_of`, el día UTC (`AAAA-MM-DD`) de su valor: el job
-  nocturno guarda cada noche el **día anterior** (nulo en `judge_ladder_level`, que es el nivel actual). Rotula el
-  tablero con esa fecha («al cierre de la noche anterior»). `reclassified`, `hidden_criticals` y `noise_avoided`
-  traen además `description`: cuentan los puntajes de CI de las evaluaciones de ese día, mientras que la pantalla
+  nocturno guarda cada noche el **día anterior**, así que normalmente es ayer y es una fecha anterior si una noche
+  no guardó esa métrica (nulo en `judge_ladder_level`, que es el nivel actual). Rotula cada cifra con su fecha
+  («al cierre de la noche del …»). `reclassified`, `hidden_criticals` y `noise_avoided` traen además
+  `description`, con esa misma fecha: cuentan los puntajes de CI de las evaluaciones de ese día, mientras que la pantalla
   de comparación (`GET /api/comparison/summary`: `reclassified_percent`, `hidden_criticals`, `avoided_noise`) los
   calcula **en vivo** sobre todos los hallazgos vigentes. Por eso pueden diferir (en el ensayo 2: 34 en la
   comparación y 0 en el tablero); muestra la `description` junto a la cifra en lugar de igualarlas.

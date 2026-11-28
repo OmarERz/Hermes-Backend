@@ -397,6 +397,25 @@ def test_the_scheduled_refresh_skips_right_after_a_scan_refreshed(factory: sessi
     assert calls[2:] == ["refresh"]
 
 
+def test_the_skip_window_starts_when_a_long_refresh_ends(factory: sessionmaker[Session]) -> None:
+    """F15.12 feature review: a scan's refresh that took two hours still counts as fresh for an hour after it ended;
+    the mapping mark stays at its start."""
+    calls: list[str] = []
+    now = [latest_mapping(factory) + timedelta(hours=1)]
+    started = now[0]
+
+    def slow() -> None:
+        calls.append("refresh")
+        now[0] += timedelta(hours=2)
+
+    pipeline = Pipeline(factory, scan_steps(calls, slow), clock=lambda: now[0])
+    pipeline.scan_cycle()
+    assert (pipeline.refreshed_at, pipeline.refresh_ended_at) == (started, now[0])
+    assert pipeline.refresh_cycle().ran is False
+    now[0] += REFRESH_FRESH
+    assert pipeline.refresh_cycle().ran is True
+
+
 def test_without_a_refresh_step_the_scan_does_not_look_at_the_mappings(factory: sessionmaker[Session]) -> None:
     calls: list[str] = []
     steps = scan_steps(calls)

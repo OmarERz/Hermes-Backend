@@ -349,6 +349,23 @@ def test_retries_count_against_the_request_budget(
     assert cve_org.capped and cve_org.stored == len(sources.github) // 2
 
 
+def test_a_candidate_the_first_pass_could_not_ask_goes_first_in_the_next(
+    engine: Engine, world: sessionmaker[Session], monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """F15.12 feature review: retries spend the first pass's share (7 candidates, 14 requests, each record answers 503
+    once), so 3 of its candidates wait; the CPython round adds one candidate and 2 requests, and the oldest waiting
+    candidate of the first pass is asked before the new one instead of being dropped from the refresh."""
+    monkeypatch.setattr(cna_discovery, "MIN_BUDGET", 0)
+    sources = Sources(recorded("nvd_cna_window.json"))
+    sources.flaky = True
+    *_, cve_org = sources.refresh(world, attempts=2)
+    asked = list(dict.fromkeys(sources.github))
+    assert asked[:4] == ["CVE-2026-116303", "CVE-2026-100080", "CVE-2026-110952", "CVE-2026-115557"]
+    assert asked[4:] == ["CVE-2026-112945"]  # deferred by the first pass, asked in the CPython pass
+    # Vite's record teaches its CNA (GitHub's), a third round with nothing new: the budget is spent, 3 wait
+    assert (cve_org.passes, cve_org.budget, cve_org.capped, cve_org.waiting) == (3, 16, True, 3)
+
+
 def redated(window: dict[str, Any], cve_ids: set[str], when: str = "2026-11-28T10:00:00.000") -> dict[str, Any]:
     copied = copy.deepcopy(window)
     for entry in copied["vulnerabilities"]:

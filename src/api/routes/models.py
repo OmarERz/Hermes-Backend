@@ -660,8 +660,9 @@ class Metric(_Model):
     unit: str | None
     as_of: str | None = Field(
         default=None,
-        description="Día UTC (AAAA-MM-DD) del valor: el job nocturno guarda cada noche el día anterior. Nulo en el "
-        "nivel de la escalera del juez, que es el actual.",
+        description="Día UTC (AAAA-MM-DD) del valor: el job nocturno guarda cada noche el día anterior, así que "
+        "normalmente es ayer; es una fecha anterior si una noche no guardó la métrica. Nulo en el nivel de la "
+        "escalera del juez, que es el actual.",
     )
     description: str | None = Field(
         default=None,

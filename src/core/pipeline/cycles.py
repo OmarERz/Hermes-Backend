@@ -49,7 +49,7 @@ log = logging.getLogger("core.pipeline")
 SCAN_EVALUATED_STATUSES: Final = ("new", "reopened", "fixed", "persistent")
 SCAN_CORRELATED_STATUSES: Final = ("new", "reopened")
 CATCH_UP: Final = timedelta(hours=72)  # how far back analysed stories with no trace of correlation are retried
-# The scheduled refresh is skipped when a scan refreshed this recently (a scan queued at worker start runs first).
+# The scheduled refresh is skipped when a scan's refresh ended this recently (a scan queued at worker start runs first).
 REFRESH_FRESH: Final = timedelta(hours=1)
 
 # (session, group_id, run_id, trigger, judge or None) -> the stored assessment id, None when nothing changed.
@@ -136,6 +136,7 @@ class Pipeline:
     # When the last vulnerability refresh this process completed started: a mapping saved after it is not in the
     # catalogue yet (CVE.org discovery reads the mappings), so the next scan refreshes first (P2-B).
     refreshed_at: datetime | None = None
+    refresh_ended_at: datetime | None = None  # when that refresh ended: how recent the data is (`REFRESH_FRESH`)
 
     # --- cycles ---------------------------------------------------------------------------------------------
     def news_cycle(self, trigger_reason: str = "schedule") -> CycleReport:
@@ -177,9 +178,10 @@ class Pipeline:
             report.ran = False
             report.notes.append("vulnerability refresh is not configured")
             return report
-        if self.refreshed_at is not None and self.clock() - self.refreshed_at < REFRESH_FRESH:
+        ended = self.refresh_ended_at
+        if ended is not None and self.clock() - ended < REFRESH_FRESH:
             report.ran = False
-            report.notes.append(f"a scan refreshed the vulnerability data at {self.refreshed_at:%H:%M} UTC")
+            report.notes.append(f"a scan refreshed the vulnerability data at {ended:%H:%M} UTC")
             self._log(report)
             return report
         with cycle_lock(self.session_factory) as acquired:
@@ -264,7 +266,7 @@ class Pipeline:
         down, budget spent: `VulndataRefresh.complete`) leaves the mark where it was, so the next scan after a
         mapping change refreshes again."""
         if getattr(result, "complete", True):
-            self.refreshed_at = started
+            self.refreshed_at, self.refresh_ended_at = started, self.clock()
             return
         report.notes.append("CVE.org did not finish this refresh; the next scan refreshes again")
 

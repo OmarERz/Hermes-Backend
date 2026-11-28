@@ -21,7 +21,7 @@ def test_the_metrics_the_comparison_shows_live_say_they_are_nightly() -> None:
     described = {code for code, info in CATALOG.items() if info.description}
     assert described == {"reclassified", "hidden_criticals", "noise_avoided"}
     for code in described:
-        assert "al cierre de la noche anterior" in str(CATALOG[code].description)
+        assert "del día UTC {day}, al cierre de esa noche" in str(CATALOG[code].description)
 
 
 def test_the_accepted_original_score_sits_with_the_judge_feedback_metrics() -> None:

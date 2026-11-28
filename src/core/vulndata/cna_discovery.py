@@ -247,7 +247,8 @@ def _load_candidates(
     """The first pass asks the named candidates and those of the CNAs already known (same budget, newest first); then
     each round of CNAs learned from the records just stored gets its own pass, so their CVEs arrive in this refresh
     (P2-A), at most `LEARN_PASSES` rounds. A CNA is learned from its own records (their NVD `sourceIdentifier`), so one
-    round normally suffices; the bound keeps the step finite whatever the data."""
+    round normally suffices. Each pass grows the budget, so the candidates an earlier pass could not ask yet (retries
+    spent its share) go first in the next one; a record among them can teach another CNA, hence the bounded rounds."""
     window = Counter(s.source for s in seen if s.in_window)
 
     def followable(hit_ids: set[str]) -> set[str]:
@@ -258,9 +259,12 @@ def _load_candidates(
     followed = followable(found)
     batch = [s for s in seen if loader.watch.mentions(s.description) or s.source in followed]
     asked: set[str] = set()
+    deferred: list[str] = []  # candidates of earlier passes the budget did not reach yet
     while True:
         asked |= {s.cve_id for s in batch}
-        found |= loader.load(loader.fresh(batch, cached))
+        queue = [*deferred, *loader.fresh(batch, cached)]
+        found |= loader.load(queue)
+        deferred = [cve for cve in queue if cve not in loader.requested]
         loader.result.passes += 1
         learned = followable(found) - followed
         if not learned or loader.result.passes > LEARN_PASSES or loader.stopped():
@@ -353,6 +357,7 @@ class _Loader:
     result: CveOrgResult = field(default_factory=CveOrgResult)
     stored_ids: set[str] = field(default_factory=set)
     rejected_ids: set[str] = field(default_factory=set)
+    requested: set[str] = field(default_factory=set)  # ids sent to GitHub in this refresh, whatever the answer
 
     def budget(self) -> int:
         """The requests this refresh may send: `REQUESTS_PER_CANDIDATE` per candidate of every pass so far, at least
@@ -401,6 +406,7 @@ class _Loader:
                 self.result.capped = True
                 return records, True
             before = self.client.source.sent
+            self.requested.add(cve_id)
             try:
                 document = self.client.fetch(cve_id)
             except (SourceUnavailableError, SourceRefusedError) as error:
