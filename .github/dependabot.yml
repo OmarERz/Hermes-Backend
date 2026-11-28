@@ -17,7 +17,8 @@ updates:
         update-types: ["minor", "patch"]
 
   - package-ecosystem: "docker"
-    directories: ["/", "/docker/auth-emulator", "/docker/db", "/docker/embeddings", "/docker/embeddings-fake"]
+    directories:
+      ["/", "/docker/auth-emulator", "/docker/db", "/docker/embeddings", "/docker/embeddings-fake", "/docker/itop-db"]
     target-branch: "develop"
     open-pull-requests-limit: 0 # D-086: version updates paused until after the delivery
     commit-message:

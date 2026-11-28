@@ -34,7 +34,9 @@ services:
   itop-db:
     <<: *limits
     profiles: [itop]
-    image: mariadb:10.11@sha256:e5fe75b2b9de0eb9f6f9a4d9c97272fb3a7480e389ccd487a786bab2a12cc0d7
+    # docker/itop-db/Dockerfile: the pinned mariadb:10.11 without gosu (never used here; it had fixable Trivy findings).
+    build: docker/itop-db
+    image: hermes-itop-db:10.11
     # Runs directly as the image's mysql user (a fresh named volume inherits its ownership): no capability needed.
     user: mysql
     environment:
